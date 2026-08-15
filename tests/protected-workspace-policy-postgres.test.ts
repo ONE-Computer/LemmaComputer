@@ -41,7 +41,7 @@ test("organization workspace policy is optional, append-only, and tenant scoped"
       "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
     ]);
     assert.deepEqual(initial.catalog.constraints.workspaceProfiles.allow, ["claude-desktop-standard-v1", "disposable-open-v1"]);
-    assert.deepEqual(initial.catalog.constraints.applications.allow, ["firefox", "google-chrome"]);
+    assert.deepEqual(initial.catalog.constraints.applications.allow, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
     assert.deepEqual(initial.catalog.constraints.serviceClasses.allow, ["lite", "balanced", "pro"]);
 
     const first = await administration.createOrganizationPolicyVersion({

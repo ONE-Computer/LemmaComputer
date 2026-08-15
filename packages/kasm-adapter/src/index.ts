@@ -16,10 +16,67 @@ import {
   type SignedPolicyBundle,
 } from "@lemmacomputer/contracts";
 
-const coworkSeccompProfile = readFileSync(
+type SeccompRule = {
+  names: string[];
+  action: string;
+  args?: Array<{ index: number; value: number; valueTwo?: number; op: string }>;
+  includes?: Record<string, unknown>;
+  excludes?: Record<string, unknown>;
+  comment?: string;
+};
+
+const coworkSeccompProfile = JSON.parse(readFileSync(
   new URL("./cowork-seccomp-profile.json", import.meta.url),
   "utf8",
-).trim();
+)) as Record<string, unknown> & { syscalls: SeccompRule[] };
+
+const electronUserNamespaceSeccompRules: SeccompRule[] = [
+  {
+    names: ["clone"],
+    action: "SCMP_ACT_ALLOW",
+    args: [{
+      index: 0,
+      value: 0x10000000,
+      valueTwo: 0x10000000,
+      op: "SCMP_CMP_MASKED_EQ",
+    }],
+    excludes: { arches: ["s390", "s390x"] },
+  },
+  {
+    names: ["unshare"],
+    action: "SCMP_ACT_ALLOW",
+    args: [{
+      index: 0,
+      value: 0x10000000,
+      valueTwo: 0x10000000,
+      op: "SCMP_CMP_MASKED_EQ",
+    }],
+  },
+];
+
+const workspaceSeccompProfile = (coworkEnabled: boolean, electronSandboxRequired: boolean) => {
+  if (!coworkEnabled && !electronSandboxRequired) return undefined;
+  const syscalls = coworkEnabled
+    ? coworkSeccompProfile.syscalls
+    : coworkSeccompProfile.syscalls.filter((rule) => !(
+      rule.names.length === 1
+      && rule.names[0] === "socket"
+      && rule.args?.length === 1
+      && rule.args[0]?.index === 0
+      && rule.args[0]?.value === 40
+      && rule.args[0]?.op === "SCMP_CMP_EQ"
+    ));
+  return JSON.stringify({
+    ...coworkSeccompProfile,
+    syscalls: [
+      ...(electronSandboxRequired ? electronUserNamespaceSeccompRules : []),
+      ...syscalls,
+    ],
+  });
+};
+
+export const ELECTRON_WORKSPACE_APPARMOR_PROFILE = "lemmacomputer-workspace-electron";
+const electronSandboxApplicationIds = new Set(["google-chrome", "visual-studio-code", "obsidian"]);
 
 export interface SandboxAdapter {
   reconcile?(): Promise<void>;
@@ -244,6 +301,7 @@ type DockerKasmVncConfig = {
   timeZone?: string;
   chatAttachmentRetentionDays?: number;
   kvmEnabled?: boolean;
+  electronSandboxEnabled?: boolean;
   installationKind: "customer-managed" | "hosted" | "worktree";
   portStart?: number;
   portEnd?: number;
@@ -325,9 +383,6 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
     }
     const runtimeInput = this.runtimeProjection(input);
-    const workspaceNetwork = this.workspaceNetwork(input.workspaceId);
-    const workspaceVolume = await this.resolveWorkspaceVolume(input.workspaceId, input.accessGeneration);
-    const name = `lemmacomputer-sandbox-${input.workspaceId}`;
     const fallbackAgent = ({
       "claude-desktop-managed-v1": "claude-desktop",
       "claude-cli-managed-v1": "claude-cli",
@@ -338,6 +393,25 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
     const enabledApplications = input.policy.applications ?? ["firefox"];
     const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
+    const electronSandboxRequired = enabledApplications.some((application) => electronSandboxApplicationIds.has(application));
+    const seccompProfile = workspaceSeccompProfile(coworkEnabled, electronSandboxRequired);
+    if (electronSandboxRequired && this.config.electronSandboxEnabled !== true) {
+      throw new LemmaComputerError(
+        "ELECTRON_SANDBOX_NOT_CONFIGURED",
+        `The workspace node must load ${ELECTRON_WORKSPACE_APPARMOR_PROFILE} before Chrome, Visual Studio Code, or Obsidian can run`,
+        503,
+      );
+    }
+    if (electronSandboxRequired && this.config.installationKind === "hosted" && this.topology !== "remote") {
+      throw new LemmaComputerError(
+        "ELECTRON_HOST_ISOLATION_REQUIRED",
+        "Hosted Chromium and Electron applications require a remote-isolated workspace node",
+        503,
+      );
+    }
+    const workspaceNetwork = this.workspaceNetwork(input.workspaceId);
+    const workspaceVolume = await this.resolveWorkspaceVolume(input.workspaceId, input.accessGeneration);
+    const name = `lemmacomputer-sandbox-${input.workspaceId}`;
     const prepareRuntime = async () => {
       await this.ensureNetwork(workspaceNetwork, true, input.workspaceId);
       await this.ensureVolume(workspaceVolume, input.authority);
@@ -356,7 +430,12 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       }
     };
     const existing = await this.inspectByName(name);
-    if (existing?.running && existing.coworkEnabled === coworkEnabled && existing.accessGeneration === input.accessGeneration) {
+    if (
+      existing?.running
+      && existing.coworkEnabled === coworkEnabled
+      && existing.electronSandboxEnabled === electronSandboxRequired
+      && existing.accessGeneration === input.accessGeneration
+    ) {
       await prepareRuntime();
       await this.ensureRelay(input.workspaceId, name, existing.id, existing.port ?? await this.allocatePort(), workspaceNetwork);
       return { providerId: existing.id, workspaceId: input.workspaceId, state: "ready", failureCode: null };
@@ -397,6 +476,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         "com.lemmacomputer.enabled-agents": enabledAgents.join(","),
         "com.lemmacomputer.enabled-applications": enabledApplications.join(","),
         "com.lemmacomputer.cowork-enabled": String(coworkEnabled),
+        "com.lemmacomputer.electron-sandbox-enabled": String(electronSandboxRequired),
         "com.lemmacomputer.chat-runtime-agents": input.chatRuntimes?.map((runtime) => runtime.catalogId).join(",") ?? "",
         "com.lemmacomputer.desktop-port": String(port),
         "com.lemmacomputer.clipboard-enabled": String(clipboard.enabled),
@@ -427,6 +507,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         `LEMMACOMPUTER_ENABLED_AGENTS=${enabledAgents.join(",")}`,
         `LEMMACOMPUTER_ENABLED_APPLICATIONS=${enabledApplications.join(",")}`,
         `LEMMACOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
+        `LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED=${electronSandboxRequired}`,
         `LEMMACOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
         `LEMMACOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
         `LEMMACOMPUTER_WORKSPACE_IMAGE_VERSION=${this.config.image}`,
@@ -475,7 +556,8 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
         SecurityOpt: [
           "no-new-privileges",
-          ...(coworkEnabled ? ["seccomp=" + coworkSeccompProfile] : []),
+          ...(electronSandboxRequired ? [`apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`] : []),
+          ...(seccompProfile ? ["seccomp=" + seccompProfile] : []),
         ],
         Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
         ...(coworkEnabled ? {
@@ -1056,6 +1138,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
           && (!health || health === "healthy"),
         port: typeof rawPort === "string" ? Number(rawPort) : undefined,
         coworkEnabled: labels["com.lemmacomputer.cowork-enabled"] === "true",
+        electronSandboxEnabled: labels["com.lemmacomputer.electron-sandbox-enabled"] === "true",
         accessGeneration: Number(labels["com.lemmacomputer.access-generation"] ?? 0),
         configurationDigest: textValue(labels, "com.lemmacomputer.relay-configuration-digest"),
       };
@@ -1324,6 +1407,10 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       /Cowork cannot create an AF_VSOCK socket/,
       /Cowork requires the Claude Desktop agent/,
       /invalid Cowork capability setting/,
+      /invalid Electron sandbox capability setting/,
+      /Electron sandbox capability does not match the selected applications/,
+      /Electron applications require the enforced LemmaComputer AppArmor profile/,
+      /Electron applications cannot create their user-namespace sandbox/,
       /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) (?:GATEWAY_UPSTREAM|GATEWAY_CREDENTIAL|MODEL_ALIAS|CONTROL_UPSTREAM|AGENT_BRIDGE_TOKEN|ALLOWED_TOOLS) is required/,
       /(?:Claude Desktop|Claude CLI|Codex CLI|Hermes Agent CLI|Hermes Agent Desktop) MODEL_ALIAS is invalid/,
       /(?:Hermes sandbox API|Claude Chat API|Codex Chat API) configuration is required/,

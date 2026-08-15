@@ -33,8 +33,12 @@ ARG CLAUDE_CODE_VERSION=2.1.215
 ARG CLAUDE_CODE_SHA256=7ff9594e53cd89d1af9ceb3c18d3d70be1a5c6d27475e31ee2bed65d748f18c0
 ARG FIREFOX_VERSION=140.12.0esr
 ARG FIREFOX_SHA256=3323ee13ac6fe4877fa2e1f4a3aa6b8009f65a620c7bbca96fe86f1a6f433d92
-ARG GOOGLE_CHROME_VERSION=150.0.7871.186-1
-ARG GOOGLE_CHROME_SHA256=4193e00b6d5d5969ee63f7a69596868f546aa0e8cb077b3e0bf9cc1e2c719d00
+ARG GOOGLE_CHROME_VERSION=151.0.7922.137-1
+ARG GOOGLE_CHROME_SHA256=e6dabf044cf9cd0279cfe86efa431682c18bfc06d06339ce055aaa87ae871727
+ARG VSCODE_VERSION=1.133.0
+ARG VSCODE_SHA256=d064e87e22f556b8a91e1354b5227e340597324e52886dbb288551596b00e34a
+ARG OBSIDIAN_VERSION=1.13.7
+ARG OBSIDIAN_SHA256=17dc33b49cb3e785ecc27edd2ea0c79e40207798b554fd2886e36ebee7af9ae0
 ARG HERMES_AGENT_VERSION=0.19.0
 ARG HERMES_AGENT_TAG=v2026.7.20
 ARG HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990
@@ -67,6 +71,10 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       "https://ftp.mozilla.org/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.xz" \
     && curl -fsSLo /tmp/google-chrome.deb \
       "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${GOOGLE_CHROME_VERSION}_amd64.deb" \
+    && curl -fsSLo /tmp/code.deb \
+      "https://vscode.download.prss.microsoft.com/dbazure/download/stable/a5b500951314efd502d07465bd138dfbd714a960/code_1.133.0-1786487972_amd64.deb" \
+    && curl -fsSLo /tmp/obsidian.deb \
+      "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb" \
     && curl -fsSLo /tmp/hermes-agent.tar.gz \
       "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
     && curl -fsSLo /tmp/hermes-office-skills.tar.gz \
@@ -77,6 +85,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && echo "${CLAUDE_CODE_SHA256}  /tmp/claude-code.zst" | sha256sum -c - \
     && echo "${FIREFOX_SHA256}  /tmp/firefox.tar.xz" | sha256sum -c - \
     && echo "${GOOGLE_CHROME_SHA256}  /tmp/google-chrome.deb" | sha256sum -c - \
+    && echo "${VSCODE_SHA256}  /tmp/code.deb" | sha256sum -c - \
+    && echo "${OBSIDIAN_SHA256}  /tmp/obsidian.deb" | sha256sum -c - \
     && echo "${HERMES_AGENT_SHA256}  /tmp/hermes-agent.tar.gz" | sha256sum -c - \
     && echo "${HERMES_OFFICE_SKILLS_SHA256}  /tmp/hermes-office-skills.tar.gz" | sha256sum -c - \
     && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
@@ -102,6 +112,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       zstd \
       /tmp/claude-desktop.deb \
       /tmp/google-chrome.deb \
+      /tmp/code.deb \
+      /tmp/obsidian.deb \
+    && rm -f /usr/share/applications/code.desktop /usr/share/applications/obsidian.desktop \
     && ln -s /usr/local/libexec/lemmacomputer-libreoffice /usr/local/bin/soffice \
     && ln -s /usr/local/libexec/lemmacomputer-libreoffice /usr/local/bin/libreoffice \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
@@ -167,8 +180,13 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && test "$(/opt/lemmacomputer/claude-code/${CLAUDE_CODE_VERSION}/claude --version | awk '{print $1}')" = "${CLAUDE_CODE_VERSION}" \
     && test "$(/opt/firefox/firefox --version | awk '{print $3}')" = "${FIREFOX_VERSION}" \
     && test "$(google-chrome-stable --version | awk '{print $3}')" = "${GOOGLE_CHROME_VERSION%-1}" \
+    && test "$(dpkg-query -W -f='${Version}' code | sed -E 's/-[0-9]+$//')" = "${VSCODE_VERSION}" \
+    && test "$(dpkg-query -W -f='${Version}' obsidian)" = "${OBSIDIAN_VERSION}" \
+    && test -x /usr/share/code/code \
+    && test -x /opt/Obsidian/obsidian \
+    && command -v unshare \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/hermes-agent-activity.patch /tmp/hermes-agent-instance.patch /tmp/hermes-agent-lemmacomputer.patch /tmp/hermes-agent.tar.gz /tmp/hermes-office-skills.tar.gz /tmp/hermes-office-skills /tmp/lemmacomputer_hermes_mcp_identity.py /tmp/node.tar.xz /opt/Telegram \
+    && rm -rf /var/lib/apt/lists/* /root/.cache/uv /tmp/claude-desktop.deb /tmp/claude-code.zst /tmp/firefox.tar.xz /tmp/google-chrome.deb /tmp/code.deb /tmp/obsidian.deb /tmp/hermes-agent-activity.patch /tmp/hermes-agent-instance.patch /tmp/hermes-agent-lemmacomputer.patch /tmp/hermes-agent.tar.gz /tmp/hermes-office-skills.tar.gz /tmp/hermes-office-skills /tmp/lemmacomputer_hermes_mcp_identity.py /tmp/node.tar.xz /opt/Telegram \
       /home/kasm-default-profile/Desktop/* \
       /home/kasm-default-profile/.mozilla \
       /home/kasm-default-profile/.local/share/remmina \
@@ -250,6 +268,8 @@ COPY docker/workspace/firefox.desktop /usr/local/share/lemmacomputer/application
 COPY docker/workspace/firefox-policies.json /opt/firefox/distribution/policies.json
 COPY docker/workspace/google-chrome.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-google-chrome.desktop
 COPY docker/workspace/google-chrome-policies.json /etc/opt/chrome/policies/managed/lemmacomputer.json
+COPY docker/workspace/visual-studio-code.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-visual-studio-code.desktop
+COPY docker/workspace/obsidian.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-obsidian.desktop
 COPY docker/workspace/lemmacomputer-hermes /usr/local/bin/lemmacomputer-hermes
 COPY docker/workspace/hermes-agent-cli.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-hermes-agent-cli.desktop
 COPY docker/workspace/lemmacomputer-hermes-desktop /usr/local/bin/lemmacomputer-hermes-desktop
@@ -280,6 +300,8 @@ RUN chmod 0755 \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-codex-cli.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-firefox.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-google-chrome.desktop \
+      /usr/local/share/lemmacomputer/applications/lemmacomputer-visual-studio-code.desktop \
+      /usr/local/share/lemmacomputer/applications/lemmacomputer-obsidian.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-hermes-agent-cli.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-hermes-desktop.desktop \
     && test -f /opt/lemmacomputer/skills/make-a-site/SKILL.md \

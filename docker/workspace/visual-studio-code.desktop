@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Visual Studio Code
+Comment=Policy-assigned code editor in this workspace
+Exec=/usr/bin/code %F
+Icon=com.visualstudio.code
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true

@@ -292,8 +292,10 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   const codexLauncher = await source("docker/workspace/lemmacomputer-codex");
   const hermesDesktopLauncher = await source("docker/workspace/lemmacomputer-hermes-desktop");
 
-  assert.match(dockerfile, /GOOGLE_CHROME_VERSION=150\.0\.7871\.186-1/);
-  assert.match(dockerfile, /GOOGLE_CHROME_SHA256=4193e00b/);
+  assert.match(dockerfile, /GOOGLE_CHROME_VERSION=151\.0\.7922\.137-1/);
+  assert.match(dockerfile, /GOOGLE_CHROME_SHA256=e6dabf04/);
+  assert.match(dockerfile, /VSCODE_VERSION=1\.133\.0/);
+  assert.match(dockerfile, /OBSIDIAN_VERSION=1\.13\.7/);
   assert.match(dockerfile, /npm run pack --workspace apps\/desktop/);
   assert.match(dockerfile, /release\/linux-unpacked/);
   assert.doesNotMatch(dockerfile, /COPY .*\.desktop \/usr\/share\/applications\/lemmacomputer-/);
@@ -341,10 +343,15 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(entrypoint, /Hermes-Claw\.desktop/);
   assert.match(entrypoint, /lemmacomputer-hermes-agent-cli\.desktop.*Hermes-Agent-CLI\.desktop/);
   assert.doesNotMatch(entrypoint, /lemmacomputer-hermes-claw\.desktop/);
-  for (const selection of ["google-chrome", "claude-cli", "codex-cli", "hermes-desktop"]) {
+  for (const selection of ["google-chrome", "visual-studio-code", "obsidian", "claude-cli", "codex-cli", "hermes-desktop"]) {
     assert.match(entrypoint, new RegExp(selection));
   }
   assert.match(entrypoint, /chmod 0700 \/opt\/google\/chrome\/google-chrome/);
+  assert.match(entrypoint, /chmod 0700 \/usr\/share\/code\/code/);
+  assert.match(entrypoint, /chmod 0700 \/opt\/Obsidian\/obsidian/);
+  assert.match(entrypoint, /unshare --user --map-root-user true/);
+  const chromeLauncher = await source("docker/workspace/google-chrome.desktop");
+  assert.doesNotMatch(chromeLauncher, /--no-sandbox/);
   assert.match(entrypoint, /remove_stale_chrome_singletons/);
   for (const singleton of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
     assert.match(entrypoint, new RegExp(singleton));

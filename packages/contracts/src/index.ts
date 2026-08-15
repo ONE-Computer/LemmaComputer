@@ -63,9 +63,9 @@ export const sandboxProfileIdSchema = z.enum(sandboxProfileIds);
 export type SandboxProfileId = z.infer<typeof sandboxProfileIdSchema>;
 
 // Applications are an owned, policy-bounded catalog. The reviewed workspace
-// image contains both browsers, while each sandbox configuration decides which
-// launchers are exposed on its next start.
-export const sandboxApplicationIds = ["firefox", "google-chrome"] as const;
+// image contains these reviewed applications, while each sandbox configuration
+// decides which launchers are exposed on its next start.
+export const sandboxApplicationIds = ["firefox", "google-chrome", "visual-studio-code", "obsidian"] as const;
 export const sandboxApplicationIdSchema = z.enum(sandboxApplicationIds);
 export type SandboxApplicationId = z.infer<typeof sandboxApplicationIdSchema>;
 

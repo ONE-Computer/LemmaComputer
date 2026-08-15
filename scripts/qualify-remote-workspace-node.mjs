@@ -300,6 +300,7 @@ const prepareState = ({ cowork }) => {
     ["WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64", applicationClientKey],
     ["KASM_PUBLIC_HOST", bridgeAddress],
     ["KASM_LOCAL_KVM_ENABLED", cowork ? "true" : environment.value("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED") || "false"],
+    ["KASM_LOCAL_ELECTRON_SANDBOX_ENABLED", environment.value("LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED") || "false"],
   ]));
   const controllerEnv = resolve(root, "workspace-controller.env");
   writeFileSync(controllerEnv, controllerEnvironment, { mode: 0o600 });

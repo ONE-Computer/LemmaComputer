@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Obsidian
+Comment=Policy-assigned knowledge workspace
+Exec=/usr/bin/obsidian %U
+Icon=obsidian
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

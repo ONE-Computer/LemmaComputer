@@ -621,7 +621,7 @@ export interface IdentityPolicyStore {
 
 const mvpAgentIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
 const mvpDefaultAgentIds = ["claude-desktop", "hermes-claw"] as const;
-const mvpApplicationIds = ["firefox", "google-chrome"] as const;
+const mvpApplicationIds = ["firefox", "google-chrome", "visual-studio-code", "obsidian"] as const;
 const mvpDefaultApplicationIds = ["firefox"] as const;
 const mvpDefaultModelAliases = ["lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-bedrock"] as const;
 const historicMvpDefaultModelAliasSets = [

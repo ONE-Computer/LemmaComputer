@@ -195,6 +195,8 @@ test("workspace options are editable, opt-in, and return to the overview with re
     assert.match(app, new RegExp(`catalogId: "${catalogId}"`));
   }
   assert.doesNotMatch(app, /name: "Google Chrome"[\s\S]+Coming soon/);
+  assert.match(app, /"visual-studio-code": "Visual Studio Code"/);
+  assert.match(app, /obsidian: "Obsidian"/);
   assert.match(app, /Default model mode/);
   assert.match(app, /choose a different mode for each conversation in Chat/i);
   assert.match(app, /setSelectedSandboxGrantId\(null\)/);

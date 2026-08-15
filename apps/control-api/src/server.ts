@@ -181,8 +181,22 @@ const sandboxApplications = [
     id: "google-chrome",
     displayName: "Google Chrome",
     category: "Browser",
-    version: "150.0.7871.186",
+    version: "151.0.7922.137",
     description: "Pinned Chrome browser locked to the governed egress proxy.",
+  }),
+  sandboxApplicationSchema.parse({
+    id: "visual-studio-code",
+    displayName: "Visual Studio Code",
+    category: "Development",
+    version: "1.133.0",
+    description: "Pinned editor available only when assigned by workspace policy.",
+  }),
+  sandboxApplicationSchema.parse({
+    id: "obsidian",
+    displayName: "Obsidian",
+    category: "Knowledge",
+    version: "1.13.7",
+    description: "Pinned local knowledge workspace available only when assigned by workspace policy.",
   }),
 ] as const;
 

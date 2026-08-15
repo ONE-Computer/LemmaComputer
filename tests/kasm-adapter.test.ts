@@ -8,6 +8,7 @@ import {
   buildKasmClipboardLaunch,
   DEFAULT_DOCKER_WORKSPACE_STARTUP_TIMEOUT_MS,
   DockerKasmVncAdapter,
+  ELECTRON_WORKSPACE_APPARMOR_PROFILE,
 } from "@lemmacomputer/kasm-adapter";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -326,6 +327,86 @@ test("hosted Cowork virtualization is allowed on a fully isolated remote node", 
   );
 });
 
+const electronPolicyFixture = () => {
+  const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const policy = {
+    schemaVersion: 1 as const,
+    policyVersionId: "policy-version-electron",
+    policyVersion: 1,
+    policyHash: "a".repeat(64),
+    workspaceProfile: "kasm-persistent-standard" as const,
+    agentId: "agent-alex",
+    agentProfile: "lemmacomputer-default-agent" as const,
+    applications: ["visual-studio-code"] as const,
+    networkProfile: "controlled-egress-v1" as const,
+    clipboard: {
+      enabled: true,
+      localToWorkspace: true,
+      workspaceToLocal: true,
+      maxBytes: 65_536,
+    },
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_ms365",
+    allowedTools: ["list-mail-folders"],
+    toolPolicies: { "list-mail-folders": "allow" as const },
+  };
+  const signed = policyFixture(policy, workspaceId);
+  return {
+    workspaceId,
+    input: {
+      workspaceId,
+      accessGeneration: 1,
+      authority: {
+        tenantId: "acme",
+        subjectId: "alex",
+        workspaceId,
+        accessGeneration: 1,
+        correlationId: "correlation-electron-sandbox",
+        policyDigest: policy.policyHash,
+        policyKeyId: signed.bundle.keyId,
+      },
+      policy,
+      policyBundle: signed.bundle,
+      policyVerificationKeys: signed.keys,
+    },
+  };
+};
+
+test("Chromium and Electron selections fail closed without the node AppArmor capability", async () => {
+  const fixture = electronPolicyFixture();
+  const adapter = new DockerKasmVncAdapter({
+    socketPath: "/nonexistent/docker.sock",
+    image: "sha256:pinned-workspace",
+    networkPrefix: "lemmacomputer-workspace",
+    controlNetwork: "lemmacomputer-control",
+    gatewayContainer: "lemmacomputer-litellm",
+    relayImage: "sha256:pinned-relay",
+    installationKind: "customer-managed",
+  });
+  await assert.rejects(
+    adapter.create(fixture.input),
+    (error: unknown) => (error as { code?: string }).code === "ELECTRON_SANDBOX_NOT_CONFIGURED",
+  );
+});
+
+test("hosted Chromium and Electron selections require a remote workspace node", async () => {
+  const fixture = electronPolicyFixture();
+  const adapter = new DockerKasmVncAdapter({
+    socketPath: "/nonexistent/docker.sock",
+    image: "sha256:pinned-workspace",
+    networkPrefix: "lemmacomputer-workspace",
+    controlNetwork: "lemmacomputer-control",
+    gatewayContainer: "lemmacomputer-litellm",
+    relayImage: "sha256:pinned-relay",
+    installationKind: "hosted",
+    electronSandboxEnabled: true,
+  });
+  await assert.rejects(
+    adapter.create(fixture.input),
+    (error: unknown) => (error as { code?: string }).code === "ELECTRON_HOST_ISOLATION_REQUIRED",
+  );
+});
+
 test("remote Docker/KasmVNC nodes fail closed without private TLS relay configuration", async () => {
   assert.throws(
     () => new DockerKasmVncAdapter({
@@ -604,6 +685,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     workspaceProfile: "kasm-persistent-standard" as const,
     agentId: "agent-alex",
     agentProfile: "lemmacomputer-default-agent" as const,
+    applications: ["google-chrome", "visual-studio-code", "obsidian"] as const,
     networkProfile: "controlled-egress-v1" as const,
     clipboard: {
       enabled: true,
@@ -653,6 +735,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       egressNetwork: "lemmacomputer-egress",
       timeZone: "Asia/Singapore",
       kvmEnabled: true,
+      electronSandboxEnabled: true,
       portStart: 16920,
       portEnd: 16920,
     });
@@ -719,12 +802,25 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
     const securityOptions = host.SecurityOpt as string[];
     assert.equal(securityOptions[0], "no-new-privileges");
-    assert.match(securityOptions[1]!, /^seccomp=\{/);
-    const seccomp = JSON.parse(securityOptions[1]!.slice("seccomp=".length)) as {
+    assert.equal(securityOptions[1], `apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`);
+    assert.match(securityOptions[2]!, /^seccomp=\{/);
+    const seccomp = JSON.parse(securityOptions[2]!.slice("seccomp=".length)) as {
       defaultAction: string;
-      syscalls: Array<{ names: string[]; action: string; args?: Array<{ value: number; op: string }> }>;
+      syscalls: Array<{ names: string[]; action: string; args?: Array<{ value: number; valueTwo?: number; op: string }> }>;
     };
     assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
+    assert.deepEqual(
+      seccomp.syscalls.slice(0, 2).map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
+      [{
+        names: ["clone"],
+        action: "SCMP_ACT_ALLOW",
+        args: [{ index: 0, value: 268_435_456, valueTwo: 268_435_456, op: "SCMP_CMP_MASKED_EQ" }],
+      }, {
+        names: ["unshare"],
+        action: "SCMP_ACT_ALLOW",
+        args: [{ index: 0, value: 268_435_456, valueTwo: 268_435_456, op: "SCMP_CMP_MASKED_EQ" }],
+      }],
+    );
     assert.deepEqual(
       seccomp.syscalls
         .filter((rule) => rule.names.length === 1 && rule.names[0] === "socket")
@@ -875,6 +971,7 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       egressProxyImage: "sha256:pinned-egress-proxy",
       egressNetwork: "lemmacomputer-egress",
       kvmEnabled: false,
+      electronSandboxEnabled: true,
       portStart: 16920,
       portEnd: 16920,
     });
@@ -883,7 +980,20 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     const standardHost = sandboxCreates.at(-1)!.body.HostConfig as Record<string, unknown>;
     assert.equal(standardHost.Memory, 4_294_967_296);
     assert.equal(standardHost.Devices, undefined);
-    assert.deepEqual(standardHost.SecurityOpt, ["no-new-privileges"]);
+    const standardSecurityOptions = standardHost.SecurityOpt as string[];
+    assert.equal(standardSecurityOptions[0], "no-new-privileges");
+    assert.equal(standardSecurityOptions[1], `apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`);
+    assert.match(standardSecurityOptions[2]!, /^seccomp=\{/);
+    const standardSeccomp = JSON.parse(standardSecurityOptions[2]!.slice("seccomp=".length)) as {
+      syscalls: Array<{ names: string[]; args?: Array<{ value: number; op: string }> }>;
+    };
+    assert.equal(standardSeccomp.syscalls.some((rule) => (
+      rule.names.length === 1
+      && rule.names[0] === "socket"
+      && rule.args?.[0]?.value === 40
+      && rule.args[0].op === "SCMP_CMP_EQ"
+    )), false);
+    assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED=true"));
     assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_COWORK_ENABLED=false"));
 
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", 1);
@@ -1058,6 +1168,7 @@ test("local Kasm allowlists bounded entrypoint validation without exposing arbit
     "unrecognized agent selection",
     "managed workspaces require restricted egress",
     "Cowork requires the virtualization device at /dev/kvm",
+    "Electron applications require the enforced LemmaComputer AppArmor profile",
     "Hermes Agent CLI MODEL_ALIAS is invalid",
     "persistent crontab has unsafe ownership, mode, or size",
   ]) assert.equal(diagnostic(`prefix\n${message}\nsuffix`), message);

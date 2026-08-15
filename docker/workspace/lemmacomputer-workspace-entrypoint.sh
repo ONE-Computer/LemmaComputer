@@ -11,6 +11,7 @@ set -euo pipefail
 : "${LEMMACOMPUTER_CLIPBOARD_WORKSPACE_TO_LOCAL:=true}"
 : "${LEMMACOMPUTER_CLIPBOARD_MAX_BYTES:=65536}"
 : "${LEMMACOMPUTER_COWORK_ENABLED:=false}"
+: "${LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED:=false}"
 : "${LEMMACOMPUTER_SIGNED_POLICY_B64:?Signed LemmaComputer policy projection is required}"
 : "${LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64:?Policy verification keys are required}"
 
@@ -63,12 +64,13 @@ done
 }
 
 IFS=',' read -r -a enabled_applications <<< "$LEMMACOMPUTER_ENABLED_APPLICATIONS"
-(( ${#enabled_applications[@]} >= 1 && ${#enabled_applications[@]} <= 2 )) || {
+(( ${#enabled_applications[@]} >= 1 && ${#enabled_applications[@]} <= 4 )) || {
   echo "invalid application selection" >&2
   exit 78
 }
 for enabled_application in "${enabled_applications[@]}"; do
-  [[ "$enabled_application" == "firefox" || "$enabled_application" == "google-chrome" ]] || {
+  [[ "$enabled_application" == "firefox" || "$enabled_application" == "google-chrome" \
+    || "$enabled_application" == "visual-studio-code" || "$enabled_application" == "obsidian" ]] || {
     echo "unrecognized application selection" >&2
     exit 78
   }
@@ -81,6 +83,33 @@ done
 application_enabled() {
   [[ ",${LEMMACOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]
 }
+
+electron_sandbox_required=false
+for electron_application in google-chrome visual-studio-code obsidian; do
+  if application_enabled "$electron_application"; then
+    electron_sandbox_required=true
+    break
+  fi
+done
+[[ "$LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED" == "true" || "$LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED" == "false" ]] || {
+  echo "invalid Electron sandbox capability setting" >&2
+  exit 78
+}
+[[ "$LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED" == "$electron_sandbox_required" ]] || {
+  echo "Electron sandbox capability does not match the selected applications" >&2
+  exit 78
+}
+if [[ "$electron_sandbox_required" == "true" ]]; then
+  [[ "$(cat /proc/self/attr/current)" == "lemmacomputer-workspace-electron (enforce)" ]] || {
+    echo "Electron applications require the enforced LemmaComputer AppArmor profile" >&2
+    exit 78
+  }
+  setpriv --reuid=1000 --regid=1000 --init-groups \
+    unshare --user --map-root-user true 2>/dev/null || {
+      echo "Electron applications cannot create their user-namespace sandbox" >&2
+      exit 78
+    }
+fi
 
 grant_cowork_device_access() {
   local device_path="$1"
@@ -497,7 +526,9 @@ rm -f /home/kasm-user/.config/autostart/claude-desktop.desktop \
   /home/kasm-user/Desktop/Hermes-Desktop.desktop \
   /home/kasm-user/Desktop/Hermes-Agent-Desktop.desktop \
   /home/kasm-user/Desktop/Firefox.desktop \
-  /home/kasm-user/Desktop/Google-Chrome.desktop
+  /home/kasm-user/Desktop/Google-Chrome.desktop \
+  /home/kasm-user/Desktop/Visual-Studio-Code.desktop \
+  /home/kasm-user/Desktop/Obsidian.desktop
 if agent_enabled claude-desktop; then
   chmod 0755 "$(command -v claude-desktop)"
   install -o 1000 -g 1000 -m 0755 "$launcher_dir/lemmacomputer-claude-desktop.desktop" /home/kasm-user/.config/autostart/claude-desktop.desktop
@@ -546,6 +577,18 @@ if application_enabled google-chrome; then
   install -o 1000 -g 1000 -m 0755 "$launcher_dir/lemmacomputer-google-chrome.desktop" /home/kasm-user/Desktop/Google-Chrome.desktop
 else
   chmod 0700 /opt/google/chrome/google-chrome
+fi
+if application_enabled visual-studio-code; then
+  chmod 0755 /usr/share/code/code
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/lemmacomputer-visual-studio-code.desktop" /home/kasm-user/Desktop/Visual-Studio-Code.desktop
+else
+  chmod 0700 /usr/share/code/code
+fi
+if application_enabled obsidian; then
+  chmod 0755 /opt/Obsidian/obsidian
+  install -o 1000 -g 1000 -m 0755 "$launcher_dir/lemmacomputer-obsidian.desktop" /home/kasm-user/Desktop/Obsidian.desktop
+else
+  chmod 0700 /opt/Obsidian/obsidian
 fi
 remove_stale_libreoffice_lock
 

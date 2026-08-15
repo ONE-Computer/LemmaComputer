@@ -142,7 +142,9 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.deepEqual(settings.json().availableAgents.map((agent: { id: string }) => agent.id), [
       "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
     ]);
-    assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), ["firefox", "google-chrome"]);
+    assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), [
+      "firefox", "google-chrome", "visual-studio-code", "obsidian",
+    ]);
     assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
     assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
     assert.equal(settings.json().securityGroup.defaultAction, "deny");

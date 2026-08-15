@@ -466,6 +466,46 @@ npm run image:workspace
 `LEMMACOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
 deployments should use an immutable digest.
 
+Chrome, Visual Studio Code, and Obsidian require Chromium's unprivileged user-
+namespace process sandbox. On each AppArmor-enforcing workspace node, validate
+and install LemmaComputer's fixed, root-owned profile before enabling those
+applications:
+
+```bash
+npm run apparmor:electron:check
+sudo "$(command -v node)" scripts/install-electron-apparmor.mjs install
+```
+
+Then set:
+
+```text
+LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED=true
+```
+
+The adapter applies `lemmacomputer-workspace-electron` only when the workspace
+policy selects Chrome, Visual Studio Code, or Obsidian. Firefox-only
+workspaces retain Docker's default AppArmor profile. The custom profile is the
+Docker default policy shape with one explicit addition: permission to create a
+user namespace. It is not `unconfined`; `no-new-privileges`, capability drops,
+PID/memory limits, internal workspace networks, and governed egress remain
+active. The associated seccomp profile retains the pinned Moby default and
+adds only argument-filtered `clone` and `unshare` rules whose flags contain
+`CLONE_NEWUSER`; other namespace calls remain denied. Cowork's `AF_VSOCK`
+exception is included only when Cowork is selected too. The image verifies
+both the enforced AppArmor label and actual user-namespace creation as
+`kasm-user` before reporting ready.
+
+AppArmor confinement attaches to the container, so the `userns` permission is
+available to every process in a workspace that selects one of these apps, not
+only to the Electron executable. True per-process delegation would require a
+separate launcher or application container with a different confinement
+boundary. Hosted deployments therefore allow this profile only on a remote-
+isolated workspace node; a colocated hosted node fails closed with
+`ELECTRON_HOST_ISOLATION_REQUIRED`. If the host profile is absent, disabled, or
+cannot create user namespaces, workspace startup fails closed. Changing the
+setting or selected applications recreates the workspace container while
+preserving its volume.
+
 Claude Cowork local execution requires hardware virtualization. On every eligible
 customer-managed Docker host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
 devices and that the host has at least 8 GB of RAM and approximately 25 GB of

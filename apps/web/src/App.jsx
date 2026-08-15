@@ -405,6 +405,8 @@ function Drawer({ title, children, onClose }) {
 const applicationNames = {
   firefox: "Firefox ESR",
   "google-chrome": "Google Chrome",
+  "visual-studio-code": "Visual Studio Code",
+  obsidian: "Obsidian",
 };
 
 const workspaceStatus = (state) => ({
@@ -3067,10 +3069,7 @@ function ActivityScreen({ displayName, operations, onOpenOperation, canReadToolA
   );
 }
 
-const pendingApplications = [
-  { name: "Obsidian", type: "Knowledge workspace", detail: "Available when the approved application package is published." },
-  { name: "Visual Studio Code", type: "Code editor", detail: "Available when the approved application package is published." },
-];
+const pendingApplications = [];
 
 const agentChoices = [
   { family: "Claude", choices: [{ catalogId: "claude-desktop", name: "Desktop", status: "available" }, { catalogId: "claude-cli", name: "CLI", status: "available" }] },

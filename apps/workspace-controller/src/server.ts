@@ -57,6 +57,7 @@ const envSchema = z.object({
   WORKSPACE_NODE_APPLICATION_TLS_CLIENT_CERT_B64: z.string().optional(),
   WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64: z.string().optional(),
   KASM_LOCAL_KVM_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  KASM_LOCAL_ELECTRON_SANDBOX_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   KASM_LOCAL_STARTUP_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
   KASM_LOCAL_TIME_ZONE: z.preprocess(
     (value) => value === "" ? undefined : value,
@@ -447,6 +448,7 @@ export function adapterFromEnv(env: z.infer<typeof envSchema>): SandboxAdapter {
     timeZone: env.KASM_LOCAL_TIME_ZONE,
     chatAttachmentRetentionDays: env.CHAT_ATTACHMENT_RETENTION_DAYS,
     kvmEnabled: env.KASM_LOCAL_KVM_ENABLED,
+    electronSandboxEnabled: env.KASM_LOCAL_ELECTRON_SANDBOX_ENABLED,
     startupTimeoutMs: env.KASM_LOCAL_STARTUP_TIMEOUT_MS,
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
   });

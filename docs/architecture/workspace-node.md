@@ -34,6 +34,29 @@ workspace container to an application, control, default-bridge, host, or
 general outbound network. Block instance metadata at routing and firewall
 layers as well as in the governed proxy.
 
+## Chromium and Electron process sandbox
+
+Chrome, Visual Studio Code, and Obsidian must run with their upstream Chromium
+sandbox enabled. A workspace that selects any of those applications receives
+the fixed `lemmacomputer-workspace-electron` AppArmor profile. The profile
+retains Docker's default confinement shape and adds only the AppArmor `userns`
+permission needed by Chromium when `no-new-privileges` is active. Its seccomp
+profile retains the pinned Moby default and adds two argument-filtered rules:
+`clone` and `unshare` are allowed only when the `CLONE_NEWUSER` bit is present.
+`clone3` retains Moby's `ENOSYS` fallback, unrelated namespace calls remain
+denied, and Cowork's `AF_VSOCK` exception is absent unless Cowork is also
+selected. The runtime must not use `--no-sandbox`, `apparmor=unconfined`,
+`seccomp=unconfined`, a privileged container, added capabilities, or the host
+PID/user namespace to make these applications start.
+
+This exception is scoped to the selected workspace container, not to an
+individual process inside it. All processes in that container can request a
+user namespace, while the AppArmor, seccomp, capability, network, storage, PID,
+and memory boundaries continue to constrain the resulting processes. A hosted
+deployment may enable this profile only on a remote workspace node. The node
+capability switch, exact enforced profile label, and an unprivileged namespace
+probe are all fail-closed preconditions to workspace readiness.
+
 Set the workspace-node contract through `.env` and run `npm run env:check
 -- --profile=hosted`. Remote deployments require the node URL and both private
 application URLs to use HTTPS, complete client and server mTLS certificate

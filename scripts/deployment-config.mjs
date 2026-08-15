@@ -195,6 +195,7 @@ const sections = [
     variable("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "lemmacomputer-workspace", "Local Kasm workspace network-name prefix."),
     variable("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "lemmacomputer-egress", "Local Kasm egress network name."),
     variable("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "false", "Expose KVM devices only to supported local desktop workspaces.", { kind: "boolean", requiredWhen: "Claude Cowork must run; the workspace node must provide /dev/kvm and /dev/vhost-vsock." }),
+    variable("LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED", "false", "Apply the root-owned AppArmor profile and pinned user-namespace seccomp rules to workspaces that select Chrome, Visual Studio Code, or Obsidian.", { kind: "boolean", requiredWhen: "A workspace may select Chrome, Visual Studio Code, or Obsidian on an AppArmor-enforcing node." }),
     variable("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS", "60000", "Local workspace startup timeout in milliseconds.", { kind: "integer" }),
   ]),
 ];
@@ -261,6 +262,7 @@ export const environmentAliases = new Map([
   ["LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "KASM_LOCAL_NETWORK_PREFIX"],
   ["LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "KASM_LOCAL_EGRESS_NETWORK"],
   ["LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED", "KASM_LOCAL_KVM_ENABLED"],
+  ["LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED", "KASM_LOCAL_ELECTRON_SANDBOX_ENABLED"],
   ["LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS", "KASM_LOCAL_STARTUP_TIMEOUT_MS"],
 ]);
 
@@ -775,6 +777,7 @@ export function projectServiceEnvironment(input = {}) {
       KASM_LOCAL_EGRESS_NETWORK: v("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK"),
       KASM_PUBLIC_HOST: v("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST"),
       KASM_LOCAL_KVM_ENABLED: v("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED"),
+      KASM_LOCAL_ELECTRON_SANDBOX_ENABLED: v("LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED"),
       KASM_LOCAL_STARTUP_TIMEOUT_MS: v("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS"),
       KASM_LOCAL_TIME_ZONE: v("LEMMACOMPUTER_TIME_ZONE"),
       CHAT_ATTACHMENT_RETENTION_DAYS: v("LEMMACOMPUTER_CHAT_ATTACHMENT_RETENTION_DAYS"),

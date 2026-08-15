@@ -36,6 +36,12 @@ reference stack and managed desktop require:
 - Docker Engine and Docker Compose v2.30.0 or later; and
 - enough Docker address-pool capacity for the isolated networks.
 
+Chrome, Visual Studio Code, and Obsidian additionally require an AppArmor 4
+host that can load the repository's `lemmacomputer-workspace-electron` profile
+and permits unprivileged user namespaces. Install and enable it using the
+[workspace-node runtime procedure](operations.md#workspace-node-runtime)
+before starting an Electron-selected workspace.
+
 Claude Cowork additionally requires usable `/dev/kvm` and
 `/dev/vhost-vsock`. On a Mac, use a Linux x86_64 host or VM for full workspace
 runtime checks. Docker Desktop emulation is not a qualified deployment path.
@@ -560,6 +566,12 @@ Cowork, stop its workspaces, run `down`, then run `up --cowork`.
 - Test an allowed and denied public destination.
 - Complete a governed model request and verify provider credentials are absent from the sandbox.
 - Complete Hermes Desktop and Hermes CLI turns.
+- Open Chrome, Visual Studio Code, and Obsidian; in each app, create persistent
+  state, close and reopen the app, then restart/reconnect the workspace and
+  verify that state remains.
+- Inspect the workspace container and confirm it is enforcing
+  `lemmacomputer-workspace-electron`, retains `no-new-privileges`, and does not
+  add capabilities or host devices for the Electron applications.
 - Open Claude Desktop, verify Cowork virtualization, and complete a Cowork action.
 - Restart and reconnect to the workspace through the product route.
 - Run two workspaces concurrently and verify separate IDs, networks, relays, and home volumes.

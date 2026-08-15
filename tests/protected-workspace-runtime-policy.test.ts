@@ -24,7 +24,7 @@ const basePolicy = (): EffectivePolicy => ({
 test("without an organization policy the runtime keeps the full supported catalog", () => {
   const document = basePolicy().document as Record<string, unknown>;
   assert.deepEqual(document.agents, ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]);
-  assert.deepEqual(document.applications, ["firefox", "google-chrome"]);
+  assert.deepEqual(document.applications, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
   assert.deepEqual(document.workspaceProfiles, ["claude-desktop-standard-v1", "disposable-open-v1"]);
 });
 
@@ -38,7 +38,7 @@ test("the latest organization policy constrains every member runtime", () => {
     constraints: {
       workspaceProfiles: { allow: ["claude-desktop-standard-v1"], deny: [] },
       agents: { allow: ["claude-cli", "codex-cli"], deny: [] },
-      applications: { allow: ["firefox", "google-chrome"], deny: [] },
+      applications: { allow: ["firefox", "google-chrome", "visual-studio-code", "obsidian"], deny: [] },
       serviceClasses: { allow: ["balanced", "pro"], deny: [] },
       maximumEgressMode: "restricted",
       connectors: {
@@ -54,7 +54,7 @@ test("the latest organization policy constrains every member runtime", () => {
   const constrained = constrainEffectivePolicy(basePolicy(), organizationPolicy);
   const document = constrained.document as Record<string, unknown>;
   assert.deepEqual(document.agents, ["claude-cli", "codex-cli"]);
-  assert.deepEqual(document.applications, ["firefox", "google-chrome"]);
+  assert.deepEqual(document.applications, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
   assert.deepEqual(document.workspaceProfiles, ["claude-desktop-standard-v1"]);
   assert.deepEqual(document.serviceClasses, ["balanced", "pro"]);
   assert.equal(document.organizationPolicyHash, organizationPolicy.documentHash);

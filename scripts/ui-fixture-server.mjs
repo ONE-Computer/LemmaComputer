@@ -149,8 +149,22 @@ const availableApplications = [
     id: "google-chrome",
     displayName: "Google Chrome",
     category: "Browser",
-    version: "150.0.7871.186",
+    version: "151.0.7922.137",
     description: "Pinned Chrome browser locked to the governed egress proxy.",
+  },
+  {
+    id: "visual-studio-code",
+    displayName: "Visual Studio Code",
+    category: "Development",
+    version: "1.133.0",
+    description: "Pinned editor available only when assigned by workspace policy.",
+  },
+  {
+    id: "obsidian",
+    displayName: "Obsidian",
+    category: "Knowledge",
+    version: "1.13.7",
+    description: "Pinned local knowledge workspace available only when assigned by workspace policy.",
   },
 ];
 
@@ -580,7 +594,7 @@ const protectedWorkspacePolicyOverview = {
     constraints: {
       workspaceProfiles: { allow: ["claude-desktop-standard-v1", "disposable-open-v1"], deny: [] },
       agents: { allow: ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"], deny: [] },
-      applications: { allow: ["firefox", "google-chrome"], deny: [] },
+      applications: { allow: ["firefox", "google-chrome", "visual-studio-code", "obsidian"], deny: [] },
       modelAliases: { allow: ["lemmacomputer-auto", "lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-assistant", "lemmacomputer-bedrock"], deny: [] },
       serviceClasses: { allow: ["lite", "balanced", "pro"], deny: [] },
       maximumReasoningEffort: "max",
