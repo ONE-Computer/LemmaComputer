@@ -890,8 +890,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       }>;
     };
     assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
+    const electronNamespaceRules = seccomp.syscalls.slice(0, 3);
     assert.deepEqual(
-      seccomp.syscalls.slice(0, 3).map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
+      electronNamespaceRules.map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
       [{
         names: ["clone"],
         action: "SCMP_ACT_ALLOW",
@@ -899,13 +900,22 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       }, {
         names: ["clone"],
         action: "SCMP_ACT_ALLOW",
-        args: [{ index: 0, value: 536_870_912, valueTwo: 2_114_060_288, op: "SCMP_CMP_MASKED_EQ" }],
+        args: [{ index: 0, value: 2_114_060_288, valueTwo: 536_870_912, op: "SCMP_CMP_MASKED_EQ" }],
       }, {
         names: ["unshare"],
         action: "SCMP_ACT_ALLOW",
         args: [{ index: 0, value: 268_435_456, valueTwo: 268_435_456, op: "SCMP_CMP_MASKED_EQ" }],
       }],
     );
+    for (const rule of electronNamespaceRules) {
+      const argument = rule.args?.[0];
+      assert.equal(argument?.op, "SCMP_CMP_MASKED_EQ");
+      assert.equal(
+        (argument!.valueTwo! & argument!.value) >>> 0,
+        argument!.valueTwo,
+        `${rule.names.join(",")} masked-equality datum must fit within its mask`,
+      );
+    }
     assert.equal(
       seccomp.syscalls.some((rule) => (
         rule.names.includes("clone3")

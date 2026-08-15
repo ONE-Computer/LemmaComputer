@@ -47,8 +47,8 @@ const electronUserNamespaceSeccompRules: SeccompRule[] = [
     action: "SCMP_ACT_ALLOW",
     args: [{
       index: 0,
-      value: 0x20000000,
-      valueTwo: 0x7e020000,
+      value: 0x7e020000,
+      valueTwo: 0x20000000,
       op: "SCMP_CMP_MASKED_EQ",
     }],
     excludes: { arches: ["s390", "s390x"] },

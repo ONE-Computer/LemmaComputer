@@ -61,8 +61,9 @@ The Electron profile:
   boundaries;
 - adds AppArmor `userns` permission to the Docker default policy shape;
 - adds only argument-filtered `clone` and `unshare` rules involving
-  `CLONE_NEWUSER`, plus the exact PID-namespace-only `clone` transition used
-  after Chromium enters its user namespace;
+  `CLONE_NEWUSER`, plus a `clone` rule whose namespace-flag mask requires
+  `CLONE_NEWPID` and no other namespace flag for the transition Chromium uses
+  after entering its user namespace;
 - leaves `clone3` on the pinned Moby `ENOSYS` fallback and denies unrelated
   namespace combinations; and
 - does not include Cowork's `AF_VSOCK` exception unless Claude Cowork is also
