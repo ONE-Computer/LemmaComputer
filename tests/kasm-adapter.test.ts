@@ -875,7 +875,8 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.equal(host.NetworkMode, workspaceNetwork);
     assert.equal(host.Memory, 8_589_934_592);
     assert.equal(host.NanoCpus, 2_000_000_000);
-    assert.deepEqual(host.CapDrop, ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]);
+    assert.deepEqual(host.CapDrop, ["ALL"]);
+    assert.deepEqual(host.CapAdd, ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]);
     const securityOptions = host.SecurityOpt as string[];
     assert.equal(securityOptions[0], "no-new-privileges");
     assert.equal(securityOptions[1], `apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`);

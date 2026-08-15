@@ -56,7 +56,9 @@ them, or another downloaded binary, inherit this application qualification.
 The Electron profile:
 
 - retains Chromium's upstream sandbox; launchers must not use `--no-sandbox`;
-- retains `no-new-privileges`, capability drops, PID and memory limits,
+- retains `no-new-privileges`, a complete default capability drop with only
+  the entrypoint's `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, and `SETUID`
+  bootstrap requirements restored, PID and memory limits,
   workspace network isolation, governed egress, and persistent-volume
   boundaries;
 - adds AppArmor `userns` permission to the Docker default policy shape;

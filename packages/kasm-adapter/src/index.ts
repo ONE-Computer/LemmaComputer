@@ -88,6 +88,11 @@ const workspaceSeccompProfile = (coworkEnabled: boolean, electronSandboxRequired
 };
 
 export const ELECTRON_WORKSPACE_APPARMOR_PROFILE = "lemmacomputer-workspace-electron";
+// The root entrypoint uses these only while preparing managed files in the
+// persistent home and entering the fixed kasm-user uid/gid. Keep this list
+// explicit: the desktop, Electron sandbox, Cowork, and user workloads require
+// no other Linux capability from Docker's default set.
+export const WORKSPACE_BOOTSTRAP_CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"] as const;
 const electronSandboxApplicationIds = new Set(["google-chrome", "visual-studio-code", "obsidian"]);
 
 export interface SandboxAdapter {
@@ -565,7 +570,8 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         PidsLimit: 1024,
         Memory: coworkEnabled ? 8_589_934_592 : 4_294_967_296,
         NanoCpus: 2_000_000_000,
-        CapDrop: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
+        CapDrop: ["ALL"],
+        CapAdd: [...WORKSPACE_BOOTSTRAP_CAPABILITIES],
         SecurityOpt: [
           "no-new-privileges",
           ...(electronSandboxRequired ? [`apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`] : []),

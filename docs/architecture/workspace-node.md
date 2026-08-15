@@ -34,6 +34,15 @@ workspace container to an application, control, default-bridge, host, or
 general outbound network. Block instance metadata at routing and firewall
 layers as well as in the governed proxy.
 
+Workspace containers drop the entire Docker default Linux capability set, then
+add only `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, and `SETUID`. The root
+entrypoint needs these capabilities to repair ownership and modes, replace
+root-managed configuration inside the user-owned persistent home, and enter
+the fixed `kasm-user` UID/GID during initialization. The final desktop process
+runs as UID/GID 1000 without effective capabilities. Electron sandboxing and
+Cowork add no capability; in particular, the runtime does not add network,
+namespace, mount, device, `MKNOD`, or `SYS_CHROOT` capabilities.
+
 ## Chromium and Electron process sandbox
 
 The application boundary and reasons for catalog gating are recorded in
