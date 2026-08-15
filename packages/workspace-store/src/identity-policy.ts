@@ -2769,22 +2769,30 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     try {
       await client.query("BEGIN");
       const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.unassignedBy);
-      if (!actor.allows("organization.manage_roles", { type: "organization" })) {
-        throw new LemmaComputerError("ROLE_ACTOR_INVALID", "The role actor cannot manage organization roles", 403);
-      }
-      const removed = await client.query(
-        `DELETE FROM organization_membership_role_assignments
+      const assignment = await client.query(
+        `SELECT role_version FROM organization_membership_role_assignments
          WHERE organization_id=$1 AND membership_id=$2 AND role_id=$3
-         RETURNING role_version`,
+         FOR UPDATE`,
         [input.organizationId, input.membershipId, input.roleId],
       );
-      if (!removed.rowCount) throw new LemmaComputerError("ROLE_ASSIGNMENT_INVALID", "Role assignment not found", 404);
+      if (!assignment.rowCount) throw new LemmaComputerError("ROLE_ASSIGNMENT_INVALID", "Role assignment not found", 404);
+      const roleVersion = Number(assignment.rows[0].role_version);
+      const candidate = await this.roleVersionGrants(client, input.organizationId, input.roleId, roleVersion);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })
+        || !canDelegateOrganizationGrants(actor, candidate)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The unassignment exceeds the actor's delegated authority", 403);
+      }
+      await client.query(
+        `DELETE FROM organization_membership_role_assignments
+         WHERE organization_id=$1 AND membership_id=$2 AND role_id=$3`,
+        [input.organizationId, input.membershipId, input.roleId],
+      );
       const revokedSessions = await this.revokeMembershipRoleSessions(client, input.organizationId, [input.membershipId], input.unassignedBy);
       await client.query(
         `INSERT INTO organization_role_audit_events (
            organization_id,role_id,role_version,membership_id,actor_user_id,event_type
          ) VALUES ($1,$2,$3,$4,$5,'role.unassigned')`,
-        [input.organizationId, input.roleId, removed.rows[0].role_version, input.membershipId, input.unassignedBy],
+        [input.organizationId, input.roleId, roleVersion, input.membershipId, input.unassignedBy],
       );
       await client.query("COMMIT");
       return { revokedSessions };
@@ -2806,16 +2814,23 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     try {
       await client.query("BEGIN");
       const actor = await this.actorOrganizationAuthorization(client, input.organizationId, input.archivedBy);
-      if (!actor.allows("organization.manage_roles", { type: "organization" })) {
-        throw new LemmaComputerError("ROLE_ACTOR_INVALID", "The role actor cannot manage organization roles", 403);
-      }
       const role = await client.query(
-        `UPDATE organization_custom_roles SET status='archived',updated_by=$4,updated_at=now()
+        `SELECT current_version FROM organization_custom_roles
          WHERE organization_id=$1 AND id=$2 AND status='active' AND current_version=$3
-         RETURNING current_version`,
-        [input.organizationId, input.roleId, input.expectedVersion, input.archivedBy],
+         FOR UPDATE`,
+        [input.organizationId, input.roleId, input.expectedVersion],
       );
       if (!role.rowCount) throw new LemmaComputerError("ROLE_VERSION_CONFLICT", "The role changed or is no longer active", 409);
+      const candidate = await this.roleVersionGrants(client, input.organizationId, input.roleId, input.expectedVersion);
+      if (!actor.allows("organization.manage_roles", { type: "organization" })
+        || !canDelegateOrganizationGrants(actor, candidate)) {
+        throw new LemmaComputerError("ROLE_DELEGATION_EXCEEDED", "The archive exceeds the actor's delegated authority", 403);
+      }
+      await client.query(
+        `UPDATE organization_custom_roles SET status='archived',updated_by=$3,updated_at=now()
+         WHERE organization_id=$1 AND id=$2`,
+        [input.organizationId, input.roleId, input.archivedBy],
+      );
       const removed = await client.query(
         `DELETE FROM organization_membership_role_assignments
          WHERE organization_id=$1 AND role_id=$2 RETURNING membership_id`,

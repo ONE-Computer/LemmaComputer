@@ -17,10 +17,12 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
   const ownerId = `iam-owner-${suffix}`;
   const adminId = `iam-admin-${suffix}`;
   const memberId = `iam-member-${suffix}`;
+  const managerId = `iam-manager-${suffix}`;
   const otherOwnerId = `iam-other-owner-${suffix}`;
   const ownerAccount = randomUUID();
   const adminAccount = randomUUID();
   const memberAccount = randomUUID();
+  const managerAccount = randomUUID();
   const otherAccount = randomUUID();
   const workspaceId = randomUUID();
   const secondWorkspaceId = randomUUID();
@@ -33,17 +35,18 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
     );
     await pool.query("INSERT INTO organizations (id,display_name) VALUES ($1,'IAM'),($2,'Other')", [organizationId, otherOrganizationId]);
     await pool.query(
-      "INSERT INTO account_users (id,status) VALUES ($1,'active'),($2,'active'),($3,'active'),($4,'active')",
-      [ownerAccount, adminAccount, memberAccount, otherAccount],
+      "INSERT INTO account_users (id,status) VALUES ($1,'active'),($2,'active'),($3,'active'),($4,'active'),($5,'active')",
+      [ownerAccount, adminAccount, memberAccount, managerAccount, otherAccount],
     );
     await pool.query(
       `INSERT INTO users (id,tenant_id,email,display_name,account_user_id) VALUES
          ($1,$5,$1 || '@example.test','Owner',$7),
          ($2,$5,$2 || '@example.test','Admin',$8),
          ($3,$5,$3 || '@example.test','Member',$9),
-         ($4,$6,$4 || '@example.test','Other Owner',$10)`,
-      [ownerId, adminId, memberId, otherOwnerId, organizationId, otherOrganizationId,
-        ownerAccount, adminAccount, memberAccount, otherAccount],
+         ($4,$5,$4 || '@example.test','Scoped Manager',$10),
+         ($11,$6,$11 || '@example.test','Other Owner',$12)`,
+      [ownerId, adminId, memberId, managerId, organizationId, otherOrganizationId,
+        ownerAccount, adminAccount, memberAccount, managerAccount, otherOwnerId, otherAccount],
     );
     await pool.query(
       `INSERT INTO organization_memberships (
@@ -52,9 +55,10 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
          ($1,$3,$7,'active','owner',$7,$7),
          ($1,$4,$8,'active','admin',$7,$7),
          ($1,$5,$9,'active','member',$7,$7),
-         ($2,$6,$10,'active','owner',$10,$10)`,
-      [organizationId, otherOrganizationId, ownerAccount, adminAccount, memberAccount, otherAccount,
-        ownerId, adminId, memberId, otherOwnerId],
+         ($1,$6,$10,'active','member',$7,$7),
+         ($2,$11,$12,'active','owner',$12,$12)`,
+      [organizationId, otherOrganizationId, ownerAccount, adminAccount, memberAccount, managerAccount,
+        ownerId, adminId, memberId, managerId, otherAccount, otherOwnerId],
     );
     await pool.query(
       `INSERT INTO workspaces (id,tenant_id,subject_id,grant_id,state,created_at,updated_at) VALUES
@@ -65,6 +69,7 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
     );
     const memberships = await store.listOrganizationMemberships(organizationId);
     const member = memberships.find((item) => item.userId === memberId)!;
+    const manager = memberships.find((item) => item.userId === managerId)!;
     const admin = memberships.find((item) => item.userId === adminId)!;
     await store.createSession({
       tokenHash: `iam-session-${suffix}`,
@@ -235,6 +240,12 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
       roleId: delegator.id,
       assignedBy: ownerId,
     });
+    await store.assignOrganizationRole({
+      organizationId,
+      membershipId: manager.membershipId,
+      roleId: delegator.id,
+      assignedBy: ownerId,
+    });
     const delegatedInvitation = await store.createOrganizationInvitation({
       organizationId,
       email: `delegated-${suffix}@example.test`,
@@ -321,6 +332,35 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
     assert.equal((await store.resolveOrganizationAuthorization({ organizationId, membershipId: member.membershipId }))
       .allows("policy.manage", { type: "workspace", resourceId: "workspace-b" }), true);
 
+    await assert.rejects(() => store.unassignOrganizationRole({
+      organizationId,
+      membershipId: member.membershipId,
+      roleId: reviewer.id,
+      unassignedBy: managerId,
+    }), { code: "ROLE_DELEGATION_EXCEEDED" });
+    await assert.rejects(() => store.archiveOrganizationRole({
+      organizationId,
+      roleId: reviewer.id,
+      expectedVersion: updated.version,
+      archivedBy: managerId,
+    }), { code: "ROLE_DELEGATION_EXCEEDED" });
+    await store.unassignOrganizationRole({
+      organizationId,
+      membershipId: member.membershipId,
+      roleId: operator.id,
+      unassignedBy: managerId,
+    });
+    const archivedDelegated = await store.archiveOrganizationRole({
+      organizationId,
+      roleId: delegated.id,
+      expectedVersion: delegated.version,
+      archivedBy: managerId,
+    });
+    assert.equal(archivedDelegated.role.status, "archived");
+    assert.equal((await store.listOrganizationRoles(organizationId))
+      .find((role) => role.id === reviewer.id)?.status, "active",
+      "refused role mutations leave the stronger role and its assignment intact");
+
     await assert.rejects(() => store.assignOrganizationRole({
       organizationId: otherOrganizationId,
       membershipId: member.membershipId,
@@ -349,8 +389,10 @@ test("tenant IAM persists versioned roles, unions assignments, audits changes, a
     );
     const eventTypes = events.rows.map((row) => row.event_type);
     assert.equal(eventTypes.filter((event) => event === "role.created").length, 4);
-    assert.equal(eventTypes.filter((event) => event === "role.assigned").length, 4);
+    assert.equal(eventTypes.filter((event) => event === "role.assigned").length, 5);
     assert.equal(eventTypes.filter((event) => event === "role.updated").length, 1);
+    assert.equal(eventTypes.filter((event) => event === "role.unassigned").length, 1);
+    assert.equal(eventTypes.filter((event) => event === "role.archived").length, 1);
   } finally {
     await pool.end();
   }
