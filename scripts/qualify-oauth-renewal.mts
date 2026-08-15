@@ -102,7 +102,7 @@ const policyFor = (agentId: string): RuntimePolicy => ({
 const main = async () => {
   const runId = randomBytes(8).toString("hex");
   const [litellmPort, fixturePort] = await Promise.all([availablePort(), availablePort()]);
-  const project = `oc-oauth-${process.pid}-${runId}`;
+  const project = `lemmacomputer-oauth-${process.pid}-${runId}`;
   const masterKey = `sk-oauth-${randomBytes(24).toString("base64url")}`;
   const credentialSecret = randomBytes(32).toString("base64url");
   const environment = {

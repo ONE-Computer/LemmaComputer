@@ -8,12 +8,12 @@ import {
 } from "../scripts/qualify-remote-workspace-node.mjs";
 
 test("remote workspace-node qualification names remain scoped to the worktree project", () => {
-  assert.deepEqual(qualificationNames("oc-Issue_74"), {
-    nodeProject: "oc-issue_74-remote-node",
-    nodeId: "oc-issue_74-remote-node-1",
-    nodeTransportNetwork: "oc-issue_74-remote-node-transport",
-    applicationNetwork: "oc-issue_74-remote-application",
-    relayNetwork: "oc-issue_74-remote-relay-ingress",
+  assert.deepEqual(qualificationNames("LemmaComputer-Issue_74"), {
+    nodeProject: "lemmacomputer-issue_74-remote-node",
+    nodeId: "lemmacomputer-issue_74-remote-node-1",
+    nodeTransportNetwork: "lemmacomputer-issue_74-remote-node-transport",
+    applicationNetwork: "lemmacomputer-issue_74-remote-application",
+    relayNetwork: "lemmacomputer-issue_74-remote-relay-ingress",
   });
 });
 

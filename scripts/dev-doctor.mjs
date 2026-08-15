@@ -2,6 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { worktreeIsolationEnvironmentVariableNames } from "./deployment-config.mjs";
 import { containerMountedFilePaths, inspectReadablePaths } from "./dev-doctor-lib.mjs";
+import { isWorktreeResourceName, worktreeResourcePrefix } from "./worktree-names.mjs";
 
 const run = (command, args) => spawnSync(command, args, { encoding: "utf8" });
 const failures = [];
@@ -15,7 +16,7 @@ try { env = await readFile(".env", "utf8"); } catch { failures.push(".env is mis
 const value = (key) => env.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
 if (!integrationCheckout) {
   for (const key of worktreeIsolationEnvironmentVariableNames) {
-    if (!value(key)?.startsWith("oc-")) failures.push(`${key} is not worktree-isolated`);
+    if (!isWorktreeResourceName(value(key))) failures.push(`${key} is not worktree-isolated; expected prefix ${worktreeResourcePrefix}`);
   }
 }
 const context = run("docker", ["context", "show"]);

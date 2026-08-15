@@ -54,7 +54,7 @@ const stringified = (value: unknown) => JSON.stringify(value);
 const main = async () => {
   const runId = randomBytes(8).toString("hex");
   const [litellmPort, fixturePort, controlPostgresPort] = await Promise.all([availablePort(), availablePort(), availablePort()]);
-  const project = `oc-provider-${process.pid}-${runId}`;
+  const project = `lemmacomputer-provider-${process.pid}-${runId}`;
   const masterKey = `sk-provider-qualification-master-${randomBytes(24).toString("base64url")}`;
   const credentialSecret = randomBytes(32).toString("base64url");
   const litellmPostgresPassword = randomBytes(24).toString("hex");

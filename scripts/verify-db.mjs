@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 
 const image = "postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15";
 const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
-const container = `oc-migration-test-${suffix}`;
+const container = `lemmacomputer-migration-test-${suffix}`;
 const password = `test-${suffix}`;
 const exec = (command, args, options = {}) => spawnSync(command, args, { encoding: "utf8", ...options });
 const must = (command, args, options = {}) => {

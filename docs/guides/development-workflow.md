@@ -100,7 +100,8 @@ Do not run `npm ci` or `env:init` separately in a task worktree.
 - creates `.env` with fresh secrets if it is absent;
 - selects `LEMMACOMPUTER_INSTALLATION_KIND=worktree` and development runtime
   behavior;
-- derives a stable `oc-*` worktree identity;
+- derives a stable `lemmacomputer-*` worktree identity from the worktree path
+  and branch;
 - assigns unique ports, Compose projects, networks, image tags, databases, and
   volumes; and
 - prints the worktree's Web URL.
@@ -124,7 +125,7 @@ without rotating existing secrets.
 | Command | Mutates state? | Purpose |
 | --- | --- | --- |
 | `npm run worktree:init` | Yes, once | Installs missing dependencies, creates the worktree-owned `.env`, and assigns isolated names and ports. |
-| `npm run dev:doctor` | No | Checks branch identity, dependencies, `.env`, `oc-*` isolation values, Docker context safety, and bind-mounted file readability. |
+| `npm run dev:doctor` | No | Checks branch identity, dependencies, `.env`, `lemmacomputer-*` isolation values, Docker context safety, and bind-mounted file readability. |
 | `npm run env:check` | No | Checks `.env` parity and validates profile, URL, secret, and coupled configuration such as complete mTLS groups. |
 | `npm run env:update` | Yes | Merges newly registered variables into `.env` while preserving existing values and reporting extras. |
 | `npm run compose:config` | Only generated projections | Writes least-privilege `.runtime-env/<service>.env` files, then validates the resolved Compose model without starting containers. |
@@ -135,6 +136,48 @@ without rotating existing secrets.
 `compose:up` repeats environment rendering, but `env:check` and
 `compose:config` are useful separate diagnostics: they catch contract and
 Compose errors before partially changing the running stack.
+
+### First start with a fresh database
+
+A new task worktree intentionally starts with no users, organizations,
+providers, pricing, sessions, or workspaces. Initialize it once, validate the
+generated namespace, then let the explicit migration jobs create the schemas:
+
+```bash
+npm run worktree:init
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+grep '^LEMMACOMPUTER_PUBLIC_WEB_URL=' .env
+```
+
+`worktree:init` creates fresh secrets and a stable
+`lemmacomputer-<10-character-id>` Docker namespace. `compose:up` creates that
+namespace's empty PostgreSQL volumes, runs the product and Better Auth
+migration jobs, starts LiteLLM against its own database, and waits for health.
+This path is correct only when fresh application state is intended.
+
+### Later development after the stack contains data
+
+The `.env` and Docker volumes in the same worktree are the durable local stack
+identity. `worktree:init` is unnecessary after the first initialization and
+preserves an already matching worktree environment, but it is not the command
+for resuming services. Do not create a replacement worktree or add `--volumes`
+merely to resume development. Use:
+
+```bash
+git status --short
+npm run dev:doctor
+npm run env:check
+npm run compose:up
+```
+
+`dev:doctor` confirms that the checkout still owns its generated namespace.
+`env:check` detects a changed configuration contract without rotating secrets.
+`compose:up` reattaches the existing database volumes and applies only pending
+explicit migrations. Stop it with `npm run compose:down`; volumes remain.
+`npm run compose:down -- --volumes` is destructive and is reserved for an
+intentionally disposable stack.
 
 ## Start and use the development stack
 
@@ -276,6 +319,44 @@ handover. Until one exists, record the exact backup, restore, ownership, and
 verification commands as migration evidence. Ordinary task worktrees remain
 fresh and isolated; a persistent seeded development environment is a distinct
 operator workflow, not an implicit side effect of `worktree:init`.
+
+### Rename a stateful `oc-*` worktree
+
+The `oc-*` prefix is a retired development Docker namespace. Changing only
+`LEMMACOMPUTER_COMPOSE_PROJECT_NAME` makes Compose create different database
+volumes; the old data still exists, but the new stack appears empty. Perform a
+stateful rename as a stopped backup-and-restore operation:
+
+1. record the current project, workspace prefix, public URL, image IDs, and
+   non-sensitive continuity counts;
+2. capture the product, Better Auth, and LiteLLM databases plus every
+   workspace-home volume using the backup contract;
+3. stop all managed workspaces. For an active remote-node qualification, run
+   `npm run qualify:remote-workspace-node -- down`, then run
+   `npm run compose:down` and verify that no old project containers remain;
+4. explicitly rewrite only canonical legacy isolation values:
+
+   ```bash
+   npm run worktree:init -- --migrate-legacy-namespace
+   npm run dev:doctor
+   npm run env:check
+   ```
+
+   The migration flag refuses a non-`oc-*` project, an active remote-node
+   qualification, or remaining legacy Compose containers. It preserves custom
+   values such as an intentionally transferred public port or exclusive
+   workspace-home prefix. It does not move database contents;
+5. create the new PostgreSQL volumes, restore all three databases, and reapply
+   the Better Auth runtime grants described by the backup contract;
+6. start the required topology with either `npm run compose:up` or
+   `npm run qualify:remote-workspace-node -- up`; and
+7. compare the same continuity counts and health endpoint before accepting the
+   rename. Retain the stopped `oc-*` database volumes until rollback is no
+   longer required.
+
+Never start the old and new namespaces concurrently against the same
+workspace-home volumes. The explicit migration flag is a namespace rewrite,
+not authorization to share writable persistence.
 
 ## Remote workspace-node and Cowork qualification
 

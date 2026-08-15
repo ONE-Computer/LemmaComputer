@@ -153,15 +153,15 @@ test("compose shutdown delegates to Docker only when runtime containers are abse
 test("worktree shutdown detects an orphaned workspace relay by its isolated network label", () => {
   let errors = "";
   const status = runComposeDown({
-    projectName: "oc-test",
-    networkPrefix: "oc-test-workspace",
+    projectName: "lemmacomputer-test",
+    networkPrefix: "lemmacomputer-test-workspace",
     run: (command: string, args: string[]) => {
       if (args[0] === "ps") {
         const filter = args[args.indexOf("--filter") + 1];
         return { status: 0, stdout: filter === runtimeContainerFilters[1] ? "orphan-relay\n" : "", stderr: "" };
       }
       if (args[0] === "inspect") {
-        return { status: 0, stdout: JSON.stringify({ "com.lemmacomputer.workspace-network": "oc-test-workspace-11111111-1111-4111-8111-111111111111" }), stderr: "" };
+        return { status: 0, stdout: JSON.stringify({ "com.lemmacomputer.workspace-network": "lemmacomputer-test-workspace-11111111-1111-4111-8111-111111111111" }), stderr: "" };
       }
       throw new Error(`Unexpected command: ${command} ${args.join(" ")}`);
     },

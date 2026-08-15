@@ -182,12 +182,12 @@ test("every production Compose operator reference and worktree override is regis
   assert.deepEqual(unregisteredComposeReferences, [], "Compose must not introduce an unregistered operator variable");
 
   const overrides = worktreeEnvironmentOverrides({
-    slug: "oc-a1b2c3d4e5",
+    slug: "lemmacomputer-a1b2c3d4e5",
     id: "a1b2c3d4e5",
     portOffset: 1234,
   });
   assert.ok(overrides instanceof Map);
-  assert.equal(overrides.get("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), "oc-a1b2c3d4e5");
+  assert.equal(overrides.get("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), "lemmacomputer-a1b2c3d4e5");
   assert.equal(overrides.get("LEMMACOMPUTER_WEB_PORT"), "5408");
   assert.equal(overrides.get("LEMMACOMPUTER_INSTALLATION_KIND"), "worktree");
   assert.deepEqual([...overrides.keys()].filter((key) => !keys.has(key)), [], "worktree initialization must not create unregistered configuration");
