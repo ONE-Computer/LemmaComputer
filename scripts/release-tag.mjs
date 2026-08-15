@@ -27,12 +27,23 @@ if (branch !== "main" && !branch.startsWith("release/")) {
 }
 
 const attestation = JSON.parse(await readFile(`.artifacts/release-verification/${sha}.json`, "utf8"));
+const requiredFirstPartyImages = ["control-runtime", "openvtc-consent", "ms365-mcp", "workspace"];
 if (
   attestation.schemaVersion !== releaseAttestationSchemaVersion
   || attestation.sha !== sha
   || attestation.branch !== branch
   || !Array.isArray(attestation.gates)
   || requiredReleaseGates.some((gate) => !attestation.gates.includes(gate))
+  || !Array.isArray(attestation.images)
+  || attestation.images.length !== requiredFirstPartyImages.length
+  || requiredFirstPartyImages.some((name) => {
+    const image = attestation.images.find((candidate) => candidate?.name === name);
+    return !image
+      || !/^sha256:[a-f0-9]{64}$/.test(image.builtDigest)
+      || typeof image.reference !== "string"
+      || !Array.isArray(image.repositoryDigests)
+      || image.repositoryDigests.some((digest) => !/^[^\s@]+@sha256:[a-f0-9]{64}$/.test(digest));
+  })
 ) {
   throw new Error("Release verification attestation does not match the current commit and branch");
 }

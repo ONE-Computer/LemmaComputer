@@ -20,7 +20,13 @@ npm run release:tag
 npm run release:tag -- --push
 ```
 
-The first command performs the local release checks and records `.artifacts/release-verification/<sha>.json`. The preview command validates the candidate and prints the tag without changing GitHub. The final command pushes only the new immutable tag; it never advances a branch.
+The first command performs the local release checks and records
+`.artifacts/release-verification/<sha>.json`, including the built content digest
+and any repository digest for the control runtime, OpenVTC consent, Microsoft
+365 MCP, and workspace images. Retain that checksummed attestation with the
+release evidence. The preview command validates the candidate and prints the
+tag without changing GitHub. The final command pushes only the new immutable
+tag; it never advances a branch.
 
 The release gate qualifies managed-provider configuration and OAuth renewal,
 runs quick and database verification, builds the workspace image, starts an
@@ -28,7 +34,13 @@ isolated Compose stack, checks the product origin, and creates, observes, and
 destroys a real Hermes workspace. A healthy control stack without a durable
 workspace readiness marker is not a releasable candidate.
 
-Deploy the exact tag and image digest. Creating a newer tag is the only way to release a newer commit. Never move or reuse an existing demo tag.
+Promote each recorded first-party build to the deployment registry, record its
+resulting repository digest, and set the four image variables to those exact
+`repository@sha256:<digest>` references. The deployment-profile preflight
+rejects mutable tags whenever production runtime is selected; hosted always
+requires production runtime. Deploy the exact Git tag and image digests.
+Creating a newer tag is the only way to release a newer commit. Never move or
+reuse an existing demo tag.
 
 ## Database promotion
 

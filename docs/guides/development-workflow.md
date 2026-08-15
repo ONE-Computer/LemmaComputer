@@ -623,6 +623,7 @@ npm run verify:release
 npm run release:tag -- --push
 ```
 
-Deploy the immutable `demo-*` tag and image digest, never a moving branch or a
-dirty checkout. Do not resolve migration conflicts by renumbering or editing a
+Deploy the immutable `demo-*` tag and the four first-party image digests
+recorded by `verify:release`, never a moving branch, mutable image tag, or dirty
+checkout. Do not resolve migration conflicts by renumbering or editing a
 migration already applied anywhere; use forward reconciliation.

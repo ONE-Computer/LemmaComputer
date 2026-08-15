@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   environmentContract,
+  firstPartyImageVariables,
   allEnvironmentVariableNameSet,
   projectServiceEnvironment,
   renderEnvironmentTemplate,
@@ -103,6 +104,10 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET: "credential-secret-that-is-long-enough-0000001",
     LEMMACOMPUTER_SESSION_SECRET: "session-secret-that-is-long-enough-0000000001",
     LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET: "ingress-secret-that-is-long-enough-0000000001",
+    LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
+    LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
+    LEMMACOMPUTER_MS365_MCP_IMAGE: `lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
+    LEMMACOMPUTER_WORKSPACE_IMAGE: `lemmacomputer/workspace@sha256:${"d".repeat(64)}`,
   });
   return values;
 };
@@ -115,6 +120,10 @@ const validCustomerManagedEnvironment = () => {
     LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory-tenant",
     LEMMACOMPUTER_ENTRA_CLIENT_ID: "customer-application-client",
     LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "customer-application-secret",
+    LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
+    LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
+    LEMMACOMPUTER_MS365_MCP_IMAGE: `lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
+    LEMMACOMPUTER_WORKSPACE_IMAGE: `lemmacomputer/workspace@sha256:${"d".repeat(64)}`,
   });
   return values;
 };
@@ -125,6 +134,18 @@ const initializedCustomerManagedEnvironment = () => initializeEnvironment(
 ).replace(
   "LEMMACOMPUTER_ENTRA_TENANT_ID=replace-with-entra-directory-tenant-id",
   "LEMMACOMPUTER_ENTRA_TENANT_ID=customer-directory-tenant",
+).replace(
+  "LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE=lemmacomputer/control-runtime:dev",
+  `LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE=lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
+).replace(
+  "LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE=lemmacomputer/openvtc-consent:dev",
+  `LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE=lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
+).replace(
+  "LEMMACOMPUTER_MS365_MCP_IMAGE=lemmacomputer/ms365-mcp:0.131.2",
+  `LEMMACOMPUTER_MS365_MCP_IMAGE=lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
+).replace(
+  "LEMMACOMPUTER_WORKSPACE_IMAGE=lemmacomputer/workspace:dev",
+  `LEMMACOMPUTER_WORKSPACE_IMAGE=lemmacomputer/workspace@sha256:${"d".repeat(64)}`,
 );
 
 test("the checked-in environment example is rendered from the canonical deployment contract", async () => {
@@ -180,6 +201,9 @@ test("every production Compose operator reference and worktree override is regis
   }
   const unregisteredComposeReferences = [...references].filter((key) => !keys.has(key));
   assert.deepEqual(unregisteredComposeReferences, [], "Compose must not introduce an unregistered operator variable");
+  for (const key of firstPartyImageVariables) {
+    assert.ok(references.has(key), `Compose must consume the complete ${key} reference`);
+  }
 
   const overrides = worktreeEnvironmentOverrides({
     slug: "lemmacomputer-a1b2c3d4e5",
@@ -190,6 +214,10 @@ test("every production Compose operator reference and worktree override is regis
   assert.equal(overrides.get("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), "lemmacomputer-a1b2c3d4e5");
   assert.equal(overrides.get("LEMMACOMPUTER_WEB_PORT"), "5408");
   assert.equal(overrides.get("LEMMACOMPUTER_INSTALLATION_KIND"), "worktree");
+  assert.equal(overrides.get("LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE"), "lemmacomputer/control-runtime:dev-a1b2c3d4e5");
+  assert.equal(overrides.get("LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE"), "lemmacomputer/openvtc-consent:dev-a1b2c3d4e5");
+  assert.equal(overrides.get("LEMMACOMPUTER_MS365_MCP_IMAGE"), "lemmacomputer/ms365-mcp:dev-a1b2c3d4e5");
+  assert.equal(overrides.get("LEMMACOMPUTER_WORKSPACE_IMAGE"), "lemmacomputer/workspace:dev-a1b2c3d4e5");
   assert.deepEqual([...overrides.keys()].filter((key) => !keys.has(key)), [], "worktree initialization must not create unregistered configuration");
 });
 
@@ -247,6 +275,41 @@ test("remote workspace grants use only the configured private HTTPS relay upstre
 
 test("a complete customer-managed configuration passes the shared profile validation", () => {
   assert.doesNotThrow(() => validateDeploymentEnvironment(validCustomerManagedEnvironment(), {
+    profile: "customer-managed",
+    strict: true,
+  }));
+});
+
+test("both production profiles reject every mutable first-party image reference", () => {
+  for (const [profile, environment] of [
+    ["customer-managed", {
+      ...validCustomerManagedEnvironment(),
+      LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+      LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
+      LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "postmark-test-token",
+      LEMMACOMPUTER_POSTMARK_FROM: "login@example.test",
+    }],
+    ["hosted", validHostedEnvironment()],
+  ] as const) {
+    for (const key of firstPartyImageVariables) {
+      assert.throws(
+        () => validateDeploymentEnvironment({ ...environment, [key]: "registry.example.test/lemma:latest" }, {
+          profile,
+          strict: true,
+        }),
+        new RegExp(`${key}.*immutable`, "i"),
+      );
+    }
+  }
+});
+
+test("customer-managed development permits local first-party image tags", () => {
+  const environment = validCustomerManagedEnvironment();
+  environment.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE = "lemmacomputer/control-runtime:local";
+  environment.LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE = "lemmacomputer/openvtc-consent:local";
+  environment.LEMMACOMPUTER_MS365_MCP_IMAGE = "lemmacomputer/ms365-mcp:local";
+  environment.LEMMACOMPUTER_WORKSPACE_IMAGE = "lemmacomputer/workspace:local";
+  assert.doesNotThrow(() => validateDeploymentEnvironment(environment, {
     profile: "customer-managed",
     strict: true,
   }));

@@ -1,7 +1,7 @@
 name: ${LEMMACOMPUTER_COMPOSE_PROJECT_NAME:?set LEMMACOMPUTER_COMPOSE_PROJECT_NAME in .env}
 
 x-control-runtime: &control-runtime
-  image: lemmacomputer/control-runtime:${LEMMACOMPUTER_IMAGE_TAG:?set LEMMACOMPUTER_IMAGE_TAG in .env}
+  image: ${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?set LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE in .env}
   build:
     context: .
     dockerfile: docker/Dockerfile.node
@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
 
   ms365-mcp:
-    image: lemmacomputer/ms365-mcp:${LEMMACOMPUTER_MS365_IMAGE_TAG:?set LEMMACOMPUTER_MS365_IMAGE_TAG in .env}
+    image: ${LEMMACOMPUTER_MS365_MCP_IMAGE:?set LEMMACOMPUTER_MS365_MCP_IMAGE in .env}
     build:
       context: .
       dockerfile: docker/Dockerfile.ms365-mcp
@@ -238,7 +238,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.openvtc-consent
-    image: lemmacomputer/openvtc-consent:${LEMMACOMPUTER_IMAGE_TAG:?set LEMMACOMPUTER_IMAGE_TAG in .env}
+    image: ${LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE:?set LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE in .env}
     env_file:
       - path: .runtime-env/openvtc-consent.env
         format: raw

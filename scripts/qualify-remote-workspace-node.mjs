@@ -45,7 +45,7 @@ export const renderNodeCompose = () => `name: \${QUALIFICATION_NODE_PROJECT:?set
 
 services:
   workspace-controller:
-    image: lemmacomputer/control-runtime:\${LEMMACOMPUTER_IMAGE_TAG:?set image tag}
+    image: \${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?set control runtime image}
     command: ["npm", "run", "start", "--workspace", "@lemmacomputer/workspace-controller"]
     init: true
     env_file:
@@ -104,7 +104,7 @@ export const renderControlOverride = () => `services:
       WORKSPACE_INGRESS_TLS_CLIENT_KEY_B64: \${QUALIFICATION_INGRESS_CLIENT_KEY_B64:?set ingress client key}
 
   remote-application-tls:
-    image: lemmacomputer/control-runtime:\${LEMMACOMPUTER_IMAGE_TAG:?set image tag}
+    image: \${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?set control runtime image}
     user: "\${QUALIFICATION_HOST_UID:?set qualification host UID}:\${QUALIFICATION_HOST_GID:?set qualification host GID}"
     command: ["node", "/qualification/remote-workspace-node-tls-forwarder.mjs"]
     init: true

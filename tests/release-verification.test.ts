@@ -11,7 +11,8 @@ test("release attestation requires an isolated built Hermes workspace readiness 
     readFile("docker/Dockerfile.workspace", "utf8"),
   ]);
 
-  assert.equal(releaseAttestationSchemaVersion, 4);
+  assert.equal(releaseAttestationSchemaVersion, 5);
+  assert.ok(requiredReleaseGates.includes("first-party-image-digest-manifest"));
   assert.deepEqual(requiredReleaseGates.slice(-2), [
     "workspace-image-build",
     "hermes-workspace-readiness-smoke",
@@ -22,6 +23,13 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.ok(renderServiceEnvironment >= 0, "release verification must render its ignored service environment files");
   assert.ok(renderServiceEnvironment < firstComposeInvocation, "release verification must render service environments before Compose");
   assert.match(verifyRelease, /"--profile", "build", "build", "workspace-image"/);
+  for (const image of ["control-runtime", "openvtc-consent", "ms365-mcp", "workspace"]) {
+    assert.match(verifyRelease, new RegExp(`\\["${image}"`));
+  }
+  assert.match(verifyRelease, /builtDigest: image\.Id/);
+  assert.match(verifyRelease, /repositoryDigests:/);
+  assert.match(releaseTag, /requiredFirstPartyImages/);
+  assert.match(releaseTag, /repositoryDigests\.some/);
   assert.match(verifyRelease, /"compose", "exec", "-T", "control-api"/);
   assert.match(verifyRelease, /"node", "--import", "tsx", "-"/);
   assert.match(verifyRelease, /input: await readFile\(qualifier\)/);

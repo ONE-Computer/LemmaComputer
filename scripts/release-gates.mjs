@@ -1,4 +1,4 @@
-export const releaseAttestationSchemaVersion = 4;
+export const releaseAttestationSchemaVersion = 5;
 
 export const requiredReleaseGates = Object.freeze([
   "pinned-litellm-provider-settings-qualification",
@@ -8,6 +8,7 @@ export const requiredReleaseGates = Object.freeze([
   "verify:quick",
   "verify:db",
   "isolated-compose-smoke",
+  "first-party-image-digest-manifest",
   "workspace-image-build",
   "hermes-workspace-readiness-smoke",
 ]);

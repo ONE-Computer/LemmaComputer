@@ -463,8 +463,14 @@ Docker Engine in both placements. Build the workspace image first:
 npm run image:workspace
 ```
 
-`LEMMACOMPUTER_WORKSPACE_IMAGE` may be a local tag for development. Production
-deployments should use an immutable digest.
+Worktree development uses isolated local tags for
+`LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE`, `LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE`,
+`LEMMACOMPUTER_MS365_MCP_IMAGE`, and `LEMMACOMPUTER_WORKSPACE_IMAGE`.
+Customer-managed evaluation may also use local tags while
+`LEMMACOMPUTER_RUNTIME_ENVIRONMENT=development`. Hosted and customer-managed
+production runtime rejects tags for these first-party images. Set each value
+to the promoted `repository@sha256:<digest>` reference; do not reuse one digest
+across independently built images.
 
 Chrome, Visual Studio Code, and Obsidian require Chromium's unprivileged user-
 namespace process sandbox. On each AppArmor-enforcing workspace node, validate
@@ -767,7 +773,8 @@ Back up these as one recovery set:
 3. the `litellm` gateway database;
 4. per-workspace persistent volumes;
 5. the exact secret-manager versions active at backup time;
-6. immutable control and workspace image digests.
+6. immutable control-runtime, OpenVTC consent, Microsoft 365 MCP, and workspace
+   image digests.
 
 Example logical database backups:
 

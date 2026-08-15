@@ -27,9 +27,10 @@ const sections = [
   section("Deployment profile and local topology", "Set the profile explicitly for every deployment. Worktree values are replaced by npm run worktree:init.", [
     variable("LEMMACOMPUTER_INSTALLATION_KIND", "customer-managed", "Deployment profile: customer-managed, hosted, or worktree.", { kind: "enum", values: ["customer-managed", "hosted", "worktree"] }),
     variable("LEMMACOMPUTER_COMPOSE_PROJECT_NAME", "lemmacomputer", "Compose project name. Keep this unique for each local worktree."),
-    variable("LEMMACOMPUTER_IMAGE_TAG", "dev", "LemmaComputer control-runtime and workspace image tag."),
+    variable("LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE", "lemmacomputer/control-runtime:dev", "Control runtime image reference. Production runtime requires a repository digest reference."),
+    variable("LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE", "lemmacomputer/openvtc-consent:dev", "OpenVTC consent image reference. Production runtime requires a repository digest reference."),
     variable("LEMMACOMPUTER_APP_VERSION", "dev", "Version recorded with schema and operational events."),
-    variable("LEMMACOMPUTER_MS365_IMAGE_TAG", "0.131.2", "Microsoft 365 MCP image tag used by the reference deployment."),
+    variable("LEMMACOMPUTER_MS365_MCP_IMAGE", "lemmacomputer/ms365-mcp:0.131.2", "Microsoft 365 MCP image reference. Production runtime requires a repository digest reference."),
     variable("LEMMACOMPUTER_CONTROL_NETWORK", "lemmacomputer-control", "Private Docker network name used by local Kasm workspaces."),
     variable("LEMMACOMPUTER_CONTROL_CONTAINER", "lemmacomputer-control-api", "Control API container name used by the local Kasm adapter."),
     variable("LEMMACOMPUTER_LITELLM_CONTAINER", "lemmacomputer-litellm", "LiteLLM container name used by the local Kasm adapter."),
@@ -190,7 +191,7 @@ const sections = [
     variable("LEMMACOMPUTER_WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64", "", "Base64 PEM workspace-node application-gateway client private key.", { secret: true, optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_GATEWAY_URL", "", "Private HTTPS gateway endpoint reachable only from the remote node application network.", { kind: "url", optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
     variable("LEMMACOMPUTER_WORKSPACE_NODE_CONTROL_URL", "", "Private HTTPS Control endpoint reachable only from the remote node application network.", { kind: "url", optional: true, requiredWhen: "LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY=remote." }),
-    variable("LEMMACOMPUTER_WORKSPACE_IMAGE", "lemmacomputer/workspace:dev", "Workspace container image."),
+    variable("LEMMACOMPUTER_WORKSPACE_IMAGE", "lemmacomputer/workspace:dev", "Workspace container image reference. Production runtime requires a repository digest reference."),
     variable("LEMMACOMPUTER_TIME_ZONE", "Etc/UTC", "Trusted IANA timezone for workspace and relative calendar times.", { initialize: "time-zone" }),
     variable("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", "lemmacomputer-workspace", "Local Kasm workspace network-name prefix."),
     variable("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK", "lemmacomputer-egress", "Local Kasm egress network name."),
@@ -371,6 +372,13 @@ const isInteger = (value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(
 const isUrl = (value) => {
   try { return Boolean(new URL(value)); } catch { return false; }
 };
+const immutableImageReference = /^[^\s@]+@sha256:[a-f0-9]{64}$/;
+export const firstPartyImageVariables = Object.freeze([
+  "LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE",
+  "LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE",
+  "LEMMACOMPUTER_MS365_MCP_IMAGE",
+  "LEMMACOMPUTER_WORKSPACE_IMAGE",
+]);
 
 /**
  * Fails before a deployment starts. Runtime checks remain defense in depth;
@@ -414,6 +422,14 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
     if (item.kind === "boolean" && !["true", "false"].includes(value)) errors.push(`${item.key} must be true or false`);
     if (item.kind === "url" && hasValue(value) && !isUrl(value)) errors.push(`${item.key} must be an absolute URL`);
     if (item.kind === "enum" && !item.values.includes(value)) errors.push(`${item.key} must be one of ${item.values.map((candidate) => candidate || "(empty)").join(", ")}`);
+  }
+
+  if (values.LEMMACOMPUTER_RUNTIME_ENVIRONMENT === "production") {
+    for (const key of firstPartyImageVariables) {
+      if (!immutableImageReference.test(values[key])) {
+        errors.push(`${key} must use an immutable repository@sha256:<64 lowercase hex characters> reference in production deployments`);
+      }
+    }
   }
 
   for (const group of coupledEnvironmentGroups) {
@@ -588,9 +604,10 @@ export function worktreeEnvironmentOverrides({ slug, id, portOffset }) {
     ["LEMMACOMPUTER_CONTROL_NETWORK", `${slug}-control`],
     ["LEMMACOMPUTER_CONTROL_CONTAINER", `${slug}-control-api`],
     ["LEMMACOMPUTER_LITELLM_CONTAINER", `${slug}-litellm`],
-    ["LEMMACOMPUTER_IMAGE_TAG", `dev-${id}`],
+    ["LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE", `lemmacomputer/control-runtime:dev-${id}`],
+    ["LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE", `lemmacomputer/openvtc-consent:dev-${id}`],
     ["LEMMACOMPUTER_APP_VERSION", `dev-${id}`],
-    ["LEMMACOMPUTER_MS365_IMAGE_TAG", `dev-${id}`],
+    ["LEMMACOMPUTER_MS365_MCP_IMAGE", `lemmacomputer/ms365-mcp:dev-${id}`],
     ["LEMMACOMPUTER_WORKSPACE_IMAGE", `lemmacomputer/workspace:dev-${id}`],
     ["LEMMACOMPUTER_WORKSPACE_NODE_ID", `${slug}-node`],
     ["LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX", `${slug}-workspace`],
@@ -773,7 +790,7 @@ export function projectServiceEnvironment(input = {}) {
       KASM_LOCAL_CONTROL_CONTAINER: v("LEMMACOMPUTER_CONTROL_CONTAINER"),
       KASM_LOCAL_IMAGE: v("LEMMACOMPUTER_WORKSPACE_IMAGE"),
       KASM_LOCAL_RELAY_IMAGE: "node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2",
-      KASM_LOCAL_EGRESS_PROXY_IMAGE: `lemmacomputer/control-runtime:${v("LEMMACOMPUTER_IMAGE_TAG")}`,
+      KASM_LOCAL_EGRESS_PROXY_IMAGE: v("LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE"),
       KASM_LOCAL_EGRESS_NETWORK: v("LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK"),
       KASM_PUBLIC_HOST: v("LEMMACOMPUTER_WORKSPACE_NODE_PRIVATE_HOST"),
       KASM_LOCAL_KVM_ENABLED: v("LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED"),

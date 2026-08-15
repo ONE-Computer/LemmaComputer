@@ -349,9 +349,11 @@ docker compose --profile build build workspace-image
 ```
 
 The build downloads checksum-pinned desktop applications and language
-runtimes, so it can take a long time and use substantial disk space. It
-produces the image named by `LEMMACOMPUTER_WORKSPACE_IMAGE`, which defaults to
-`lemmacomputer/workspace:dev`.
+runtimes, so it can take a long time and use substantial disk space. In an
+isolated worktree it produces the local tag named by
+`LEMMACOMPUTER_WORKSPACE_IMAGE`. A production customer-managed deployment must
+instead consume the promoted immutable digest recorded for the release; its
+preflight rejects this development tag.
 
 Confirm the default image exists:
 
@@ -509,8 +511,11 @@ uses dynamic managed-provider routes; it does not read provider keys from
 
 ### Workspace creation reports image not found
 
-Run `npm run image:workspace` and verify that
-`LEMMACOMPUTER_WORKSPACE_IMAGE` matches the built image tag.
+In a worktree, run `npm run image:workspace` and verify that
+`LEMMACOMPUTER_WORKSPACE_IMAGE` matches the built image tag. In a
+production customer-managed deployment, verify that the configured repository
+digest was promoted and is readable by the workspace node; do not replace it
+with a mutable tag.
 
 ### Compose does not become healthy
 

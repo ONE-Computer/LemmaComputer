@@ -16,8 +16,12 @@ for (const profile of profiles) {
   if (!supported.has(profile)) throw new Error("Profile smoke accepts only customer-managed or hosted");
 }
 
-const sharedImageTag = "profile-smoke-same-commit";
-const sharedWorkspaceImage = "lemmacomputer/workspace@sha256:profile-smoke-same-image";
+const sharedImages = Object.freeze({
+  LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
+  LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
+  LEMMACOMPUTER_MS365_MCP_IMAGE: `lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
+  LEMMACOMPUTER_WORKSPACE_IMAGE: `lemmacomputer/workspace@sha256:${"d".repeat(64)}`,
+});
 const baseEnvironment = () => Object.fromEntries(parseEnvironment(initializeEnvironment(
   renderEnvironmentTemplate(),
   "Etc/UTC",
@@ -27,8 +31,7 @@ const environmentFor = (profile) => {
   const values = {
     ...baseEnvironment(),
     LEMMACOMPUTER_INSTALLATION_KIND: profile,
-    LEMMACOMPUTER_IMAGE_TAG: sharedImageTag,
-    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
+    ...sharedImages,
   };
   if (profile === "customer-managed") {
     return {
@@ -93,8 +96,8 @@ const qualified = profiles.map((profile) => {
   const values = validateDeploymentEnvironment(environmentFor(profile), { profile, strict: true });
   const services = projectServiceEnvironment(values);
   assert.ok(Object.keys(services).length > 0);
-  assert.equal(values.LEMMACOMPUTER_IMAGE_TAG, sharedImageTag);
-  assert.equal(services["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
+  assert.equal(values.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE, sharedImages.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE);
+  assert.equal(services["workspace-controller"].KASM_LOCAL_IMAGE, sharedImages.LEMMACOMPUTER_WORKSPACE_IMAGE);
   if (profile === "customer-managed") {
     assert.doesNotMatch(JSON.stringify(services), /https:\/\/[^\"/]*lemmacomputer/i);
   }
@@ -105,4 +108,4 @@ if (qualified.length === 2) {
   assert.deepEqual(qualified[0].services, qualified[1].services, "both profiles must project the same service topology");
 }
 
-process.stdout.write(`Deployment profile preflight smoke passed for ${profiles.join(" and ")} using image ${sharedImageTag}.\n`);
+process.stdout.write(`Deployment profile preflight smoke passed for ${profiles.join(" and ")} using immutable first-party image digests.\n`);

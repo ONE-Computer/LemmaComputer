@@ -24,6 +24,12 @@ const envValue = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.tr
 const composeProject = envValue("LEMMACOMPUTER_COMPOSE_PROJECT_NAME");
 const workspaceImage = envValue("LEMMACOMPUTER_WORKSPACE_IMAGE");
 const workspaceNetworkPrefix = envValue("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
+const firstPartyImageReferences = [
+  ["control-runtime", envValue("LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE")],
+  ["openvtc-consent", envValue("LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE")],
+  ["ms365-mcp", envValue("LEMMACOMPUTER_MS365_MCP_IMAGE")],
+  ["workspace", workspaceImage],
+];
 if (
   !composeProject
   || composeProject === "lemmacomputer"
@@ -31,6 +37,7 @@ if (
   || workspaceImage === "lemmacomputer/workspace:dev"
   || !workspaceNetworkPrefix
   || workspaceNetworkPrefix === "lemmacomputer-workspace"
+  || firstPartyImageReferences.some(([, reference]) => !reference)
 ) {
   throw new Error("Release verification requires an isolated worktree initialized with npm run worktree:init");
 }
@@ -44,6 +51,7 @@ run("npm", ["run", "qualify:microsoft365-contracts"]);
 run(process.execPath, ["scripts/verify-quick.mjs"]);
 run(process.execPath, ["scripts/verify-db.mjs"]);
 let composeAttempted = false;
+let firstPartyImages;
 try {
   run("docker", ["compose", "--profile", "build", "build", "workspace-image"]);
   run("docker", ["image", "inspect", workspaceImage]);
@@ -64,6 +72,18 @@ try {
     input: await readFile(qualifier),
     stdio: ["pipe", "inherit", "inherit"],
   });
+  firstPartyImages = firstPartyImageReferences.map(([name, reference]) => {
+    const [image] = JSON.parse(capture("docker", ["image", "inspect", reference]));
+    if (!/^sha256:[a-f0-9]{64}$/.test(image?.Id ?? "")) {
+      throw new Error(`Built ${name} image did not resolve to a sha256 content digest`);
+    }
+    return {
+      name,
+      reference,
+      builtDigest: image.Id,
+      repositoryDigests: [...(image.RepoDigests ?? [])].sort(),
+    };
+  });
 } finally {
   if (composeAttempted) run(process.execPath, ["scripts/compose-down.mjs", "--volumes"]);
 }
@@ -82,8 +102,12 @@ const attestation = {
   branch,
   verifiedAt: new Date().toISOString(),
   gates: requiredReleaseGates,
+  images: firstPartyImages,
   migrations,
 };
 await mkdir(".artifacts/release-verification", { recursive: true });
 await writeFile(`.artifacts/release-verification/${sha}.json`, `${JSON.stringify(attestation, null, 2)}\n`, { mode: 0o600 });
+for (const image of firstPartyImages) {
+  process.stdout.write(`${image.name}: ${image.builtDigest} (${image.reference})\n`);
+}
 process.stdout.write(`Release verification passed for ${sha}.\n`);

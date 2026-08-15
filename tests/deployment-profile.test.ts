@@ -27,6 +27,13 @@ const initializedEnvironment = () => Object.fromEntries(parseEnvironment(
   initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC"),
 ).values);
 
+const productionImages = Object.freeze({
+  LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
+  LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
+  LEMMACOMPUTER_MS365_MCP_IMAGE: `lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
+  LEMMACOMPUTER_WORKSPACE_IMAGE: `lemmacomputer/workspace@sha256:${"d".repeat(64)}`,
+});
+
 test("the checked-in matrix has exactly two production profiles and development-only worktree", () => {
   assert.deepEqual(productionDeploymentProfileIds, ["customer-managed", "hosted"]);
   assert.deepEqual(deploymentProfileIds, ["customer-managed", "hosted", "worktree"]);
@@ -104,13 +111,14 @@ test("hosted requires a qualified remote provider boundary without selecting a v
 
 test("both production profiles render the same service topology from the same image contract", () => {
   const base = initializedEnvironment();
-  const sharedImage = "release-same-commit";
-  const sharedWorkspaceImage = "lemmacomputer/workspace@sha256:same-runtime-image";
   const customerManaged = {
     ...base,
     LEMMACOMPUTER_INSTALLATION_KIND: "customer-managed",
-    LEMMACOMPUTER_IMAGE_TAG: sharedImage,
-    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
+    LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+    LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
+    LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "postmark-test-token",
+    LEMMACOMPUTER_POSTMARK_FROM: "login@example.test",
+    ...productionImages,
     LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory",
     LEMMACOMPUTER_ENTRA_CLIENT_ID: "customer-client",
     LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "customer-secret",
@@ -124,8 +132,7 @@ test("both production profiles render the same service topology from the same im
     LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "postmark-test-token",
     LEMMACOMPUTER_POSTMARK_FROM: "login@example.test",
     LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
-    LEMMACOMPUTER_IMAGE_TAG: sharedImage,
-    LEMMACOMPUTER_WORKSPACE_IMAGE: sharedWorkspaceImage,
+    ...productionImages,
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "hosted-external-directory",
     LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "hosted-test",
@@ -173,9 +180,44 @@ test("both production profiles render the same service topology from the same im
     Object.keys(projectServiceEnvironment(customerManaged)).sort(),
     Object.keys(projectServiceEnvironment(hosted)).sort(),
   );
-  assert.equal(customerManaged.LEMMACOMPUTER_IMAGE_TAG, hosted.LEMMACOMPUTER_IMAGE_TAG);
-  assert.equal(projectServiceEnvironment(customerManaged)["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
-  assert.equal(projectServiceEnvironment(hosted)["workspace-controller"].KASM_LOCAL_IMAGE, sharedWorkspaceImage);
+  assert.equal(customerManaged.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE, hosted.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE);
+  assert.equal(projectServiceEnvironment(customerManaged)["workspace-controller"].KASM_LOCAL_IMAGE, productionImages.LEMMACOMPUTER_WORKSPACE_IMAGE);
+  assert.equal(projectServiceEnvironment(hosted)["workspace-controller"].KASM_LOCAL_IMAGE, productionImages.LEMMACOMPUTER_WORKSPACE_IMAGE);
+});
+
+test("production profiles fail closed unless all first-party images use immutable digests", () => {
+  for (const profile of ["customer-managed", "hosted"] as const) {
+    const values = profile === "customer-managed"
+      ? {
+          ...initializedEnvironment(),
+          LEMMACOMPUTER_INSTALLATION_KIND: profile,
+          LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+          LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory",
+        }
+      : {
+          ...initializedEnvironment(),
+          ...productionImages,
+          LEMMACOMPUTER_INSTALLATION_KIND: profile,
+          LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
+          LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: "lemmacomputer/control-runtime:latest",
+        };
+    assert.throws(
+      () => validateDeploymentEnvironment(values, { profile, strict: true }),
+      /CONTROL_RUNTIME_IMAGE.*immutable|OPENVTC_CONSENT_IMAGE.*immutable|MS365_MCP_IMAGE.*immutable|WORKSPACE_IMAGE.*immutable/i,
+    );
+  }
+});
+
+test("worktree development preserves isolated mutable image tags", () => {
+  const values = {
+    ...initializedEnvironment(),
+    LEMMACOMPUTER_INSTALLATION_KIND: "worktree",
+  };
+  assert.doesNotThrow(() => validateDeploymentEnvironment(values, { profile: "worktree", strict: true }));
+  assert.match(values.LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE, /:dev$/);
+  assert.match(values.LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE, /:dev$/);
+  assert.match(values.LEMMACOMPUTER_MS365_MCP_IMAGE, /:0\.131\.2$/);
+  assert.match(values.LEMMACOMPUTER_WORKSPACE_IMAGE, /:dev$/);
 });
 
 test("customer-managed service projection has no LemmaComputer-hosted control-plane dependency", () => {
