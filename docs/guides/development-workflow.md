@@ -115,6 +115,21 @@ Do not run `npm ci` or `env:init` separately in a task worktree.
 Never copy `.env`, database volumes, generated PKI, or runtime environment
 files from another checkout. Each worktree owns its trust and persistence.
 
+### Browser cookies across local worktrees
+
+Unique localhost ports isolate each worktree's processes and Docker resources,
+but they do not create separate browser cookie jars. Cookies are scoped to a
+host, not a port, so a cookie set for `localhost` can be sent to LemmaComputer,
+another worktree, or an unrelated local application served on a different
+localhost port. This is a local-development limitation; real deployments use
+distinct hostnames and must not rely on ports as a cookie boundary.
+
+Use a separate browser profile for each sensitive local stack (and for
+unrelated localhost applications), or assign distinct development hostnames
+when the complete callback, trusted-origin, and certificate configuration has
+also been updated for those names. Do not treat the generated port allocation
+as browser credential isolation.
+
 At the start of every later session:
 
 ```bash
