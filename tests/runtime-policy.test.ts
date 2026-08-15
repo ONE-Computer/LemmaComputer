@@ -82,8 +82,8 @@ test("disposable-open projects explicit open execution and full-web egress witho
       schemaVersion: 1,
       workspaceProfile: "claude-desktop-standard-v1",
       workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
-      agentProfile: "codex-cli-managed-v1",
-      agents: ["codex-cli", "hermes-claw"],
+      agentProfile: "hermes-claw-managed-v1",
+      agents: ["hermes-claw"],
       modelAliases: ["lemmacomputer-openai"],
       networkProfile: "controlled-egress-v1",
       mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
@@ -111,7 +111,7 @@ test("disposable-open projects attached deny rules as full-web exceptions", () =
     document: {
       schemaVersion: 1,
       workspaceProfiles: ["claude-desktop-standard-v1", "disposable-open-v1"],
-      agents: ["codex-cli"],
+      agents: ["hermes-claw"],
       modelAliases: ["lemmacomputer-openai"],
       networkProfile: "controlled-egress-v1",
       mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
@@ -282,6 +282,30 @@ test("policy-selected Claude and Hermes clients receive distinct governed identi
   assert.throws(
     () => runtimePolicyFor(effective, undefined, undefined, ["hermes-claw", "hermes-claw"]),
     /unique workspace agent/,
+  );
+});
+
+test("Codex CLI remains schema-compatible but cannot be selected before qualification", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-codex", policyBundleId: "bundle-1", policyVersionId: "version-codex", version: 1,
+    documentHash: "9".repeat(64), assignedBy: "admin-1", assignedAt: "2026-08-15T00:00:00.000Z",
+    agentId: "agent-1", vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfile: "claude-desktop-standard-v1",
+      workspaceProfiles: ["claude-desktop-standard-v1"],
+      agents: ["claude-cli", "codex-cli"],
+      defaultAgents: ["codex-cli"],
+      modelAliases: ["lemmacomputer-claude"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+  };
+
+  assert.deepEqual(runtimePolicyFor(effective).agents?.map((agent) => agent.catalogId), ["claude-cli"]);
+  assert.throws(
+    () => runtimePolicyFor(effective, undefined, undefined, ["codex-cli"]),
+    /not assigned/,
   );
 });
 

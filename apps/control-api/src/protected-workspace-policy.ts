@@ -1,11 +1,13 @@
 import {
-  agentCatalogIds,
+  isWorkspaceSelectableAgentCatalogId,
+  LemmaComputerError,
   m365ToolCatalog,
   organizationWorkspacePolicyConstraintsSchema,
   productReleaseVerificationKeySetSchema,
   sandboxApplicationIds,
   sandboxModelAliases,
   signedProtectedBaselineTemplateSchema,
+  workspaceSelectableAgentCatalogIds,
   workspaceCapabilityIds,
   type OrganizationWorkspacePolicyConstraints,
   type ProductReleaseVerificationKeySet,
@@ -43,7 +45,7 @@ const microsoft365ToolPolicies = Object.fromEntries(Object.entries(m365ToolCatal
 export const organizationWorkspacePolicyCatalog = {
   constraints: {
     workspaceProfiles: { allow: ["claude-desktop-standard-v1", "disposable-open-v1"] as const, deny: [] },
-    agents: { allow: [...agentCatalogIds], deny: [] },
+    agents: { allow: [...workspaceSelectableAgentCatalogIds], deny: [] },
     applications: { allow: [...sandboxApplicationIds], deny: [] },
     modelAliases: { allow: [...sandboxModelAliases], deny: [] },
     serviceClasses: { allow: ["lite", "balanced", "pro"] as const, deny: [] },
@@ -91,6 +93,17 @@ export class ProtectedWorkspacePolicyAdministrationService implements ProtectedW
     createdBy: string;
   }): Promise<OrganizationWorkspacePolicyVersionRecord> {
     const constraints = organizationWorkspacePolicyConstraintsSchema.parse(input.constraints);
+    const configuredAgentIds = [
+      ...(constraints.agents?.allow ?? []),
+      ...(constraints.agents?.deny ?? []),
+    ];
+    if (configuredAgentIds.some((agentId) => !isWorkspaceSelectableAgentCatalogId(agentId))) {
+      throw new LemmaComputerError(
+        "WORKSPACE_AGENT_NOT_SELECTABLE",
+        "Organization workspace guardrails may include only release-qualified agents",
+        400,
+      );
+    }
     const created = await this.store.createOrganizationPolicyVersion({ ...input, constraints });
     const versions = await this.store.listOrganizationPolicyVersions(input.tenantId);
     const persisted = versions.find((version) => version.policyVersionId === created.policyVersionId);

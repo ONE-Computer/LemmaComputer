@@ -21,9 +21,10 @@ const basePolicy = (): EffectivePolicy => ({
   document: mvpPolicyDocument(),
 });
 
-test("without an organization policy the runtime keeps the full supported catalog", () => {
+test("known Codex history remains readable while only qualified agents reach the runtime", () => {
   const document = basePolicy().document as Record<string, unknown>;
   assert.deepEqual(document.agents, ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]);
+  assert.deepEqual(runtimePolicyFor(basePolicy()).agents?.map((agent) => agent.catalogId), ["claude-desktop", "hermes-claw"]);
   assert.deepEqual(document.applications, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
   assert.deepEqual(document.workspaceProfiles, ["claude-desktop-standard-v1", "disposable-open-v1"]);
 });
@@ -53,15 +54,19 @@ test("the latest organization policy constrains every member runtime", () => {
   };
   const constrained = constrainEffectivePolicy(basePolicy(), organizationPolicy);
   const document = constrained.document as Record<string, unknown>;
-  assert.deepEqual(document.agents, ["claude-cli", "codex-cli"]);
+  assert.deepEqual(document.agents, ["claude-cli"]);
   assert.deepEqual(document.applications, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
   assert.deepEqual(document.workspaceProfiles, ["claude-desktop-standard-v1"]);
   assert.deepEqual(document.serviceClasses, ["balanced", "pro"]);
   assert.equal(document.organizationPolicyHash, organizationPolicy.documentHash);
   assert.equal(document.maximumEgressMode, "restricted");
 
-  const chrome = runtimePolicyFor(constrained, "lemmacomputer-claude", "claude-desktop-standard-v1", ["codex-cli"], ["google-chrome"]);
+  const chrome = runtimePolicyFor(constrained, "lemmacomputer-claude", "claude-desktop-standard-v1", ["claude-cli"], ["google-chrome"]);
   assert.deepEqual(chrome.applications, ["google-chrome"]);
+  assert.throws(
+    () => runtimePolicyFor(constrained, "lemmacomputer-claude", "claude-desktop-standard-v1", ["codex-cli"], ["firefox"]),
+    (error: unknown) => error instanceof Error && error.message.includes("not assigned"),
+  );
   assert.throws(
     () => runtimePolicyFor(constrained, "lemmacomputer-claude", "claude-desktop-standard-v1", ["hermes-claw"], ["firefox"]),
     (error: unknown) => error instanceof Error && error.message.includes("not assigned"),

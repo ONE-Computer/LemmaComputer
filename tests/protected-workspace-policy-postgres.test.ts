@@ -38,7 +38,7 @@ test("organization workspace policy is optional, append-only, and tenant scoped"
     assert.equal(initial.organizationPolicyVersions.length, 0);
     assert.equal(await administration.currentOrganizationPolicy(tenant), null);
     assert.deepEqual(initial.catalog.constraints.agents.allow, [
-      "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
+      "claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw",
     ]);
     assert.deepEqual(initial.catalog.constraints.workspaceProfiles.allow, ["claude-desktop-standard-v1", "disposable-open-v1"]);
     assert.deepEqual(initial.catalog.constraints.applications.allow, ["firefox", "google-chrome", "visual-studio-code", "obsidian"]);
@@ -46,14 +46,14 @@ test("organization workspace policy is optional, append-only, and tenant scoped"
 
     const first = await administration.createOrganizationPolicyVersion({
       tenantId: tenant,
-      constraints: { agents: { allow: ["claude-cli", "codex-cli"], deny: [] } },
+      constraints: { agents: { allow: ["claude-cli", "hermes-claw"], deny: [] } },
       revisionNote: "Allow the approved command-line agents",
       createdBy: administrator,
     });
     const second = await administration.createOrganizationPolicyVersion({
       tenantId: tenant,
       constraints: {
-        agents: { allow: ["claude-cli", "codex-cli"], deny: [] },
+        agents: { allow: ["claude-cli", "hermes-claw"], deny: [] },
         workspaceProfiles: { allow: ["claude-desktop-standard-v1"], deny: [] },
         maximumEgressMode: "restricted",
       },

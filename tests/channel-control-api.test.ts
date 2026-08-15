@@ -457,7 +457,7 @@ test("workspace settings expose one manifest with a non-secret Telegram binding"
     assert.equal(response.statusCode, 200);
     const manifest = response.json().manifest;
     assert.equal(manifest.schemaVersion, 2);
-    assert.deepEqual(manifest.sandbox.agentIds, ["hermes-agent", "claude-cli", "codex-cli"]);
+    assert.deepEqual(manifest.sandbox.agentIds, ["hermes-agent", "claude-cli"]);
     assert.deepEqual(manifest.channels, [{
       adapter: "telegram",
       credentialRef: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",

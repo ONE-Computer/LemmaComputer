@@ -116,9 +116,10 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByText("Default", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Effective guardrails" })).toBeVisible();
   const agentsAndApplications = page.locator(".workspace-policy-control-group").filter({ hasText: "Agents and applications" });
-  for (const agent of ["Claude Desktop", "Claude CLI", "Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
+  for (const agent of ["Claude Desktop", "Claude CLI", "Hermes Desktop", "Hermes Agent"]) {
     await expect(agentsAndApplications).toContainText(agent);
   }
+  await expect(agentsAndApplications).not.toContainText("Codex");
   await expect(agentsAndApplications).toContainText("Firefox ESR");
   await expect(page.getByText("Organization connector ceiling", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Current · Product defaults", { exact: true })).toBeVisible();
@@ -140,8 +141,14 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByRole("option", { name: "Max", exact: true })).toHaveCount(0);
   await expect(page.getByRole("option", { name: "Off", exact: true })).toHaveCount(0);
   await page.getByRole("option", { name: "High", exact: true }).click();
-  for (const agent of ["Claude Desktop", "Claude CLI", "Codex CLI", "Hermes Desktop", "Hermes Agent"]) {
+  for (const agent of ["Claude Desktop", "Claude CLI", "Hermes Desktop", "Hermes Agent"]) {
     await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(agent, { exact: true })).toBeVisible();
+  }
+  await expect(policyDialog.getByRole("group", { name: "Agents" }).getByRole("checkbox")).toHaveCount(4);
+  for (const agent of ["Codex Desktop", "Codex CLI"]) {
+    const planned = policyDialog.locator(".workspace-policy-choice.unavailable").filter({ hasText: agent });
+    await expect(planned).toContainText("Coming soon");
+    await expect(planned.getByRole("checkbox")).toHaveCount(0);
   }
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");

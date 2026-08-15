@@ -97,7 +97,7 @@ const productWorkspace = {
   grantId: "workspace-product",
   agents: [
     { id: "hermes-claw", displayName: "Hermes Agent CLI", clientVersion: "0.19.0", agentId: "agent-alex:product-hermes", state: "ready" },
-    { id: "codex-cli", displayName: "Codex CLI", clientVersion: "0.116.0", agentId: "agent-alex:product-codex", state: "ready" },
+    { id: "claude-cli", displayName: "Claude Code", clientVersion: "2.1.215", agentId: "agent-alex:product-claude", state: "ready" },
   ],
   modelRoute: {
     alias: "lemmacomputer-auto",
@@ -593,7 +593,7 @@ const protectedWorkspacePolicyOverview = {
   catalog: {
     constraints: {
       workspaceProfiles: { allow: ["claude-desktop-standard-v1", "disposable-open-v1"], deny: [] },
-      agents: { allow: ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"], deny: [] },
+      agents: { allow: ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"], deny: [] },
       applications: { allow: ["firefox", "google-chrome", "visual-studio-code", "obsidian"], deny: [] },
       modelAliases: { allow: ["lemmacomputer-auto", "lemmacomputer-claude", "lemmacomputer-openai", "lemmacomputer-glm", "lemmacomputer-assistant", "lemmacomputer-bedrock"], deny: [] },
       serviceClasses: { allow: ["lite", "balanced", "pro"], deny: [] },
@@ -1056,7 +1056,7 @@ const responses = new Map([
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
-  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, serviceClassOptions: [{ value: "lite", available: true, reasonCode: "ready" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: true, reasonCode: "ready" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
+  [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, serviceClassOptions: [{ value: "lite", available: true, reasonCode: "ready" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: true, reasonCode: "ready" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/status`, { workspaceId: productWorkspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/codex-cli/status`, { workspaceId: productWorkspaceId, catalogId: "codex-cli", displayName: "Codex CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],

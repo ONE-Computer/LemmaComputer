@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
-import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId, type SandboxProfileId } from "@lemmacomputer/contracts";
+import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId, type SandboxProfileId } from "@lemmacomputer/contracts";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import {
   canDelegateOrganizationGrants,
@@ -121,15 +121,18 @@ export const runtimePolicyFor = (
   if (!modelAlias || !allowedModelAliases.includes(modelAlias)) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "The selected model route is not assigned by the active policy", 403);
   if (!workspaceProfile || !workspaceProfiles.includes(workspaceProfile)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "The selected sandbox profile is not assigned by the active policy", 403);
   const hasAgentCatalog = Array.isArray(document.agents) || selectedAgentIds !== undefined;
-  const configuredAgentIds = Array.isArray(document.agents)
-    ? document.agents.filter((value): value is AgentCatalogId => typeof value === "string" && ownedAgentCatalog.some((agent) => agent.id === value))
+  const configuredAgentIds: AgentCatalogId[] = Array.isArray(document.agents)
+    ? document.agents.filter((value): value is AgentCatalogId => isWorkspaceSelectableAgentCatalogId(value) && ownedAgentCatalog.some((agent) => agent.id === value))
     : hasAgentCatalog
-      ? ownedAgentCatalog.map((agent) => agent.id)
-      : [agentCatalogIdFor(document.agentProfile)];
-  const defaultAgentIds = Array.isArray(document.defaultAgents)
+      ? ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId)
+      : isWorkspaceSelectableAgentCatalogId(agentCatalogIdFor(document.agentProfile))
+        ? [agentCatalogIdFor(document.agentProfile)]
+        : ["claude-desktop"];
+  const configuredDefaultAgentIds = Array.isArray(document.defaultAgents)
     ? document.defaultAgents.filter((value): value is AgentCatalogId => typeof value === "string" && configuredAgentIds.includes(value as AgentCatalogId))
     : configuredAgentIds;
-  const agentIds = hasAgentCatalog ? selectedAgentIds ?? defaultAgentIds : configuredAgentIds;
+  const defaultAgentIds = configuredDefaultAgentIds.length ? configuredDefaultAgentIds : configuredAgentIds;
+  const agentIds: AgentCatalogId[] = hasAgentCatalog ? selectedAgentIds ?? defaultAgentIds : configuredAgentIds;
   if (!agentIds.length || new Set(agentIds).size !== agentIds.length) {
     throw new LemmaComputerError("AGENT_SELECTION_INVALID", "At least one unique workspace agent must be selected", 400);
   }

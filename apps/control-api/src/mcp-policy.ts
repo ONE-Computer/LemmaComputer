@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   LemmaComputerError,
   canonicalJson,
+  isWorkspaceSelectableAgentCatalogId,
   m365ToolCatalog,
   ownedAgentCatalog,
   type IdentityContext,
@@ -432,7 +433,7 @@ export class McpPolicyService {
     if (!["ready", "open"].includes(workspace.state)) return denied("MCP_WORKSPACE_NOT_READY", capability);
 
     const runtime = runtimePolicyFor(effectivePolicy);
-    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
+    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId));
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
     // Connector credentials and effective policy are user-scoped. Workspace
     // isolation comes from the exact owned lookup above and from the
@@ -583,7 +584,7 @@ export class McpPolicyService {
     if (!effectivePolicy || !workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
     if (!["ready", "open"].includes(workspace.state)) return genericDecision("deny", "MCP_WORKSPACE_NOT_READY");
     const runtime = runtimePolicyFor(effectivePolicy);
-    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id));
+    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId));
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId

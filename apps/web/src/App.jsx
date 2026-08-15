@@ -2046,6 +2046,7 @@ const protectedPolicyAgentNames = {
   "hermes-desktop": "Hermes Desktop",
   "hermes-claw": "Hermes Agent",
 };
+const protectedPolicyPlannedAgents = ["Codex Desktop", "Codex CLI"];
 const protectedPolicyProfileNames = {
   "claude-desktop-standard-v1": "Restricted workspace",
   "disposable-open-v1": "Internet workspace",
@@ -2074,7 +2075,7 @@ function ProtectedPolicyControlGroup({ icon: Icon, title, lines, action }) {
   </div>;
 }
 
-function ProtectedPolicyResourceEditor({ legend, description, values, labels, selected, onChange }) {
+function ProtectedPolicyResourceEditor({ legend, description, values, labels, selected, onChange, planned = [] }) {
   const toggle = (value) => onChange(selected.includes(value)
     ? selected.filter((item) => item !== value)
     : [...selected, value]);
@@ -2084,7 +2085,7 @@ function ProtectedPolicyResourceEditor({ legend, description, values, labels, se
     <div>{values.map((value) => <label key={value} className="workspace-policy-choice">
       <input type="checkbox" checked={selected.includes(value)} onChange={() => toggle(value)} />
       <span><strong>{labels[value] ?? value}</strong><small>{selected.includes(value) ? "Available across the organization" : "Restricted by the organization"}</small></span>
-    </label>)}</div>
+    </label>)}{planned.map((name) => <div key={name} className="workspace-policy-choice unavailable"><span><strong>{name}</strong><small>Coming soon · awaiting governance qualification</small></span></div>)}</div>
   </fieldset>;
 }
 
@@ -2249,7 +2250,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     {editor && <ModalDialog className="workspace-policy-editor-modal" title={latest ? "Edit workspace guardrails" : "Set workspace guardrails"} description="Choose the workspace options available across this organization. Saving creates a new immutable version for every member and workspace." eyebrow={latest ? `Current guardrails v${latest.version}` : "Product defaults active"} labelledBy="workspace-policy-editor-title" onClose={savingPolicy ? () => undefined : () => { setEditor(null); setError(""); }}>
       <div className="workspace-policy-editor-body">
         <ProtectedPolicyResourceEditor legend="Workspace types" description="Choose which workspace types members may use. Restricted workspaces reach only approved destinations; Internet workspaces reach the public web except blocked destinations. Per-workspace exceptions are managed in Network access." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
-        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} />
+        <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} planned={protectedPolicyPlannedAgents} />
         <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(available.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
         <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
         <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>AI usage and data transfer</legend><p>Set organization-wide ceilings for thinking and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
@@ -3073,7 +3074,7 @@ const pendingApplications = [];
 
 const agentChoices = [
   { family: "Claude", choices: [{ catalogId: "claude-desktop", name: "Desktop", status: "available" }, { catalogId: "claude-cli", name: "CLI", status: "available" }] },
-  { family: "OpenAI", choices: [{ name: "Desktop", status: "coming soon" }, { catalogId: "codex-cli", name: "Codex CLI", status: "available" }] },
+  { family: "OpenAI", choices: [{ name: "Codex Desktop", status: "coming soon" }, { name: "Codex CLI", status: "coming soon" }] },
   { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
 ];
 
@@ -3248,7 +3249,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
-              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is not in the approved workspace image yet.</em></span></div>;
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is awaiting governance qualification.</em></span></div>;
             })}</section>)}</div>
             {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>

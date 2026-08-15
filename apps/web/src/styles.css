@@ -6208,6 +6208,8 @@ textarea:focus-visible,
 .workspace-policy-switch { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #dce1e6; border-radius: 8px; background: #fff; }
 .workspace-policy-choice:has(input:checked),
 .workspace-policy-switch:has(input:checked) { border-color: #9eb8d1; background: #f4f8fc; }
+.workspace-policy-choice.unavailable { cursor: default; border-style: dashed; background: #fafafa; }
+.workspace-policy-choice.unavailable strong { color: #606a76; }
 .workspace-policy-choice input,
 .workspace-policy-switch input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #15589b; }
 .workspace-policy-choice span,

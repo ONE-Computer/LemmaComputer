@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
@@ -216,12 +216,13 @@ const defaultApplicationIds = (document: Record<string, unknown>, assigned = ass
 
 const assignedAgentIds = (document: Record<string, unknown>): AgentCatalogId[] => {
   const configured = Array.isArray(document.agents)
-    ? document.agents.filter((item): item is AgentCatalogId => ownedAgentCatalog.some((agent) => agent.id === item))
+    ? document.agents.filter((item): item is AgentCatalogId => isWorkspaceSelectableAgentCatalogId(item) && ownedAgentCatalog.some((agent) => agent.id === item))
     : [{
       "claude-cli-managed-v1": "claude-cli",
       "codex-cli-managed-v1": "codex-cli",
       "hermes-claw-managed-v1": "hermes-claw",
-    }[String(document.agentProfile)] ?? "claude-desktop"] as AgentCatalogId[];
+    }[String(document.agentProfile)] ?? "claude-desktop"]
+      .filter(isWorkspaceSelectableAgentCatalogId) as AgentCatalogId[];
   return configured.length ? configured : ["claude-desktop"];
 };
 
@@ -251,12 +252,13 @@ export const constrainEffectivePolicy = (
   const document = policy.document as Record<string, unknown>;
   const constraints: OrganizationWorkspacePolicyConstraints = organizationPolicy.constraints;
   const workspaceProfiles = constrainAssigned(document.workspaceProfiles, constraints.workspaceProfiles);
-  const agents = constrainAssigned(document.agents, constraints.agents);
+  const agents = constrainAssigned(document.agents, constraints.agents).filter(isWorkspaceSelectableAgentCatalogId);
   const applications = constrainAssigned(document.applications, constraints.applications);
   const modelAliases = constrainAssigned(document.modelAliases, constraints.modelAliases);
   const capabilities = constrainAssigned(document.capabilities, constraints.capabilities);
   const serviceClasses = constrainAssigned(assignedWorkspaceServiceClasses(document), constraints.serviceClasses);
-  const defaultAgents = defaultAgentIds(document, agents as AgentCatalogId[]).filter((id) => agents.includes(id));
+  const constrainedAgentIds = new Set<string>(agents);
+  const defaultAgents = defaultAgentIds(document, agents as AgentCatalogId[]).filter((id) => constrainedAgentIds.has(id));
   const defaultApplications = defaultApplicationIds(document, applications as SandboxApplicationId[]).filter((id) => applications.includes(id));
   const configuredDefaultServiceClass = explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses as ExplicitWorkspaceServiceClass[]);
   const mcp = structuredClone((document.mcp ?? {}) as Record<string, unknown>);
@@ -3357,6 +3359,17 @@ export function createControlServer(
       constraints: organizationWorkspacePolicyConstraintsSchema,
       revisionNote: z.string().trim().min(3).max(240),
     }).parse(request.body ?? {});
+    const configuredAgentIds = [
+      ...(input.constraints.agents?.allow ?? []),
+      ...(input.constraints.agents?.deny ?? []),
+    ];
+    if (configuredAgentIds.some((agentId) => !isWorkspaceSelectableAgentCatalogId(agentId))) {
+      throw new LemmaComputerError(
+        "WORKSPACE_AGENT_NOT_SELECTABLE",
+        "Organization workspace guardrails may include only release-qualified agents",
+        400,
+      );
+    }
     if (input.constraints.maximumReasoningEffort && !["low", "medium", "high"].includes(input.constraints.maximumReasoningEffort)) {
       throw new LemmaComputerError(
         "WORKSPACE_REASONING_LEVEL_NOT_SELECTABLE",
@@ -4192,7 +4205,7 @@ export function createControlServer(
     const serviceClasses = assignedWorkspaceServiceClasses(document);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
-    const agents = Array.isArray(document.agents) ? document.agents : ownedAgentCatalog.map((agent) => agent.id);
+    const agents = assignedAgentIds(document);
     if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
     if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);

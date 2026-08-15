@@ -96,7 +96,7 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   expect((await sentAgain).postDataJSON().requestedServiceClass).toBe("pro");
 });
 
-test("keeps discovery adapters fail closed and binds a qualified effort to the conversation", async ({ page }) => {
+test("keeps unqualified effort controls fail closed and binds a qualified effort to the conversation", async ({ page }) => {
   await page.goto("/?view=chat");
   await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Balanced/ }).click();
   await choose(page, "Choose workspace", "Product");
@@ -104,11 +104,6 @@ test("keeps discovery adapters fail closed and binds a qualified effort to the c
   await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /Hermes Agent CLI · Product · Balanced/ }).click();
-  await choose(page, "Choose chat agent", "Codex CLI");
-  await expect(page.getByRole("button", { name: /Codex CLI · Product · Balanced/ })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveCount(0);
-
-  await page.getByRole("button", { name: /Codex CLI · Product · Balanced/ }).click();
   await choose(page, "Choose chat agent", "Claude Code");
   await page.getByRole("button", { name: /Claude Code · Product · Balanced · Auto thinking/ }).click();
   await expect(page.getByRole("combobox", { name: "Choose thinking effort" })).toHaveText("Auto · follows your organization maximum");

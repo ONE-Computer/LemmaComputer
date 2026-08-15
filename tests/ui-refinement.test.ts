@@ -191,9 +191,13 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
 
 test("workspace options are editable, opt-in, and return to the overview with restart guidance after save", async () => {
   const app = await source("apps/web/src/App.jsx");
-  for (const catalogId of ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"]) {
+  for (const catalogId of ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"]) {
     assert.match(app, new RegExp(`catalogId: "${catalogId}"`));
   }
+  assert.doesNotMatch(app, /catalogId: "codex-cli"/);
+  assert.match(app, /name: "Codex Desktop", status: "coming soon"/);
+  assert.match(app, /name: "Codex CLI", status: "coming soon"/);
+  assert.match(app, /const protectedPolicyPlannedAgents = \["Codex Desktop", "Codex CLI"\]/);
   assert.doesNotMatch(app, /name: "Google Chrome"[\s\S]+Coming soon/);
   assert.match(app, /"visual-studio-code": "Visual Studio Code"/);
   assert.match(app, /obsidian: "Obsidian"/);
