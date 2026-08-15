@@ -46,7 +46,7 @@ const remoteCatalog: CatalogConnector[] = [
     endpointUrl: "https://gmailmcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
     scopes: [],
-    brand: "google",
+    brand: "gmail",
   }),
   remote({
     id: "google-drive",
@@ -60,7 +60,7 @@ const remoteCatalog: CatalogConnector[] = [
     endpointUrl: "https://drivemcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
     scopes: [],
-    brand: "google",
+    brand: "google-drive",
   }),
   remote({
     id: "google-calendar",
@@ -74,7 +74,7 @@ const remoteCatalog: CatalogConnector[] = [
     endpointUrl: "https://calendarmcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
     scopes: [],
-    brand: "google",
+    brand: "google-calendar",
   }),
   remote({
     id: "notion",

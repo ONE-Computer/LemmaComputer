@@ -70,3 +70,25 @@ background; this catalog uses the prescribed white icon container.
 It uses Exa's supplied blue field and white logomark. The Figma and Exa names
 and marks remain the property of their respective owners; inclusion does not
 imply sponsorship or endorsement.
+
+## Official connector assets
+
+The following files are unmodified vendor assets, stored locally so the
+catalog does not depend on a third-party request at render time:
+
+| Local file | Official source |
+| --- | --- |
+| `gmail.png` | <https://ssl.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png> |
+| `google-drive.png` | <https://ssl.gstatic.com/images/branding/product/2x/drive_2020q4_48dp.png> |
+| `google-calendar.png` | <https://ssl.gstatic.com/images/branding/product/2x/calendar_2020q4_48dp.png> |
+| `canva.png` | <https://static.canva.com/domain-assets/canva/static/images/android-192x192-2.png> |
+| `monday.png` | `monday WM_app symbol_default.png` from <https://monday.com/p/wp-content/uploads/2025/01/monday.com-products-assets-archive.zip> |
+| `clickup.svg` | <https://clickup.com/assets/brand/v4/Logomark-gradient.svg> |
+| `calendly.svg` | <https://images.ctfassets.net/k0lk9kiuza3o/3L8hrM2H4gJLD7s2UFhhxE/75734eb6c87362ba5386ef33c4760d3d/Logomark.svg> |
+| `fireflies.svg` | <https://fireflies.ai/api/logos/file/fireflies.svg?prefix=payload%2Flogos> |
+| `alpha-vantage.png` | <https://www.alphavantage.co/logo.png/> |
+| `massive.png` | <https://massive.com/brands/favicon-massive.png> |
+| `intrinio.png` | <https://cdn.prod.website-files.com/617960145ff34fe4a9fe7240/617960145ff34f29b4fe73f7_intrinio_favicon.png> |
+
+Each mark remains the property of its owner and is used only to identify that
+connector; inclusion does not imply sponsorship or endorsement.

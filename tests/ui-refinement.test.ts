@@ -369,18 +369,25 @@ test("built-in connectors use locally served branded icons", async () => {
     source("apps/web/public/connector-icons/exa.svg"),
     source("apps/web/public/connector-icons/figma.svg"),
   ]);
-  const brands = [
-    "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "google", "hubspot", "intercom",
-    "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+  const svgBrands = [
+    "asana", "atlassian", "box", "calendly", "clickup", "cloudflare", "exa", "figma", "fireflies", "github",
+    "google", "hubspot", "intercom", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
   ];
-  assert.match(app, /connectorIconBrands/);
-  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.svg/);
-  await Promise.all(brands.map(async (brand) => {
+  const pngBrands = [
+    "alpha-vantage", "canva", "gmail", "google-calendar", "google-drive", "intrinio", "massive", "monday",
+  ];
+  assert.match(app, /connectorIconFiles/);
+  assert.match(app, /\/connector-icons\/\$\{connectorIconFiles\[iconBrand\]\}/);
+  await Promise.all(svgBrands.map(async (brand) => {
     assert.match(await source("apps/web/public/connector-icons/" + brand + ".svg"), /<svg/);
+  }));
+  await Promise.all(pngBrands.map(async (brand) => {
+    assert.ok((await readFile(new URL("../apps/web/public/connector-icons/" + brand + ".png", import.meta.url))).byteLength > 0);
   }));
   assert.match(styles, /\.connector-mark\.microsoft:not\(\.branded\)/);
   assert.match(styles, /\.connector-mark\.branded img \{ display: block; width: 100%; height: 100%; object-fit: contain; \}/);
   assert.match(styles, /\.connector-mark\.branded\.exa \{ padding: 0; background: #0143d9; \}/);
+  assert.match(styles, /\.connector-mark\.branded\.figma img \{ transform: scale\(1\.35\); \}/);
   assert.match(exa, /<rect width="1024" height="1024" fill="#0143D9"\/>/);
   assert.match(exa, /fill="white"/);
   for (const color of ["#FF3737", "#874FFF", "#24CB71", "#FF7237", "#00B6FF"]) assert.match(figma, new RegExp(color));

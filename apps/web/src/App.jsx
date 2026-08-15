@@ -3455,10 +3455,38 @@ function ApprovalDeviceCard({ displayName }) {
   );
 }
 
-const connectorIconBrands = new Set([
-  "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "hubspot", "intercom",
-  "google", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
-]);
+const connectorIconFiles = {
+  "alpha-vantage": "alpha-vantage.png",
+  asana: "asana.svg",
+  atlassian: "atlassian.svg",
+  box: "box.svg",
+  calendly: "calendly.svg",
+  canva: "canva.png",
+  clickup: "clickup.svg",
+  cloudflare: "cloudflare.svg",
+  exa: "exa.svg",
+  figma: "figma.svg",
+  fireflies: "fireflies.svg",
+  "gmail": "gmail.png",
+  "google-calendar": "google-calendar.png",
+  "google-drive": "google-drive.png",
+  google: "google.svg",
+  github: "github.svg",
+  hubspot: "hubspot.svg",
+  intercom: "intercom.svg",
+  intrinio: "intrinio.png",
+  linear: "linear.svg",
+  massive: "massive.png",
+  microsoft: "microsoft.svg",
+  monday: "monday.png",
+  neon: "neon.svg",
+  notion: "notion.svg",
+  slack: "slack.svg",
+  stripe: "stripe.svg",
+  supabase: "supabase.svg",
+  vercel: "vercel.svg",
+};
+const connectorIconBrands = new Set(Object.keys(connectorIconFiles));
 const connectorCategories = ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];
 
 function ConnectorMark({ connector, large = false }) {
@@ -3468,7 +3496,7 @@ function ConnectorMark({ connector, large = false }) {
   }
   const iconBrand = connectorIconBrands.has(brand) ? brand : connectorIconBrands.has(connector?.id) ? connector.id : null;
   if (iconBrand) {
-    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.svg`} alt="" /></span>;
+    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${connectorIconFiles[iconBrand]}`} alt="" /></span>;
   }
   const fallback = connector?.name?.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
   const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? fallback;

@@ -76,19 +76,22 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(catalog.statusCode, 200);
     const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
-    assert.equal(connectorCards.length, 23);
+    assert.equal(connectorCards.length, 34);
     assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
       ["microsoft-365", "lemmacomputer_ms365"],
+      ["gmail", "lemmacomputer_gmail"],
+      ["google-drive", "lemmacomputer_google_drive"],
+      ["google-calendar", "lemmacomputer_google_calendar"],
       ["notion", "lemmacomputer_notion"],
       ["linear", "lemmacomputer_linear"],
-      ["atlassian", "lemmacomputer_atlassian"],
-      ["asana", "lemmacomputer_asana"],
-      ["figma", "lemmacomputer_figma"],
     ]);
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
     assert.ok(connectorCards.some((connector) => connector.id === "slack"));
     assert.ok(connectorCards.some((connector) => connector.id === "neon"));
     assert.ok(connectorCards.some((connector) => connector.id === "exa" && connector.serverName === "lemmacomputer_exa"));
+    assert.ok(connectorCards.some((connector) => connector.id === "alpha-vantage"));
+    assert.ok(connectorCards.some((connector) => connector.id === "massive"));
+    assert.ok(connectorCards.some((connector) => connector.id === "intrinio"));
     assert.equal(providerStatusCalls, 0, "catalog browsing must not probe a provider connection");
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
