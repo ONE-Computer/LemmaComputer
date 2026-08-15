@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { IdentityContext } from "@lemmacomputer/contracts";
+import { LemmaComputerError, type IdentityContext } from "@lemmacomputer/contracts";
 import {
   MemoryWorkspaceStore,
   type OrganizationWorkspacePolicyVersionRecord,
@@ -12,6 +12,7 @@ import {
 } from "../apps/control-api/src/protected-workspace-policy.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
+import type { GatewayClient } from "@lemmacomputer/litellm-adapter";
 
 const tenantId = "protected-policy-api-tenant";
 const proxyToken = "protected-policy-api-proxy-token-at-least-32-characters";
@@ -51,7 +52,13 @@ const overview = {
   organizationPolicyVersions: [organizationVersion],
 };
 
-const appFor = (actor: SessionPrincipal, calls: Array<{ method: string; input: unknown }>) => {
+const appFor = (
+  actor: SessionPrincipal,
+  calls: Array<{ method: string; input: unknown }>,
+  store = new MemoryWorkspaceStore(),
+  controller = {} as ControllerClient,
+  gateway?: GatewayClient,
+) => {
   const protectedWorkspacePolicy: ProtectedWorkspacePolicyAdministrationBoundary = {
     overview: async (inputTenantId) => {
       calls.push({ method: "overview", input: inputTenantId });
@@ -68,10 +75,10 @@ const appFor = (actor: SessionPrincipal, calls: Array<{ method: string; input: u
     currentOrganizationPolicy: async (inputTenantId) => inputTenantId === tenantId ? organizationVersion : null,
   };
   return createControlServer(
-    new MemoryWorkspaceStore(),
-    {} as ControllerClient,
+    store,
+    controller,
     proxyToken,
-    undefined,
+    gateway,
     undefined,
     {},
     {
@@ -139,6 +146,71 @@ test("organization policy administration exposes the full catalog and append-onl
       } },
       { method: "listOrganizationPolicyVersions", input: tenantId },
     ]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("publishing guardrails stops active tenant workspaces before the version becomes current", async () => {
+  const calls: Array<{ method: string; input: unknown }> = [];
+  const store = new MemoryWorkspaceStore();
+  const created = await store.createOrGet(identity("administrator"), "personal", "policy-transition-workspace");
+  await store.update(created.id, { state: "ready", providerId: "sandbox-policy-transition" });
+  let destroys = 0;
+  let workspaceRevocations = 0;
+  const app = appFor(principal("administrator"), calls, store, {
+    destroyWorkspace: async () => { destroys += 1; },
+  } as unknown as ControllerClient, {
+    revokeWorkspace: async () => { workspaceRevocations += 1; },
+  } as unknown as GatewayClient);
+  const headers = { cookie: "lemmacomputer_session=valid", "x-lemmacomputer-proxy-token": proxyToken };
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/protected-workspace-policy/organization-versions",
+      headers,
+      payload: { constraints: { agents: { allow: ["claude-cli"], deny: [] } }, revisionNote: "Stop before activation" },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.deepEqual(response.json().enforcement, {
+      stopped: 1,
+      alreadyStopped: 0,
+      reconciled: 0,
+      actionRequired: 0,
+    });
+    assert.equal(destroys, 1);
+    assert.equal(workspaceRevocations, 1);
+    const stopped = await store.getOwned(identity("administrator"), created.id);
+    assert.equal(stopped?.state, "stopped");
+    assert.equal(stopped?.providerId, null);
+    assert.equal(stopped?.accessGeneration, 2);
+    assert.equal(calls.at(-1)?.method, "createOrganizationPolicyVersion");
+  } finally {
+    await app.close();
+  }
+});
+
+test("guardrail activation is refused when an existing runtime cannot be revoked", async () => {
+  const calls: Array<{ method: string; input: unknown }> = [];
+  const store = new MemoryWorkspaceStore();
+  const created = await store.createOrGet(identity("administrator"), "personal", "policy-transition-failure");
+  await store.update(created.id, { state: "ready", providerId: "sandbox-policy-transition-failure" });
+  const app = appFor(principal("administrator"), calls, store, {
+    destroyWorkspace: async () => { throw new LemmaComputerError("CONTROLLER_UNAVAILABLE", "controller unavailable", 503, true); },
+  } as unknown as ControllerClient);
+  const headers = { cookie: "lemmacomputer_session=valid", "x-lemmacomputer-proxy-token": proxyToken };
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/protected-workspace-policy/organization-versions",
+      headers,
+      payload: { constraints: { agents: { allow: ["claude-cli"], deny: [] } }, revisionNote: "Must fail closed" },
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.equal(response.json().error.code, "WORKSPACE_POLICY_TRANSITION_FAILED");
+    assert.equal(calls.some((call) => call.method === "createOrganizationPolicyVersion"), false);
   } finally {
     await app.close();
   }

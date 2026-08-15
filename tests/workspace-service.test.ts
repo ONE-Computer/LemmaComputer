@@ -39,6 +39,7 @@ class FakeController implements ControllerClient {
 class FakeGateway implements GatewayClient {
   grants = 0;
   revocations = 0;
+  workspaceRevocations = 0;
   lastPolicy: RuntimePolicy | undefined;
   lastAccessGeneration: number | undefined;
   async ensureGrant(input: Parameters<GatewayClient["ensureGrant"]>[0]): Promise<GatewayGrant> {
@@ -60,7 +61,7 @@ class FakeGateway implements GatewayClient {
     };
   }
   async revoke() { this.revocations += 1; }
-  async revokeWorkspace() { this.revocations += 1; }
+  async revokeWorkspace() { this.revocations += 1; this.workspaceRevocations += 1; }
 }
 
 const fakeModelRoute = {
@@ -197,6 +198,106 @@ test("workspace inventory retains its creation order while polling multiple runn
     secondPoll.map((workspace) => ({ id: workspace.id, updatedAt: workspace.updatedAt })),
     firstPoll.map((workspace) => ({ id: workspace.id, updatedAt: workspace.updatedAt })),
   );
+});
+
+test("workspace inventory quarantines one incompatible workspace without hiding the inventory", async () => {
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(new MemoryWorkspaceStore(), controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "policy-conflict-personal", "correlation-1");
+
+  const inventory = await service.list(alex, async () => {
+    throw new LemmaComputerError(
+      "WORKSPACE_POLICY_SELECTION_REQUIRED",
+      "The saved agent is no longer allowed",
+      409,
+    );
+  });
+
+  assert.equal(inventory.length, 1);
+  assert.equal(inventory[0]?.id, workspace.id);
+  assert.equal(inventory[0]?.state, "stopped");
+  assert.deepEqual(inventory[0]?.policyCompatibility, {
+    state: "action_required",
+    reasonCode: "WORKSPACE_POLICY_SELECTION_REQUIRED",
+  });
+  assert.equal(controller.destroys, 1);
+  assert.equal(gateway.workspaceRevocations, 1);
+});
+
+test("one incompatible workspace does not hide compatible workspace records", async () => {
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(new MemoryWorkspaceStore(), controller, gateway);
+  const incompatible = await service.create(alex, policy, "personal", "policy-conflict-mixed-personal", "correlation-1");
+  const compatible = await service.create(alex, policy, "research", "policy-conflict-mixed-research", "correlation-2");
+
+  const inventory = await service.list(alex, async (grantId) => {
+    if (grantId === "personal") {
+      throw new LemmaComputerError(
+        "WORKSPACE_POLICY_SELECTION_REQUIRED",
+        "The saved agent is no longer allowed",
+        409,
+      );
+    }
+    return policy;
+  });
+
+  assert.equal(inventory.length, 2);
+  assert.equal(inventory.find((workspace) => workspace.id === incompatible.id)?.state, "stopped");
+  assert.deepEqual(inventory.find((workspace) => workspace.id === incompatible.id)?.policyCompatibility, {
+    state: "action_required",
+    reasonCode: "WORKSPACE_POLICY_SELECTION_REQUIRED",
+  });
+  assert.equal(inventory.find((workspace) => workspace.id === compatible.id)?.state, "ready");
+  assert.deepEqual(inventory.find((workspace) => workspace.id === compatible.id)?.policyCompatibility, {
+    state: "current",
+    reasonCode: null,
+  });
+  assert.equal(controller.destroys, 1);
+  assert.equal(gateway.workspaceRevocations, 1);
+});
+
+test("a running workspace with an older projected policy is stopped and revoked before inventory returns", async () => {
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(new MemoryWorkspaceStore(), controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "policy-drift-personal", "correlation-1");
+  controller.status = async (_workspaceId, providerId) => ({
+    providerId,
+    state: "ready",
+    failureCode: null,
+    policyIntegrity: {
+      state: "drift",
+      reasonCode: "POLICY_PROJECTION_DRIFT",
+      expected: { version: 1, digest: "a".repeat(64) },
+      projected: {
+        version: 1,
+        digest: "a".repeat(64),
+        bundleDigest: "c".repeat(64),
+        keyId: "psk_test_policy",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      enforced: null,
+    },
+  });
+  const updatedPolicy = {
+    ...policy,
+    policyVersionId: "policy-version-2",
+    policyVersion: 2,
+    policyHash: "b".repeat(64),
+  };
+
+  const current = await service.current(alex, updatedPolicy);
+
+  assert.equal(current?.id, workspace.id);
+  assert.equal(current?.state, "stopped");
+  assert.deepEqual(current?.policyCompatibility, {
+    state: "restart_required",
+    reasonCode: "WORKSPACE_POLICY_VERSION_CHANGED",
+  });
+  assert.equal(controller.destroys, 1);
+  assert.equal(gateway.workspaceRevocations, 1);
 });
 
 test("workspace lifetime remains UI-managed while its gateway grant can renew", async () => {

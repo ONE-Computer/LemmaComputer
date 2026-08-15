@@ -677,6 +677,10 @@ export const workspaceViewSchema = z.object({
     version: z.number().int().positive(),
     hash: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict().optional(),
+  policyCompatibility: z.object({
+    state: z.enum(["current", "applies_on_next_start", "restart_required", "action_required"]),
+    reasonCode: z.string().min(1).nullable(),
+  }).strict().optional(),
   policyIntegrity: z.lazy(() => policyIntegrityViewSchema).optional(),
   profile: z.object({
     id: z.string().min(1),

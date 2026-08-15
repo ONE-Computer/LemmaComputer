@@ -136,6 +136,7 @@ test("organization workspace managers receive a content-free member-first invent
       profile: { id: "disposable-open-v1", executionMode: "disposable-open" },
       networkAccess: { mode: "full-web", securityGroup: null },
       policyAssignment: { authority: "runtime_policy", version: 7, hash: "a".repeat(64) },
+      policyRuntime: { state: "action_required", reasonCode: "WORKSPACE_POLICY_SELECTION_REQUIRED" },
       lastActivityAt: null,
       lastTransitionAt: body.members[0].workspaces[0].lastTransitionAt,
       createdAt: body.members[0].workspaces[0].createdAt,

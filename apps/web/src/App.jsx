@@ -421,12 +421,17 @@ const workspaceStatus = (state) => ({
 }[state] ?? "Unknown");
 
 const policyStatus = (workspace) => ({
+  current: "Current",
+  applies_on_next_start: "Applies on next start",
+  restart_required: "Restart required",
+  action_required: "Selection required",
+}[workspace.policyCompatibility?.state] ?? ({
   match: "Verified",
   drift: "Mismatch",
   expired: "Refresh required",
   invalid: "Invalid",
   unavailable: "Unverified",
-}[workspace.policyIntegrity?.state] ?? (workspace.policyAssignment ? "Assigned" : "Not assigned"));
+}[workspace.policyIntegrity?.state] ?? (workspace.policyAssignment ? "Assigned" : "Not assigned")));
 
 function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   return (
@@ -484,7 +489,10 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
         <section className="workspace-overview-list" aria-label="Your workspaces">
           {workspaces.map((workspace) => {
             const busy = actionWorkspaceId === workspace.id || busyStates.has(workspace.state);
-            const primaryLabel = ["not_created", "stopped", "failed"].includes(workspace.state)
+            const policyActionRequired = workspace.policyCompatibility?.state === "action_required";
+            const primaryLabel = policyActionRequired
+              ? "Review configuration"
+              : ["not_created", "stopped", "failed"].includes(workspace.state)
               ? "Start workspace"
               : workspace.state === "open" ? "Return to workspace" : busy ? "Preparing workspace" : "Open workspace";
             const model = workspaceModelName(workspace.modelRoute?.alias ?? workspace.profile?.modelAlias ?? "Not assigned");
@@ -515,7 +523,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
                 </div>
 
                 <footer className="workspace-card-actions">
-                  <button className="primary-button" type="button" onClick={() => onOpen(workspace)} disabled={busy}>
+                  <button className="primary-button" type="button" onClick={() => policyActionRequired ? onManage(workspace.grantId) : onOpen(workspace)} disabled={busy || (policyActionRequired && !canManageWorkspace(workspace.id))}>
                     <Open24Regular aria-hidden="true" />{primaryLabel}
                   </button>
                   {canManageWorkspace(workspace.id) && <>
@@ -2094,7 +2102,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [editor, setEditor] = useState(null);
   const [error, setError] = useState("");
-  const [impactConfirmation, setImpactConfirmation] = useState(false);
+  const [impactConfirmation, setImpactConfirmation] = useState(null);
   const load = async () => {
     const policy = await adminApi.protectedWorkspacePolicy();
     setOverview(policy);
@@ -2152,7 +2160,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
       const result = await adminApi.createProtectedOrganizationPolicyVersion(constraints, editor.revisionNote.trim());
       await load();
       setEditor(null);
-      onSaved?.(result.version);
+      await onSaved?.(result);
     } catch (saveError) {
       setError(saveError.message ?? "The workspace guardrails could not be saved.");
     } finally {
@@ -2177,16 +2185,27 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     return `${scope} · ${source}`;
   };
   const internetWorkspaces = affectedWorkspaces.filter(({ workspace }) => workspace.profile?.id === "disposable-open-v1" || workspace.profile?.executionMode === "disposable-open");
+  const runningWorkspaces = affectedWorkspaces.filter(({ workspace }) => ["provisioning", "ready", "open", "restarting"].includes(workspace.state));
   const removesInternetWorkspaceType = assignableWorkspaceProfiles.includes("disposable-open-v1") && !editor?.workspaceProfiles.includes("disposable-open-v1");
   const requestSavePolicy = () => {
-    if (removesInternetWorkspaceType && internetWorkspaces.length > 0) setImpactConfirmation(true);
+    if (runningWorkspaces.length > 0) setImpactConfirmation("runtime");
+    else if (removesInternetWorkspaceType && internetWorkspaces.length > 0) setImpactConfirmation("internet");
     else void savePolicy();
   };
   const workspaceNeedsAttention = (workspace) => {
+    if (workspace.policyRuntime?.state === "action_required") return true;
     const internet = workspace.profile?.id === "disposable-open-v1" || workspace.profile?.executionMode === "disposable-open";
     return internet
       ? !assignableWorkspaceProfiles.includes("disposable-open-v1")
       : !assignableWorkspaceProfiles.includes("claude-desktop-standard-v1");
+  };
+  const workspacePolicyLabel = (workspace) => {
+    if (workspaceNeedsAttention(workspace)) return "Needs attention";
+    if (!latest) return "Product defaults desired";
+    if (workspace.policyRuntime?.state === "applies_on_next_start" || ["stopped", "not_created"].includes(workspace.state)) {
+      return `v${latest.version} applies on next start`;
+    }
+    return `v${latest.version} desired`;
   };
   const needsAttentionCount = affectedWorkspaces.filter(({ workspace }) => workspaceNeedsAttention(workspace)).length;
   const editorBlocker = !editor ? "" : editor.workspaceProfiles.length === 0
@@ -2214,7 +2233,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
     <div className="workspace-policy-impact-summary" aria-label="Guardrail impact">
       <strong>{affectedWorkspaces.length} {affectedWorkspaces.length === 1 ? "workspace" : "workspaces"}</strong>
       <span>{activeMemberCount} active {activeMemberCount === 1 ? "member" : "members"}</span>
-      <span>{needsAttentionCount > 0 ? `${needsAttentionCount} need attention` : latest ? `Guardrails v${latest.version} active` : "Product defaults active"}</span>
+      <span>{needsAttentionCount > 0 ? `${needsAttentionCount} need attention` : latest ? `Guardrails v${latest.version} desired` : "Product defaults desired"}</span>
     </div>
 
     <div className="workspace-policy-overview">
@@ -2226,7 +2245,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
         <ProtectedPolicyControlGroup icon={Document24Regular} title="Data transfer" lines={[protectedPolicyClipboardSummary(effective.clipboard)]} />
       </section>
       <aside className="workspace-policy-context">
-        <section><div className="workspace-policy-context-title"><CheckmarkCircle24Regular aria-hidden="true" /><strong>Guardrail state</strong></div><p><strong>{latest ? `Current · v${latest.version}` : "Current · Product defaults"}</strong></p><p>{latest ? "The latest guardrails apply to every active member and workspace." : "All supported workspace options are available until an administrator saves guardrails."}</p></section>
+        <section><div className="workspace-policy-context-title"><CheckmarkCircle24Regular aria-hidden="true" /><strong>Guardrail state</strong></div><p><strong>{latest ? `Desired · v${latest.version}` : "Desired · Product defaults"}</strong></p><p>{latest ? "Running workspaces are stopped and their access is revoked before a new version becomes active. Stopped workspaces receive it on their next start." : "All supported workspace options are available until an administrator saves guardrails."}</p></section>
         {latest && <section><div className="workspace-policy-context-title"><Document24Regular aria-hidden="true" /><strong>Change summary</strong></div><p>{latest.revisionNote}</p><p>Saved {protectedPolicyDate(latest.createdAt)} by {versionCreator(latest)}.</p></section>}
       </aside>
     </div>
@@ -2237,7 +2256,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
         <div className="workspace-policy-member-header" role="row"><span role="columnheader">Owner</span><span role="columnheader">Workspace</span><span role="columnheader">Type</span><span role="columnheader">Network access</span><span role="columnheader">Guardrails</span></div>
         {affectedWorkspaces.slice(0, 5).map(({ member, workspace }) => <div className="workspace-policy-member-row" role="row" key={workspace.id}>
           <div className="workspace-policy-member-copy" role="cell"><strong>{member.displayName}</strong><small>{member.email}</small></div>
-          <strong role="cell" data-label="Workspace">{workspace.name}</strong><span role="cell" data-label="Type">{workspaceType(workspace)}</span><span role="cell" data-label="Network access">{networkAccess(workspace)}</span><span className={`workspace-policy-state ${workspaceNeedsAttention(workspace) ? "attention" : "current"}`} role="cell" data-label="Guardrails">{workspaceNeedsAttention(workspace) ? "Needs attention" : latest ? `v${latest.version} current` : "Defaults current"}</span>
+          <strong role="cell" data-label="Workspace">{workspace.name}</strong><span role="cell" data-label="Type">{workspaceType(workspace)}</span><span role="cell" data-label="Network access">{networkAccess(workspace)}</span><span className={`workspace-policy-state ${workspaceNeedsAttention(workspace) ? "attention" : "current"}`} role="cell" data-label="Guardrails">{workspacePolicyLabel(workspace)}</span>
         </div>)}
       </div>}
     </section>
@@ -2265,7 +2284,8 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
       {editorBlocker && <p className="workspace-policy-save-guidance" role="status">{editorBlocker}</p>}
       <div className="modal-actions"><button className="secondary-button" type="button" disabled={savingPolicy} onClick={() => { setEditor(null); setError(""); }}>Cancel</button><button className="primary-button" type="button" disabled={!editorReady || savingPolicy} onClick={requestSavePolicy}>{savingPolicy ? "Saving guardrails" : latest ? "Save as new version" : "Save guardrails"}</button></div>
     </ModalDialog>}
-    {impactConfirmation && <ConfirmDialog title={`Restrict ${internetWorkspaces.length} Internet ${internetWorkspaces.length === 1 ? "workspace" : "workspaces"}?`} description="Public-web access will be restricted immediately. The workspace type will not change automatically; affected workspaces will be marked Needs attention until an administrator resolves them." confirmLabel="Save and restrict access" danger onConfirm={() => { setImpactConfirmation(false); void savePolicy(); }} onCancel={() => setImpactConfirmation(false)} />}
+    {impactConfirmation === "runtime" && <ConfirmDialog title={`Stop ${runningWorkspaces.length} running ${runningWorkspaces.length === 1 ? "workspace" : "workspaces"} and apply guardrails?`} description="LemmaComputer will revoke their current access and stop them before activating this version. Compatible agent and application selections are retained; any unresolved selection is marked Needs attention." confirmLabel="Stop workspaces and save" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
+    {impactConfirmation === "internet" && <ConfirmDialog title={`Restrict ${internetWorkspaces.length} Internet ${internetWorkspaces.length === 1 ? "workspace" : "workspaces"}?`} description="Public-web access will be restricted immediately. The workspace type will not change automatically; affected workspaces will be marked Needs attention until an administrator resolves them." confirmLabel="Save and restrict access" danger onConfirm={() => { setImpactConfirmation(null); void savePolicy(); }} onCancel={() => setImpactConfirmation(null)} />}
 
   </section>;
 }
@@ -7265,7 +7285,14 @@ export function App() {
             onWorkspaceNetworkChanged={async () => { await refreshAdminWorkspaceMembers(); setToast("Workspace network access updated."); }}
             onCreateSecurityGroup={() => selectNav("Network access")}
             policyUsers={adminUsers}
-            onGuardrailsSaved={(version) => setToast(`Workspace guardrails v${version.version} saved and active across the organization.`)}
+            onGuardrailsSaved={async ({ version, enforcement }) => {
+              await refreshAdminWorkspaceMembers();
+              setToast(
+                enforcement?.stopped > 0
+                  ? `Workspace guardrails v${version.version} saved. ${enforcement.stopped} running ${enforcement.stopped === 1 ? "workspace was" : "workspaces were"} stopped and must be started again.`
+                  : `Workspace guardrails v${version.version} saved. Stopped workspaces receive it on their next start.`,
+              );
+            }}
           />
         )}
         {activeNav === "Sites" && <SitesScreen

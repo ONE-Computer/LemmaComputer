@@ -122,7 +122,7 @@ test("organization administrator invites a person and manages member access", as
   await expect(agentsAndApplications).not.toContainText("Codex");
   await expect(agentsAndApplications).toContainText("Firefox ESR");
   await expect(page.getByText("Organization connector ceiling", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Current · Product defaults", { exact: true })).toBeVisible();
+  await expect(page.getByText("Desired · Product defaults", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Affected workspaces" })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-policy-unrestricted-default.png", fullPage: true });
 
@@ -153,9 +153,13 @@ test("organization administrator invites a person and manages member access", as
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save guardrails" }).click();
+  const guardrailImpact = page.getByRole("dialog", { name: /Stop \d+ running workspaces and apply guardrails/ });
+  await expect(guardrailImpact).toBeVisible();
+  await guardrailImpact.getByRole("button", { name: "Stop workspaces and save" }).click();
   await expect(page.getByRole("heading", { name: "Workspace guardrails", exact: true })).toBeVisible();
   await expect(page.getByText("v1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Current · v1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Desired · v1", { exact: true })).toBeVisible();
+  await expect(page.getByText(/running workspaces were stopped and must be started again/)).toBeVisible();
   await expect(page.locator(".workspace-policy-context").getByText("Use Claude CLI for organization workspaces", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/workspace-guardrails-v1.png" });
   await page.locator(".workspace-policy-history summary").click();

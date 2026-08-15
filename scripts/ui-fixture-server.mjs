@@ -1911,8 +1911,20 @@ const server = http.createServer((request, response) => {
         createdAt: new Date().toISOString(),
       };
       protectedWorkspacePolicyOverview.organizationPolicyVersions.unshift(version);
+      let stopped = 0;
+      adminUsers = adminUsers.map((user) => ({
+        ...user,
+        workspaces: user.workspaces.map((item) => {
+          if (!["provisioning", "ready", "open", "restarting"].includes(item.state)) return item;
+          stopped += 1;
+          return { ...item, state: "stopped" };
+        }),
+      }));
       response.statusCode = 201;
-      response.end(JSON.stringify({ version }));
+      response.end(JSON.stringify({
+        version,
+        enforcement: { stopped, alreadyStopped: 0, reconciled: stopped, actionRequired: 0 },
+      }));
     });
     return;
   }

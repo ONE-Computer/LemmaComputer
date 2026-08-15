@@ -204,14 +204,14 @@ const assignedApplicationIds = (document: Record<string, unknown>): SandboxAppli
   const configured = Array.isArray(document.applications)
     ? document.applications.filter((item): item is SandboxApplicationId => sandboxApplications.some((application) => application.id === item))
     : ["firefox"] as SandboxApplicationId[];
-  return configured.length ? configured : ["firefox"];
+  return configured;
 };
 
 const defaultApplicationIds = (document: Record<string, unknown>, assigned = assignedApplicationIds(document)): SandboxApplicationId[] => {
   const configured = Array.isArray(document.defaultApplications)
     ? document.defaultApplications.filter((item): item is SandboxApplicationId => assigned.includes(item as SandboxApplicationId))
     : assigned;
-  return configured.length ? configured : [assigned[0]!];
+  return configured.length ? configured : assigned.length ? [assigned[0]!] : [];
 };
 
 const assignedAgentIds = (document: Record<string, unknown>): AgentCatalogId[] => {
@@ -230,7 +230,70 @@ const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedA
   const configured = Array.isArray(document.defaultAgents)
     ? document.defaultAgents.filter((item): item is AgentCatalogId => assigned.includes(item as AgentCatalogId))
     : assigned;
-  return configured.length ? configured : [assigned[0]!];
+  return configured.length ? configured : assigned.length ? [assigned[0]!] : [];
+};
+
+export type CompatibleSandboxSelection = {
+  profileId: SandboxProfileId;
+  applicationIds: SandboxApplicationId[];
+  modelAlias: SandboxModelAlias;
+  requestedServiceClass: ExplicitWorkspaceServiceClass;
+  agentIds: AgentCatalogId[];
+  changed: boolean;
+};
+
+export const compatibleSandboxSelection = (
+  document: Record<string, unknown>,
+  saved: Awaited<ReturnType<NonNullable<WorkspaceStore["getSandboxSettings"]>>> | null | undefined,
+  governedRoutingAvailable: boolean,
+): CompatibleSandboxSelection | null => {
+  const profiles = Array.isArray(document.workspaceProfiles)
+    ? document.workspaceProfiles.filter((value): value is SandboxProfileId => sandboxProfiles.some((profile) => profile.id === value))
+    : typeof document.workspaceProfile === "string" && sandboxProfiles.some((profile) => profile.id === document.workspaceProfile)
+      ? [document.workspaceProfile as SandboxProfileId]
+      : [];
+  const applications = assignedApplicationIds(document);
+  const agents = assignedAgentIds(document);
+  const models = Array.isArray(document.modelAliases)
+    ? document.modelAliases.filter((value): value is SandboxModelAlias => sandboxModels.some((model) => model.alias === value))
+    : ["lemmacomputer-assistant"] as SandboxModelAlias[];
+  const serviceClasses = assignedWorkspaceServiceClasses(document);
+  const profileId = saved
+    ? profiles.includes(saved.profileId) ? saved.profileId : null
+    : profiles[0] ?? null;
+  const applicationIds = saved
+    ? saved.applicationIds.filter((id) => applications.includes(id))
+    : defaultApplicationIds(document, applications);
+  const agentIds = saved
+    ? saved.agentIds.filter((id) => agents.includes(id))
+    : defaultAgentIds(document, agents);
+  const modelAlias = governedRoutingAvailable
+    ? "lemmacomputer-auto" as const
+    : saved ? models.includes(saved.modelAlias) ? saved.modelAlias : null : models[0] ?? null;
+  const requestedServiceClass = saved
+    ? saved.requestedServiceClass === undefined
+      ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
+      : serviceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
+        ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
+        : null
+    : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses);
+  if (!profileId || !applicationIds.length || !agentIds.length || !modelAlias || !requestedServiceClass) return null;
+  return {
+    profileId,
+    applicationIds,
+    modelAlias,
+    requestedServiceClass,
+    agentIds,
+    changed: Boolean(saved && (
+      saved.profileId !== profileId
+      || saved.modelAlias !== modelAlias
+      || saved.requestedServiceClass !== requestedServiceClass
+      || saved.applicationIds.length !== applicationIds.length
+      || saved.applicationIds.some((id, index) => id !== applicationIds[index])
+      || saved.agentIds.length !== agentIds.length
+      || saved.agentIds.some((id, index) => id !== agentIds[index])
+    )),
+  };
 };
 
 const constrainAssigned = <T extends string>(
@@ -1236,29 +1299,36 @@ export function createControlServer(
       const saved = await store.getSandboxSettings?.(value.identity, grantId);
       const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
       const document = effective.document as Record<string, unknown>;
-      const profileId = (saved?.profileId
-        ?? (Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles.find((candidate) => sandboxProfiles.some((profile) => profile.id === candidate)) : undefined)
-        ?? document.workspaceProfile
-        ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
-      const workspaceEgress = await workspaceEgressFor(value, effective, grantId, profileId);
-      const availableAgentIds = assignedAgentIds(document);
-      const availableServiceClasses = assignedWorkspaceServiceClasses(document);
-      const requestedServiceClass = explicitWorkspaceServiceClass(
-        saved?.requestedServiceClass ?? document.defaultServiceClass,
-        availableServiceClasses,
-      );
-      if (!requestedServiceClass) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "The active policy assigns no Phase 0.5 model tier", 403);
+      const selection = compatibleSandboxSelection(document, saved, governedRoutingAvailable);
+      if (!selection) {
+        throw new LemmaComputerError(
+          "WORKSPACE_POLICY_SELECTION_REQUIRED",
+          "This workspace has a saved selection that is no longer allowed. Review its agents and applications before starting it again.",
+          409,
+        );
+      }
+      if (saved && selection.changed && store.saveSandboxSettings) {
+        await store.saveSandboxSettings(value.identity, {
+          grantId,
+          profileId: selection.profileId,
+          applicationIds: selection.applicationIds,
+          modelAlias: selection.modelAlias,
+          requestedServiceClass: selection.requestedServiceClass,
+          agentIds: selection.agentIds,
+        });
+      }
+      const workspaceEgress = await workspaceEgressFor(value, effective, grantId, selection.profileId);
       policy = {
         ...runtimePolicyFor(
           effective,
-          saved?.modelAlias,
-          profileId,
-          saved?.agentIds ?? defaultAgentIds(document, availableAgentIds),
-          saved?.applicationIds ?? defaultApplicationIds(document),
+          selection.modelAlias,
+          selection.profileId,
+          selection.agentIds,
+          selection.applicationIds,
           workspaceEgress,
           governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
         ),
-        requestedServiceClass,
+        requestedServiceClass: selection.requestedServiceClass,
       };
       if (document.maximumEgressMode === "restricted" && policy.egressMode !== "restricted") {
         throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the organization policy", 403);
@@ -2652,6 +2722,7 @@ export function createControlServer(
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const organizationPolicy = await security.protectedWorkspacePolicy?.currentOrganizationPolicy?.(actor.tenantId) ?? null;
+    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
     const managesOrganization = allowsPermission(actor, "workspace.manage");
     const members = (await Promise.all(users.map(async (user) => {
       const targetIdentity = identityContextSchema.parse({
@@ -2686,6 +2757,14 @@ export function createControlServer(
             : workspace.state === "stopped" || workspace.state === "not_created"
               ? "offline"
               : "healthy";
+        const selection = targetEffective
+          ? compatibleSandboxSelection(targetEffective.document as Record<string, unknown>, settings, governedRoutingAvailable)
+          : null;
+        const policyRuntime = !targetEffective || !selection
+          ? { state: "action_required" as const, reasonCode: "WORKSPACE_POLICY_SELECTION_REQUIRED" }
+          : ["stopped", "not_created"].includes(workspace.state)
+            ? { state: "applies_on_next_start" as const, reasonCode: null }
+            : { state: "desired" as const, reasonCode: null };
         return {
           id: workspace.id,
           name: workspace.grantId === "personal"
@@ -2717,6 +2796,7 @@ export function createControlServer(
             version: user.effectivePolicy.version,
             hash: user.effectivePolicy.documentHash,
           } : null,
+          policyRuntime,
           lastActivityAt: lastActivityAt?.toISOString() ?? null,
           lastTransitionAt: workspace.updatedAt.toISOString(),
           createdAt: workspace.createdAt.toISOString(),
@@ -3377,13 +3457,64 @@ export function createControlServer(
         400,
       );
     }
+    const currentWorkspaces = await store.listTenantCurrent(actor.tenantId);
+    const transitionResults = await Promise.allSettled(currentWorkspaces.map(async (workspace) => {
+      const owner = identityContextSchema.parse({
+        tenantId: actor.tenantId,
+        subjectId: workspace.subjectId,
+        audience: "lemmacomputer-control",
+      });
+      return service.suspendForPolicyChange(owner, workspace.id);
+    }));
+    const transitionFailures = transitionResults.filter((result) => result.status === "rejected");
+    if (transitionFailures.length) {
+      throw new LemmaComputerError(
+        "WORKSPACE_POLICY_TRANSITION_FAILED",
+        "The new guardrails were not activated because one or more workspace runtimes could not be stopped and revoked safely.",
+        503,
+        true,
+      );
+    }
     const version = await requireProtectedWorkspacePolicy().createOrganizationPolicyVersion({
       tenantId: actor.tenantId,
       constraints: input.constraints,
       revisionNote: input.revisionNote,
       createdBy: actor.userId,
     });
-    return reply.code(201).send({ version });
+    let reconciled = 0;
+    let actionRequired = 0;
+    if (security.identityPolicyStore) {
+      const users = await security.identityPolicyStore.listUsers(actor.tenantId);
+      const usersById = new Map(users.map((user) => [user.userId, user]));
+      const reconciliation = await Promise.all(currentWorkspaces.map(async (workspace) => {
+        const user = usersById.get(workspace.subjectId);
+        if (!user?.effectivePolicy) return "action_required" as const;
+        const owner = await security.identityPolicyStore!.getPrincipal(user.userId);
+        if (!owner || owner.tenantId !== actor.tenantId) return "action_required" as const;
+        const effective = constrainEffectivePolicy(user.effectivePolicy, version);
+        try {
+          await policyForGrant(owner, effective, workspace.grantId);
+          return "reconciled" as const;
+        } catch {
+          // The version is already immutable and current. A settings write or
+          // selection conflict must remain visible as per-workspace action,
+          // rather than turning a successful policy commit into an ambiguous
+          // request failure.
+          return "action_required" as const;
+        }
+      }));
+      reconciled = reconciliation.filter((result) => result === "reconciled").length;
+      actionRequired = reconciliation.filter((result) => result === "action_required").length;
+    }
+    return reply.code(201).send({
+      version,
+      enforcement: {
+        stopped: transitionResults.filter((result) => result.status === "fulfilled" && result.value.stopped).length,
+        alreadyStopped: transitionResults.filter((result) => result.status === "fulfilled" && !result.value.stopped).length,
+        reconciled,
+        actionRequired,
+      },
+    });
   });
   app.post<{ Params: { userId: string } }>("/v1/admin/users/:userId/policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");

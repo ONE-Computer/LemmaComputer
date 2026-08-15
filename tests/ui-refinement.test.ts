@@ -418,7 +418,9 @@ test("administration keeps identity in People and access while workspace operati
   assert.match(app, /Workspace guardrails/);
   assert.match(app, /Affected workspaces/);
   assert.match(app, /Applies to all \$\{activeMemberCount\} active/);
-  assert.match(app, /Workspace guardrails v\$\{version\.version\} saved and active across the organization/);
+  assert.match(app, /Workspace guardrails v\$\{version\.version\} saved/);
+  assert.match(app, /Stop workspaces and save/);
+  assert.match(app, /applies on next start/);
   assert.doesNotMatch(app, /Locked baseline|Baseline only|Office worker baseline/);
   assert.doesNotMatch(app, /Organization connector ceiling|Open Connectors policy/);
   assert.doesNotMatch(app, /Member policy status|Assign policy|Revoke workspace access/);

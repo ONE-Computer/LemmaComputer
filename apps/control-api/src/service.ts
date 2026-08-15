@@ -184,6 +184,7 @@ export const toView = (
   gateway?: GatewayReadiness,
   policy?: RuntimePolicy,
   policyIntegrity?: PolicyIntegrityView,
+  policyCompatibility?: WorkspaceView["policyCompatibility"],
 ): WorkspaceView => ({
   id: record.id,
   grantId: record.grantId,
@@ -211,6 +212,7 @@ export const toView = (
     version: policy.policyVersion,
     hash: policy.policyHash,
   } } : {}),
+  ...(policyCompatibility ? { policyCompatibility } : {}),
   ...(policy ? { profile: {
     id: policy.workspaceProfile,
     ...profileClient(policy.workspaceProfile),
@@ -340,9 +342,51 @@ export class WorkspaceService {
 
   private async view(record: WorkspaceRecord, policy: RuntimePolicy, enforced?: VerifiedPolicyBundle, projected?: PolicyIntegrityView) {
     const integrity = this.integrityFor(policy, enforced, projected);
-    if (!this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity);
+    const compatibility = integrity?.state === "drift"
+      ? { state: "restart_required" as const, reasonCode: integrity.reasonCode }
+      : ["not_created", "stopped"].includes(record.state)
+        ? { state: "applies_on_next_start" as const, reasonCode: null }
+        : { state: "current" as const, reasonCode: null };
+    if (!this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity, compatibility);
     const gateway = await this.gateway.readiness(record.id, policy.agentId, policy, record.accessGeneration).catch(() => undefined);
-    return toView(record, gateway, policy, integrity);
+    return toView(record, gateway, policy, integrity, compatibility);
+  }
+
+  async suspendForPolicyChange(identity: IdentityContext, workspaceId: string) {
+    const record = await this.owned(identity, workspaceId);
+    if (["not_created", "stopped"].includes(record.state)) {
+      await this.gateway?.revokeWorkspace(record.id, record.accessGeneration);
+      return { stopped: false, workspace: record };
+    }
+    const claimed = await this.store.claim(
+      record.id,
+      ["ready", "open", "provisioning", "restarting", "failed"],
+      "stopping",
+    );
+    if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "The workspace must finish its current operation before guardrails can change", 409, true);
+    const previousGeneration = claimed.accessGeneration;
+    let providerDestroyed = !claimed.providerId;
+    try {
+      await this.store.revokeAccessGrants(claimed.id);
+      if (claimed.providerId) {
+        await this.controller.destroyWorkspace(claimed.id, claimed.providerId);
+        providerDestroyed = true;
+      }
+      await this.gateway?.revokeWorkspace(claimed.id, previousGeneration);
+      const stopped = await this.store.finish(claimed.id, claimed.operationToken!, {
+        state: "stopped",
+        providerId: null,
+        failureCode: null,
+      });
+      return { stopped: true, workspace: stopped };
+    } catch (error) {
+      await this.store.finish(claimed.id, claimed.operationToken!, {
+        state: "failed",
+        providerId: providerDestroyed ? null : claimed.providerId,
+        failureCode: "POLICY_TRANSITION_CLEANUP_FAILED",
+      });
+      throw error;
+    }
   }
 
   async current(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
@@ -366,6 +410,36 @@ export class WorkspaceService {
       }
     }
     const projectedPolicy = projectedIntegrity?.projected;
+    if (
+      record.providerId
+      && ["ready", "open"].includes(record.state)
+      && projectedPolicy
+      && (
+        projectedPolicy.version !== policy.policyVersion
+        || projectedPolicy.digest !== policy.policyHash
+      )
+    ) {
+      let transition: Awaited<ReturnType<WorkspaceService["suspendForPolicyChange"]>>;
+      try {
+        transition = await this.suspendForPolicyChange(identity, record.id);
+      } catch {
+        const failed = await this.store.getOwned(identity, record.id) ?? record;
+        return toView(
+          failed,
+          undefined,
+          policy,
+          this.integrityFor(policy, undefined, projectedIntegrity),
+          { state: "action_required", reasonCode: "POLICY_TRANSITION_CLEANUP_FAILED" },
+        );
+      }
+      return toView(
+        transition.workspace,
+        undefined,
+        policy,
+        this.integrityFor(policy, undefined, projectedIntegrity),
+        { state: "restart_required", reasonCode: "WORKSPACE_POLICY_VERSION_CHANGED" },
+      );
+    }
     if (
       record.providerId
       && ["ready", "open"].includes(record.state)
@@ -394,7 +468,26 @@ export class WorkspaceService {
 
   async list(identity: IdentityContext, policyForGrant: (grantId: string) => Promise<RuntimePolicy>) {
     const records = await this.store.listCurrent(identity);
-    const views = await Promise.all(records.map(async (record) => this.current(identity, await policyForGrant(record.grantId), record.grantId)));
+    const views = await Promise.all(records.map(async (record) => {
+      try {
+        return await this.current(identity, await policyForGrant(record.grantId), record.grantId);
+      } catch (error) {
+        if (!(error instanceof LemmaComputerError) || ![
+          "AGENT_NOT_ASSIGNED",
+          "APPLICATION_NOT_ASSIGNED",
+          "MODEL_NOT_ASSIGNED",
+          "PROFILE_NOT_ASSIGNED",
+          "SERVICE_CLASS_NOT_ASSIGNED",
+          "WORKSPACE_POLICY_SELECTION_REQUIRED",
+        ].includes(error.code)) throw error;
+        await this.suspendForPolicyChange(identity, record.id).catch(() => undefined);
+        const latest = await this.store.getOwned(identity, record.id) ?? record;
+        return toView(latest, undefined, undefined, undefined, {
+          state: "action_required",
+          reasonCode: error.code,
+        });
+      }
+    }));
     return views.filter((view): view is NonNullable<typeof view> => Boolean(view));
   }
 
