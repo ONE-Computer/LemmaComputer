@@ -4200,6 +4200,7 @@ textarea:focus-visible,
 .connector-mark.uploaded img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .connector-mark.branded { overflow: hidden; padding: 5px; background: #fff; }
 .connector-mark.branded img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.connector-mark.branded.exa { padding: 0; background: #0143d9; }
 
 .connector-catalog-copy {
   min-width: 0;

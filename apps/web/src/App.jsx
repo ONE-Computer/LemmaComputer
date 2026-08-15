@@ -3459,7 +3459,6 @@ const connectorIconBrands = new Set([
   "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "hubspot", "intercom",
   "google", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
 ]);
-const connectorIconExtensions = { exa: "png" };
 const connectorCategories = ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];
 
 function ConnectorMark({ connector, large = false }) {
@@ -3469,8 +3468,7 @@ function ConnectorMark({ connector, large = false }) {
   }
   const iconBrand = connectorIconBrands.has(brand) ? brand : connectorIconBrands.has(connector?.id) ? connector.id : null;
   if (iconBrand) {
-    const extension = connectorIconExtensions[iconBrand] ?? "svg";
-    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.${extension}`} alt="" /></span>;
+    return <span className={`connector-mark branded ${iconBrand}${large ? " large" : ""}`} aria-hidden="true"><img src={`/connector-icons/${iconBrand}.svg`} alt="" /></span>;
   }
   const fallback = connector?.name?.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
   const glyph = { notion: "N", linear: "L", atlassian: "A", github: "GH" }[brand] ?? fallback;

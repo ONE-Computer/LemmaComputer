@@ -363,24 +363,27 @@ test("the account menu gateways administrators to the AI control plane without a
 });
 
 test("built-in connectors use locally served branded icons", async () => {
-  const [app, styles] = await Promise.all([
+  const [app, styles, exa, figma] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
+    source("apps/web/public/connector-icons/exa.svg"),
+    source("apps/web/public/connector-icons/figma.svg"),
   ]);
   const brands = [
-    "asana", "atlassian", "box", "cloudflare", "figma", "github", "hubspot", "intercom",
+    "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "google", "hubspot", "intercom",
     "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
   ];
-  const exaIcon = await readFile(new URL("../apps/web/public/connector-icons/exa.png", import.meta.url));
   assert.match(app, /connectorIconBrands/);
-  assert.match(app, /const connectorIconExtensions = \{ exa: "png" \}/);
-  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.\$\{extension\}/);
-  assert.deepEqual([...exaIcon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.match(app, /\/connector-icons\/\$\{iconBrand\}\.svg/);
   await Promise.all(brands.map(async (brand) => {
     assert.match(await source("apps/web/public/connector-icons/" + brand + ".svg"), /<svg/);
   }));
   assert.match(styles, /\.connector-mark\.microsoft:not\(\.branded\)/);
   assert.match(styles, /\.connector-mark\.branded img \{ display: block; width: 100%; height: 100%; object-fit: contain; \}/);
+  assert.match(styles, /\.connector-mark\.branded\.exa \{ padding: 0; background: #0143d9; \}/);
+  assert.match(exa, /<rect width="1024" height="1024" fill="#0143D9"\/>/);
+  assert.match(exa, /fill="white"/);
+  for (const color of ["#FF3737", "#874FFF", "#24CB71", "#FF7237", "#00B6FF"]) assert.match(figma, new RegExp(color));
 });
 
 

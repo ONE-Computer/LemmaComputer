@@ -53,6 +53,16 @@ const exaConnector = {
   },
 };
 
+const figmaConnector = {
+  ...exaConnector,
+  id: "figma",
+  serverName: "lemmacomputer_figma",
+  name: "Figma",
+  shortDescription: "Use design context from Figma files",
+  category: "Productivity",
+  brand: "figma",
+};
+
 const officeAndFinanceConnectors = [
   {
     ...exaConnector,
@@ -312,9 +322,9 @@ test("a stale tool-policy save fails visibly instead of overwriting a newer vers
   await expect(page.getByRole("button", { name: "Save tool permissions" })).toBeEnabled();
 });
 
-test("Exa appears as an available built-in connector in the Search category", async ({ page }) => {
+test("Exa and Figma use their locally served official marks", async ({ page }) => {
   await page.route("**/api/v1/connections", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [exaConnector] }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [exaConnector, figmaConnector] }) });
   });
 
   await page.goto("/");
@@ -324,8 +334,12 @@ test("Exa appears as an available built-in connector in the Search category", as
   await expect(search).toBeVisible();
   await expect(search.getByRole("heading", { name: "Exa" })).toBeVisible();
   await expect(search.getByText("Search the web")).toBeVisible();
-  await expect(search.locator(".connector-mark.exa img")).toHaveAttribute("src", "/connector-icons/exa.png");
+  await expect(search.locator(".connector-mark.exa img")).toHaveAttribute("src", "/connector-icons/exa.svg");
   await expect(search.getByRole("button", { name: "Connect" })).toBeEnabled();
+
+  const productivity = page.getByRole("region", { name: "Productivity" });
+  await expect(productivity.getByRole("heading", { name: "Figma" })).toBeVisible();
+  await expect(productivity.locator(".connector-mark.figma img")).toHaveAttribute("src", "/connector-icons/figma.svg");
 });
 
 test("office and finance catalog cards are available in their respective categories", async ({ page }) => {

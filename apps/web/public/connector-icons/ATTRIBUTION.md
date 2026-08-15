@@ -16,7 +16,6 @@ and colored with the hex value published for that icon in the same release:
 | `atlassian.svg` | `atlassian` | <https://atlassian.design/resources/logo-library> |
 | `box.svg` | `box` | <https://www.box.com/en-gb/about-us/press> |
 | `cloudflare.svg` | `cloudflare` | <https://www.cloudflare.com/logo/> |
-| `figma.svg` | `figma` | <https://www.figma.com/using-the-figma-brand/> |
 | `google.svg` | `google` | <https://partnermarketinghub.withgoogle.com> |
 | `github.svg` | `github` | <https://github.com/logos> |
 | `hubspot.svg` | `hubspot` | <https://www.hubspot.com/style-guide> |
@@ -59,10 +58,15 @@ The Microsoft mark is proprietary and must not be altered. Usage is subject to
 Microsoft's published guidance:
 <https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps>.
 
-## Exa
+## Figma and Exa
 
-`exa.png` is the user-supplied Exa mark added for the built-in Exa connector.
-Its recorded SHA-256 digest at inclusion is
-`98790e3a63d481922dc7a8e02eccc7afea130355021e8eff742811759e54732f`.
-The Exa name and mark remain the property of Exa Labs, Inc.; inclusion does not
+`figma.svg` is the unmodified full-color Figma Icon supplied in Figma's
+[official newsroom asset archive](https://cdn.sanity.io/files/599r6htc/regionalized/882d4819e925e11e2ec094baef4cee0947869d61.zip).
+Figma requires the full-color icon to appear only on a white or black
+background; this catalog uses the prescribed white icon container.
+
+`exa.svg` is the unmodified square icon from Exa's
+[official brand-asset archive](https://exa.ai/assets/Exa%20Brand%20Assets.zip).
+It uses Exa's supplied blue field and white logomark. The Figma and Exa names
+and marks remain the property of their respective owners; inclusion does not
 imply sponsorship or endorsement.
