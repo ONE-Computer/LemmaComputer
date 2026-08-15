@@ -555,6 +555,64 @@ startup needs more time; do not use it to hide an entrypoint, resource, policy,
 or device preflight failure. Release verification performs a real Hermes
 workspace create/readiness/destroy smoke against the built image.
 
+### Changing organization workspace guardrails
+
+Publishing organization guardrails forcibly moves every existing tenant
+workspace to a safe boundary before the new immutable version becomes current.
+Treat this as a disruptive security operation, even when the proposed change
+looks additive: running, provisioning, restarting, and failed workspaces are
+stopped, their current access is revoked, and users must start them again.
+
+Before saving:
+
+1. Review the **Affected workspaces** inventory and resolve any workspace already
+   marked **Needs attention**.
+2. Tell active users that their desktop session will end. Use a maintenance
+   window when several workspaces are running or long tasks may be interrupted,
+   and coordinate so users do not start or restart workspaces during
+   publication.
+3. Confirm the proposed agent and application allowlists retain at least one
+   complete choice for the intended workspace configurations.
+4. Enter a change summary that explains the security or operational reason for
+   the immutable version.
+
+When an affected workspace is not already stopped, the UI presents **Stop
+affected workspaces and save**. Cancelling that dialog makes no change. On
+confirmation, Control revokes access and destroys the affected runtimes before
+creating the version. A successful response reports four counts:
+
+- `stopped`: runtimes stopped during this publication;
+- `alreadyStopped`: workspaces that required revocation but no provider
+  destruction;
+- `reconciled`: saved configurations reduced safely to the newly allowed
+  choices; and
+- `actionRequired`: configurations that need an explicit replacement choice.
+
+After publication, verify the administration inventory rather than relying on
+the success toast alone:
+
+- stopped workspaces should show **applies on next start**;
+- an incompatible selection should show **Needs attention** and remain visible;
+- **Review configuration** should lead to a complete allowed selection; and
+- a restarted workspace should receive the new policy version and digest.
+
+If Control returns `WORKSPACE_POLICY_TRANSITION_FAILED`, no new version was
+created. Some workspaces may already have been stopped because provider cleanup
+cannot be one transaction across nodes. Do not restore access manually or
+reuse an old launch URL. Inspect the workspace/controller failure, wait for any
+`stopping` operation to settle, verify provider destruction and gateway health,
+then retry the same proposed version. Already-stopped workspaces follow the
+idempotent revocation path on retry.
+
+If a workspace reports `WORKSPACE_POLICY_SELECTION_REQUIRED`, choose at least
+one allowed application and agent plus an allowed workspace type and service
+level, save the workspace configuration, and start it again. Do not edit the
+database to preserve an option removed by organization policy.
+
+The normative sequence, fail-closed guarantee, distributed-operation limit,
+and compatibility states are defined in
+[Workspace guardrail reconciliation](../architecture/workspace-guardrail-reconciliation.md).
+
 ## Start and stop
 
 Validate interpolation and schema before any mutation:

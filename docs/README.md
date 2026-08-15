@@ -54,6 +54,10 @@ How the system is built and why. Read `overview.md` first.
   and the membership authorization boundary.
 - [Workspace node deployment](architecture/workspace-node.md) — the normative
   remote-node network, mTLS, storage, purge, and qualification contract.
+- [Workspace guardrail reconciliation](architecture/workspace-guardrail-reconciliation.md)
+  — the forced suspension, grant revocation, immutable publication, compatible-
+  selection reconciliation, and recovery contract for organization guardrail
+  updates.
 
 ## Guides
 
@@ -149,6 +153,9 @@ supersession so future maintainers can understand the decision history.
 - [ADR 0004 — Better Auth adoption and qualification](adr/0004-better-auth-adoption-and-qualification.md):
   provider-neutral principal and session contracts, threat model, database and
   recovery operations, exact pins, and downstream qualification evidence.
+- [ADR 0005 — catalog-gated Electron sandbox profiles](adr/0005-catalog-gated-electron-sandbox.md):
+  why the namespace exception is limited to release-qualified applications and
+  arbitrary user-installed Electron apps do not inherit it.
 
 ## Reports
 

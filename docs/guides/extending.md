@@ -189,6 +189,12 @@ Application and agent support spans both build-time software and runtime policy.
 7. Remove self-update, telemetry, credential storage, and extension paths that
    would escape organizational policy.
 
+For an Electron or Chromium application, follow the qualification contract in
+[ADR 0005](../adr/0005-catalog-gated-electron-sandbox.md#application-qualification-contract).
+Do not make an arbitrary downloaded binary eligible for the Electron profile,
+and do not widen AppArmor, seccomp, capabilities, or device access merely to
+make an unqualified build start.
+
 ### Control and chat
 
 For a chat-capable agent:

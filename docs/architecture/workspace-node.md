@@ -36,6 +36,12 @@ layers as well as in the governed proxy.
 
 ## Chromium and Electron process sandbox
 
+The application boundary and reasons for catalog gating are recorded in
+[ADR 0005](../adr/0005-catalog-gated-electron-sandbox.md). The profile below is
+not a general-purpose compatibility mode: only release-qualified application
+identifiers can select it, and software installed inside a workspace cannot
+change the enforced container profile.
+
 Chrome, Visual Studio Code, and Obsidian must run with their upstream Chromium
 sandbox enabled. A workspace that selects any of those applications receives
 the fixed `lemmacomputer-workspace-electron` AppArmor profile. The profile
