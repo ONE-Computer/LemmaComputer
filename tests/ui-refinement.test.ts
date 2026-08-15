@@ -197,6 +197,9 @@ test("workspace options are editable, opt-in, and return to the overview with re
   assert.doesNotMatch(app, /catalogId: "codex-cli"/);
   assert.match(app, /name: "Codex Desktop", status: "coming soon"/);
   assert.match(app, /name: "Codex CLI", status: "coming soon"/);
+  assert.match(app, /Disabled by organization policy/);
+  assert.match(app, /This client is not allowed by the active organization policy\./);
+  assert.match(app, /This client is awaiting governance qualification\./);
   assert.match(app, /const protectedPolicyPlannedAgents = \["Codex Desktop", "Codex CLI"\]/);
   assert.doesNotMatch(app, /name: "Google Chrome"[\s\S]+Coming soon/);
   assert.match(app, /"visual-studio-code": "Visual Studio Code"/);

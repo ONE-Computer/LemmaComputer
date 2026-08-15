@@ -3078,6 +3078,10 @@ const agentChoices = [
   { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
 ];
 
+const unavailableAgentCopy = (choice) => choice.status === "available"
+  ? { status: "Disabled by organization policy", detail: "This client is not allowed by the active organization policy." }
+  : { status: "Coming soon", detail: "This client is awaiting governance qualification." };
+
 const workspaceName = (workspace) => workspace?.grantId === "personal"
   ? "Acme Workspace"
   : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Restricted workspace";
@@ -3249,7 +3253,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
-              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>Coming soon</small><em>This client is awaiting governance qualification.</em></span></div>;
+              const unavailableCopy = unavailableAgentCopy(choice);
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
             })}</section>)}</div>
             {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
           </section>

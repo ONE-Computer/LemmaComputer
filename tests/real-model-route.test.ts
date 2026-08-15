@@ -165,6 +165,8 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   const claudeConfig = await source("docker/workspace/lemmacomputer-claude-config.py");
   const proxy = await source("docker/workspace/lemmacomputer-gateway-proxy.py");
   const desktopLauncher = await source("docker/workspace/lemmacomputer-claude-desktop");
+  const claudeDesktopEntry = await source("docker/workspace/claude-desktop.desktop");
+  const visualStudioCodeDesktopEntry = await source("docker/workspace/visual-studio-code.desktop");
   assert.match(dockerfile, /CLAUDE_DESKTOP_VERSION=1\.22209\.3/);
   assert.match(dockerfile, /CLAUDE_DESKTOP_SHA256=d427f46a/);
   assert.match(dockerfile, /CLAUDE_CODE_VERSION=2\.1\.215/);
@@ -224,6 +226,8 @@ test("Claude Desktop is pinned and receives managed gateway policy rather than p
   assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_OPUS_MODEL="\$code_model"/);
   assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_SONNET_MODEL="\$code_model"/);
   assert.match(desktopLauncher, /ANTHROPIC_DEFAULT_HAIKU_MODEL="\$code_model"/);
+  assert.match(claudeDesktopEntry, /^Icon=claude-desktop$/m);
+  assert.match(visualStudioCodeDesktopEntry, /^Icon=vscode$/m);
   assert.match(proxy, /"\/mcp-rest\/tools\/call"/);
   assert.match(proxy, /UPLOAD_CHUNK_BYTES = 10 \* 1024 \* 1024/);
   assert.match(proxy, /content-range.*bytes \{offset\}-\{end\}\/\{job\['size'\]\}/s);

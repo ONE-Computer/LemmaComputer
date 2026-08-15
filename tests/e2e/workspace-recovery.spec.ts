@@ -211,3 +211,29 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
   await expect(page.getByRole("radiogroup", { name: "Default model mode" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
 });
+
+test("workspace configuration distinguishes policy-disabled agents from unqualified clients", async ({ page }) => {
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        agentIds: payload.agentIds.filter((id: string) => id !== "claude-cli"),
+        availableAgents: payload.availableAgents.filter((agent: { id: string }) => agent.id !== "claude-cli"),
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const claudeCli = page.locator(".agent-family").filter({ hasText: "Claude" }).locator(".agent-choice.unavailable").filter({ hasText: "CLI" });
+  await expect(claudeCli).toContainText("Disabled by organization policy");
+  await expect(claudeCli).toContainText("This client is not allowed by the active organization policy.");
+
+  const codexCli = page.locator(".agent-family").filter({ hasText: "OpenAI" }).locator(".agent-choice.unavailable").filter({ hasText: "Codex CLI" });
+  await expect(codexCli).toContainText("Coming soon");
+  await expect(codexCli).toContainText("This client is awaiting governance qualification.");
+});
