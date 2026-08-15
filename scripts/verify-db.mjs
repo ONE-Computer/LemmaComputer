@@ -157,6 +157,7 @@ try {
     "tests/schedules-postgres.test.ts",
     "tests/usage-ledger-postgres.test.ts",
     "tests/routing-postgres.test.ts",
+    "tests/governed-operation-retention-postgres.test.ts",
     "tests/openvtc-companion-push-postgres.test.ts",
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",

@@ -1915,7 +1915,7 @@ export type McpPolicyDecision = z.infer<typeof mcpPolicyDecisionSchema>;
 
 export const operationViewSchema = z.object({
   id: z.uuid(),
-  workspaceId: z.uuid(),
+  workspaceId: z.uuid().nullable(),
   agentId: z.string().min(1).nullable(),
   agentInstanceId: z.uuid().nullable(),
   policyVersionId: z.string().min(1).nullable(),

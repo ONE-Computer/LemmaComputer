@@ -822,6 +822,10 @@ export class GovernedOperationService {
     if (!claimed || claimed.leaseId !== leaseId) {
       throw new LemmaComputerError("UPLOAD_ALREADY_STARTED", "The resumable upload has already started", 409);
     }
+    if (!claimed.workspaceId) {
+      await this.store.failExecution(identity, claimed.id, leaseId, "WORKSPACE_DELETED", correlationId, "The approved workspace no longer exists");
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "The approved workspace no longer exists", 404);
+    }
     try {
       const accessGeneration = await this.activeAccessGeneration(identity, claimed.workspaceId);
       const result = await this.executor.executeGovernedTool({
@@ -916,6 +920,10 @@ export class GovernedOperationService {
     const claimed = await this.store.claimExecution(identity, operationId, leaseId, leaseExpiresAt, correlationId);
     if (!claimed) throw new LemmaComputerError("OPERATION_NOT_FOUND", "Governed operation not found", 404);
     if (claimed.leaseId !== leaseId) return this.waitForConcurrentExecution(identity, operationId);
+    if (!claimed.workspaceId) {
+      await this.store.failExecution(identity, claimed.id, leaseId, "WORKSPACE_DELETED", correlationId, "The approved workspace no longer exists");
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "The approved workspace no longer exists", 404);
+    }
     try {
       const accessGeneration = await this.activeAccessGeneration(identity, claimed.workspaceId);
       const result = await this.executor.executeGovernedTool({

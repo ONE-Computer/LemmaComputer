@@ -191,7 +191,7 @@ export type GovernedOperationRecord = {
   id: string;
   tenantId: string;
   subjectId: string;
-  workspaceId: string;
+  workspaceId: string | null;
   agentId: string | null;
   agentInstanceId: string | null;
   policyVersionId: string | null;
@@ -222,9 +222,10 @@ export type GovernedOperationRecord = {
 };
 
 export type CreateGovernedOperationRecord = Omit<GovernedOperationRecord,
-  "tenantId" | "subjectId" | "agentId" | "agentInstanceId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "failureSummary" | "createdAt" | "updatedAt" | "approval" | "receipt"
+  "tenantId" | "subjectId" | "workspaceId" | "agentId" | "agentInstanceId" | "policyVersionId" | "policyHash" | "state" | "policyDecision" | "leaseId" | "leaseExpiresAt" | "dispatchStartedAt" | "failureCode" | "failureSummary" | "createdAt" | "updatedAt" | "approval" | "receipt"
 > & {
   identity: IdentityContext;
+  workspaceId: string;
   agentId?: string;
   agentInstanceId?: string;
   policyVersionId?: string;
@@ -625,7 +626,7 @@ const mapOperationRow = (row: Record<string, unknown>): GovernedOperationRecord 
   id: String(row.id),
   tenantId: String(row.tenant_id),
   subjectId: String(row.subject_id),
-  workspaceId: String(row.workspace_id),
+  workspaceId: row.workspace_id ? String(row.workspace_id) : null,
   agentId: row.agent_id ? String(row.agent_id) : null,
   agentInstanceId: row.agent_instance_id ? String(row.agent_instance_id) : null,
   policyVersionId: row.policy_version_id ? String(row.policy_version_id) : null,
@@ -2498,7 +2499,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async remove(identity: IdentityContext, workspaceId: string) {
     if (!await this.getOwned(identity, workspaceId)) return false;
     for (const [operationId, operation] of this.operations) {
-      if (operation.workspaceId === workspaceId) this.operations.delete(operationId);
+      if (operation.workspaceId === workspaceId) this.operations.set(operationId, { ...operation, workspaceId: null });
     }
     this.activityEvents = this.activityEvents.filter((event) => event.workspaceId !== workspaceId);
     return this.records.delete(workspaceId);
