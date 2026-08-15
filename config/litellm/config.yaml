@@ -91,6 +91,36 @@ mcp_servers:
       - read:user
       - user:email
     available_on_public_internet: true
+  # Google Workspace remote MCP servers require a separately registered
+  # Google OAuth client. Keep it distinct from social sign-in so scopes,
+  # redirect URIs, consent, and rotation can be reviewed independently.
+  lemmacomputer_gmail:
+    transport: http
+    url: https://gmailmcp.googleapis.com/mcp/v1
+    description: Official Google Workspace Gmail remote MCP connector
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
+    client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
+    available_on_public_internet: true
+  lemmacomputer_google_drive:
+    transport: http
+    url: https://drivemcp.googleapis.com/mcp/v1
+    description: Official Google Workspace Drive remote MCP connector
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
+    client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
+    available_on_public_internet: true
+  lemmacomputer_google_calendar:
+    transport: http
+    url: https://calendarmcp.googleapis.com/mcp/v1
+    description: Official Google Workspace Calendar remote MCP connector
+    auth_type: oauth2
+    oauth2_flow: authorization_code
+    client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
+    client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
+    available_on_public_internet: true
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

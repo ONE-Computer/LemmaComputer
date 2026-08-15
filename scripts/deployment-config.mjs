@@ -148,6 +148,8 @@ const sections = [
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_ID", "", "Dedicated Microsoft 365 MCP Entra client ID, or blank to reuse the Web sign-in app."),
     variable("LEMMACOMPUTER_MS365_CLIENT_SECRET", "", "Dedicated Microsoft 365 MCP Entra client secret, or blank to reuse the Web sign-in app.", { secret: true }),
+    variable("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID", "", "Dedicated Google Workspace MCP OAuth client ID for Gmail, Drive, and Calendar.", { requiredWhen: "The Google Workspace MCP connectors are enabled; configure it with the matching secret and the LiteLLM OAuth callback." }),
+    variable("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET", "", "Dedicated Google Workspace MCP OAuth client secret for Gmail, Drive, and Calendar.", { secret: true, requiredWhen: "The Google Workspace MCP connectors are enabled; configure it with the matching client ID and the LiteLLM OAuth callback." }),
     variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "", "GitHub MCP OAuth app client ID.", { requiredWhen: "The GitHub MCP connector is enabled; configure it with the matching secret." }),
     variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET", "", "GitHub MCP OAuth app client secret.", { secret: true, requiredWhen: "The GitHub MCP connector is enabled; configure it with the matching client ID." }),
     variable("LEMMACOMPUTER_BOOTSTRAP_TENANT_ID", "example", "Initial owned tenant identifier."),
@@ -430,6 +432,7 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   for (const [name, keys] of Object.entries({
     Google: ["LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID", "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET"],
     Microsoft: ["LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID", "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET"],
+    "Google Workspace MCP": ["LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID", "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET"],
     "GitHub MCP": ["LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET"],
   })) {
     const present = keys.filter((key) => hasValue(values[key]));
@@ -691,6 +694,8 @@ export function projectServiceEnvironment(input = {}) {
       LEMMACOMPUTER_M365_AUTHORIZATION_URL: `${m365AuthorizationOrigin}/authorize`,
       GITHUB_MCP_CLIENT_ID: v("LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID"),
       GITHUB_MCP_CLIENT_SECRET: v("LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET"),
+      GOOGLE_WORKSPACE_MCP_CLIENT_ID: v("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID"),
+      GOOGLE_WORKSPACE_MCP_CLIENT_SECRET: v("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET"),
       LEMMACOMPUTER_MCP_POLICY_URL: `${controlUrl}/internal/v1/mcp/authorize`,
       LEMMACOMPUTER_MCP_POLICY_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
       LEMMACOMPUTER_WORKSPACE_ACCESS_URL: `${controlUrl}/internal/v1/workspace-access/authorize`,

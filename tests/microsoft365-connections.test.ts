@@ -173,7 +173,7 @@ test("the default catalog covers the required categories and registers a remote 
 
   const catalog = await service.list(alpha);
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
-  assert.equal(defaultCards.length, 23);
+  assert.equal(defaultCards.length, 34);
   const neon = catalog.connections.find((connector) => connector.id === "neon");
   assert.equal(neon?.serverName, "lemmacomputer_neon");
   assert.equal(neon?.brand, "neon");
@@ -199,13 +199,82 @@ test("the default catalog covers the required categories and registers a remote 
     authorizationOrigins: ["https://auth.exa.ai"],
     scopes: ["mcp:tools"],
   });
+  const researchedEndpoints = Object.fromEntries(
+    ["gmail", "google-drive", "google-calendar", "canva", "monday", "clickup", "calendly", "fireflies", "alpha-vantage", "massive", "intrinio"]
+      .map((id) => {
+        const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001")
+          .find((candidate) => candidate.id === id);
+        return [id, connector && {
+          endpointUrl: connector.endpointUrl,
+          authorizationOrigins: connector.authorizationOrigins,
+          scopes: connector.scopes,
+        }];
+      }),
+  );
+  assert.deepEqual(researchedEndpoints, {
+    gmail: {
+      endpointUrl: "https://gmailmcp.googleapis.com/mcp/v1",
+      authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
+      scopes: [],
+    },
+    "google-drive": {
+      endpointUrl: "https://drivemcp.googleapis.com/mcp/v1",
+      authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
+      scopes: [],
+    },
+    "google-calendar": {
+      endpointUrl: "https://calendarmcp.googleapis.com/mcp/v1",
+      authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
+      scopes: [],
+    },
+    canva: {
+      endpointUrl: "https://mcp.canva.com/mcp",
+      authorizationOrigins: ["https://mcp.canva.com"],
+      scopes: [],
+    },
+    monday: {
+      endpointUrl: "https://mcp.monday.com/mcp",
+      authorizationOrigins: ["https://mcp.monday.com"],
+      scopes: [],
+    },
+    clickup: {
+      endpointUrl: "https://mcp.clickup.com/mcp",
+      authorizationOrigins: ["https://mcp.clickup.com", "https://app.clickup.com"],
+      scopes: [],
+    },
+    calendly: {
+      endpointUrl: "https://mcp.calendly.com",
+      authorizationOrigins: ["https://calendly.com"],
+      scopes: ["mcp:scheduling:read", "mcp:scheduling:write"],
+    },
+    fireflies: {
+      endpointUrl: "https://api.fireflies.ai/mcp",
+      authorizationOrigins: ["https://api.fireflies.ai"],
+      scopes: [],
+    },
+    "alpha-vantage": {
+      endpointUrl: "https://mcp.alphavantage.co/mcp",
+      authorizationOrigins: ["https://mcp.alphavantage.co"],
+      scopes: [],
+    },
+    massive: {
+      endpointUrl: "https://mcp.massive.com/",
+      authorizationOrigins: ["https://mcp.massive.com", "https://massive.com"],
+      scopes: [],
+    },
+    intrinio: {
+      endpointUrl: "https://intrinio-mcp.intrinio.com/mcp",
+      authorizationOrigins: ["https://intrinio-mcp.intrinio.com", "https://intrinio.com"],
+      scopes: [],
+    },
+  });
   assert.deepEqual(defaultCards.slice(0, 6), [
     ["microsoft-365", "lemmacomputer_ms365"],
+    ["gmail", "lemmacomputer_gmail"],
+    ["google-drive", "lemmacomputer_google_drive"],
+    ["google-calendar", "lemmacomputer_google_calendar"],
     ["notion", "lemmacomputer_notion"],
     ["linear", "lemmacomputer_linear"],
-    ["atlassian", "lemmacomputer_atlassian"],
-    ["asana", "lemmacomputer_asana"],
-    ["figma", "lemmacomputer_figma"],
   ]);
   assert.deepEqual(gateway.statusServers, [], "browsing cards without a marker must not probe a provider");
   assert.deepEqual(gateway.toolServers, [], "browsing cards must not discover provider tools");

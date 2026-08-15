@@ -260,6 +260,20 @@ test("optional OAuth applications require complete credential pairs", () => {
     }, { profile: "customer-managed", strict: true }),
     /GitHub MCP OAuth client ID and secret must be configured together/i,
   );
+  assert.throws(
+    () => validateDeploymentEnvironment({
+      ...validCustomerManagedEnvironment(),
+      LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET: "google-workspace-secret-without-client",
+    }, { profile: "customer-managed", strict: true }),
+    /Google Workspace MCP OAuth client ID and secret must be configured together/i,
+  );
+  const services = projectServiceEnvironment({
+    ...validCustomerManagedEnvironment(),
+    LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID: "google-workspace-client",
+    LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET: "google-workspace-secret",
+  });
+  assert.equal(services.litellm.GOOGLE_WORKSPACE_MCP_CLIENT_ID, "google-workspace-client");
+  assert.equal(services.litellm.GOOGLE_WORKSPACE_MCP_CLIENT_SECRET, "google-workspace-secret");
 });
 
 test("strict profile validation rejects implicit and mixed profile selection", () => {

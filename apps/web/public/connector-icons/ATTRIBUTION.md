@@ -17,6 +17,7 @@ and colored with the hex value published for that icon in the same release:
 | `box.svg` | `box` | <https://www.box.com/en-gb/about-us/press> |
 | `cloudflare.svg` | `cloudflare` | <https://www.cloudflare.com/logo/> |
 | `figma.svg` | `figma` | <https://www.figma.com/using-the-figma-brand/> |
+| `google.svg` | `google` | <https://partnermarketinghub.withgoogle.com> |
 | `github.svg` | `github` | <https://github.com/logos> |
 | `hubspot.svg` | `hubspot` | <https://www.hubspot.com/style-guide> |
 | `intercom.svg` | `intercom` | <https://www.intercom.com/press> |

@@ -3457,7 +3457,7 @@ function ApprovalDeviceCard({ displayName }) {
 
 const connectorIconBrands = new Set([
   "asana", "atlassian", "box", "cloudflare", "exa", "figma", "github", "hubspot", "intercom",
-  "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+  "google", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
 ]);
 const connectorIconExtensions = { exa: "png" };
 const connectorCategories = ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics", "Other"];

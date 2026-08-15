@@ -53,6 +53,36 @@ const exaConnector = {
   },
 };
 
+const officeAndFinanceConnectors = [
+  {
+    ...exaConnector,
+    id: "gmail",
+    serverName: "lemmacomputer_gmail",
+    name: "Gmail",
+    shortDescription: "Search mail and prepare follow-ups",
+    category: "Productivity",
+    brand: "google",
+  },
+  {
+    ...exaConnector,
+    id: "canva",
+    serverName: "lemmacomputer_canva",
+    name: "Canva",
+    shortDescription: "Create and update designs with approved assets",
+    category: "Productivity",
+    brand: "canva",
+  },
+  {
+    ...exaConnector,
+    id: "alpha-vantage",
+    serverName: "lemmacomputer_alpha_vantage",
+    name: "Alpha Vantage",
+    shortDescription: "Research market prices, fundamentals, and macro data",
+    category: "Data and analytics",
+    brand: "alpha-vantage",
+  },
+];
+
 const documentHash = "a".repeat(64);
 const policy = {
   connectorId: connector.id,
@@ -296,6 +326,26 @@ test("Exa appears as an available built-in connector in the Search category", as
   await expect(search.getByText("Search the web")).toBeVisible();
   await expect(search.locator(".connector-mark.exa img")).toHaveAttribute("src", "/connector-icons/exa.png");
   await expect(search.getByRole("button", { name: "Connect" })).toBeEnabled();
+});
+
+test("office and finance catalog cards are available in their respective categories", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: officeAndFinanceConnectors }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+
+  const productivity = page.getByRole("region", { name: "Productivity" });
+  await expect(productivity.getByRole("heading", { name: "Gmail" })).toBeVisible();
+  await expect(productivity.locator(".connector-mark.google img")).toHaveAttribute("src", "/connector-icons/google.svg");
+  await expect(productivity.getByRole("heading", { name: "Canva" })).toBeVisible();
+  await expect(productivity.getByRole("button", { name: "Connect" })).toHaveCount(2);
+
+  const analytics = page.getByRole("region", { name: "Data and analytics" });
+  await expect(analytics.getByRole("heading", { name: "Alpha Vantage" })).toBeVisible();
+  await expect(analytics.getByText("Research market prices, fundamentals, and macro data")).toBeVisible();
+  await expect(analytics.getByRole("button", { name: "Connect" })).toBeEnabled();
 });
 
 test("administrators can read member controls, mixed tool decisions, drift, and honest remediation state", async ({ page }) => {

@@ -205,12 +205,17 @@ explicit markers and reconciles the workspace grant only when a marker's
 resolved state changes or remains expired. Selecting **Connect** registers and
 checks only that selected connector, then starts its per-user OAuth flow.
 
-Notion, Linear, and Atlassian use their official hosted MCP endpoints and
-dynamic OAuth client registration. GitHub requires an OAuth app because its
-authorization server does not expose dynamic client registration. Configure
-`LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID` and
-`LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET`, with the LiteLLM callback
-`${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` registered in GitHub. Other
+Notion, Linear, Atlassian, monday.com, Calendly, ClickUp, Canva, Fireflies,
+Alpha Vantage, Massive, and Intrinio use their official hosted MCP endpoints
+and dynamic OAuth client registration. Google Workspace's Gmail, Drive, and
+Calendar servers require a dedicated Google OAuth application: configure
+`LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID` and
+`LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET`, and register the LiteLLM
+callback `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback`. Keep that client
+separate from the optional Google customer sign-in client so its scopes,
+consent, callback, and rotation are independently reviewable. GitHub likewise
+requires an OAuth app; configure `LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID` and
+`LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET` with the same callback. Other
 providers can impose their own OAuth-app approval or allow-list requirements;
 an unsuccessful registration or authorization leaves the catalog card
 disconnected and contributes no tools.
