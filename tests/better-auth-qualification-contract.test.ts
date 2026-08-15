@@ -4,6 +4,12 @@ import test from "node:test";
 
 const json = async (path: string) => JSON.parse(await readFile(new URL(`../${path}`, import.meta.url), "utf8")) as Record<string, any>;
 
+const lockedWorkspacePackage = (lockfile: Record<string, any>, workspace: string, packageName: string) => {
+  const workspacePath = `${workspace}/node_modules/${packageName}`;
+  const rootPath = `node_modules/${packageName}`;
+  return lockfile.packages[workspacePath] ?? lockfile.packages[rootPath];
+};
+
 test("Better Auth core and plugins are exact, matching production pins", async () => {
   const [rootPackage, controlPackage, lockfile, qualification] = await Promise.all([
     json("package.json"),
@@ -14,9 +20,9 @@ test("Better Auth core and plugins are exact, matching production pins", async (
   assert.equal(controlPackage.dependencies["better-auth"], "1.6.26");
   assert.equal(controlPackage.dependencies["@better-auth/passkey"], "1.6.26");
   assert.equal(controlPackage.dependencies["@better-auth/sso"], "1.6.26");
-  assert.equal(lockfile.packages["apps/control-api/node_modules/better-auth"].version, "1.6.26");
-  assert.equal(lockfile.packages["apps/control-api/node_modules/@better-auth/passkey"].version, "1.6.26");
-  assert.equal(lockfile.packages["apps/control-api/node_modules/@better-auth/sso"].version, "1.6.26");
+  assert.equal(lockedWorkspacePackage(lockfile, "apps/control-api", "better-auth")?.version, "1.6.26");
+  assert.equal(lockedWorkspacePackage(lockfile, "apps/control-api", "@better-auth/passkey")?.version, "1.6.26");
+  assert.equal(lockedWorkspacePackage(lockfile, "apps/control-api", "@better-auth/sso")?.version, "1.6.26");
   assert.deepEqual(qualification.packages, {
     "better-auth": "1.6.26",
     "@better-auth/passkey": "1.6.26",
