@@ -234,6 +234,49 @@ The worktree profile intentionally permits unresolved Entra placeholders. Use
 the [Microsoft integration runbook](local-deployment.md) only when the task
 actually exercises those flows.
 
+## Stateful local-stack handover
+
+`worktree:init` creates an isolated database and workspace namespace. That is
+the correct default for parallel task work, but it does not seed a new
+worktree from another checkout's users, organizations, provider settings,
+pricing, sessions, or workspace homes. Do not point two running worktrees at
+the same writable Docker volumes.
+
+When retiring a long-lived local stack and replacing it with an isolated
+worktree, treat the operation as an exclusive state handover:
+
+1. capture one coordinated recovery set using the
+   [backup contract](operations.md#backup-and-restore), including all three
+   databases, workspace-home volumes, matching cryptographic configuration,
+   and image identifiers;
+2. stop application writers and every managed workspace in the source stack,
+   then keep that stack stopped for the remainder of the handover;
+3. restore the product, Better Auth, and LiteLLM databases into volumes owned
+   by the target worktree; keep the target's Compose identity and database
+   credentials, and reapply the Better Auth runtime grants after a logical
+   restore that excludes ACLs;
+4. either copy each stopped workspace-home volume into the target namespace or
+   transfer that namespace exclusively to the target. Reusing the original
+   homes is permitted only after removing the source runtime containers and
+   preventing the source stack from restarting;
+5. move the public port and callback origin only after the source listener is
+   stopped, then run `npm run env:check` and `npm run dev:doctor`; and
+6. start the target topology and compare non-sensitive continuity counts for
+   users, organizations, memberships, provider settings, model deployments,
+   sessions, and workspaces before accepting the handover.
+
+Copying database rows without their matching Better Auth, session, policy,
+LiteLLM, and connector cryptographic material can leave accounts present but
+sessions or encrypted credentials unusable. Do not copy another checkout's
+entire `.env`; transfer reviewed state-bound settings while retaining the
+target worktree's isolation values.
+
+There is currently no repository command that automates this cross-worktree
+handover. Until one exists, record the exact backup, restore, ownership, and
+verification commands as migration evidence. Ordinary task worktrees remain
+fresh and isolated; a persistent seeded development environment is a distinct
+operator workflow, not an implicit side effect of `worktree:init`.
+
 ## Remote workspace-node and Cowork qualification
 
 Ordinary evaluation and development are colocated. Use the remote qualifier

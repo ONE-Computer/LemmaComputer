@@ -105,7 +105,7 @@ export const renderControlOverride = () => `services:
 
   remote-application-tls:
     image: lemmacomputer/control-runtime:\${LEMMACOMPUTER_IMAGE_TAG:?set image tag}
-    user: "0:0"
+    user: "\${QUALIFICATION_HOST_UID:?set qualification host UID}:\${QUALIFICATION_HOST_GID:?set qualification host GID}"
     command: ["node", "/qualification/remote-workspace-node-tls-forwarder.mjs"]
     init: true
     read_only: true
@@ -309,6 +309,8 @@ const prepareState = ({ cowork }) => {
     `QUALIFICATION_NODE_PROJECT=${names.nodeProject}`,
     `QUALIFICATION_NODE_TRANSPORT_NETWORK=${names.nodeTransportNetwork}`,
     `QUALIFICATION_APPLICATION_NETWORK=${names.applicationNetwork}`,
+    `QUALIFICATION_HOST_UID=${process.getuid?.() ?? 0}`,
+    `QUALIFICATION_HOST_GID=${process.getgid?.() ?? 0}`,
     `QUALIFICATION_NODE_CA_B64=${nodeCa}`,
     `QUALIFICATION_NODE_CLIENT_CERT_B64=${nodeClientCert}`,
     `QUALIFICATION_NODE_CLIENT_KEY_B64=${nodeClientKey}`,

@@ -37,6 +37,7 @@ test("qualification Compose separates Docker authority and uses variable-backed 
   assert.match(control, /QUALIFICATION_NODE_CLIENT_KEY_B64/);
   assert.match(control, /QUALIFICATION_INGRESS_CLIENT_CERT_B64/);
   assert.match(control, /QUALIFICATION_INGRESS_CLIENT_KEY_B64/);
+  assert.match(control, /user: "\$\{QUALIFICATION_HOST_UID:\?set qualification host UID\}:\$\{QUALIFICATION_HOST_GID:\?set qualification host GID\}"/);
   assert.doesNotMatch(control, /BEGIN (?:RSA )?PRIVATE KEY/);
   assert.match(node, /QUALIFICATION_NODE_TRANSPORT_NETWORK/);
   assert.match(control, /QUALIFICATION_APPLICATION_NETWORK/);

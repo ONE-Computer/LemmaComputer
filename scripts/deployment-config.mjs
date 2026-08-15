@@ -237,6 +237,8 @@ const qualificationSections = [
     variable("QUALIFICATION_NODE_PROJECT", "generated-per-qualification", "Separate Compose project for the qualified workspace node."),
     variable("QUALIFICATION_NODE_TRANSPORT_NETWORK", "generated-per-qualification", "Private Control-to-node transport network."),
     variable("QUALIFICATION_APPLICATION_NETWORK", "generated-per-qualification", "Restricted node-to-application mTLS network."),
+    variable("QUALIFICATION_HOST_UID", "generated-per-qualification", "Host user ID used by the read-only application mTLS forwarder."),
+    variable("QUALIFICATION_HOST_GID", "generated-per-qualification", "Host group ID used by the read-only application mTLS forwarder."),
     variable("QUALIFICATION_NODE_CA_B64", "generated-per-qualification", "Base64 disposable node and desktop-relay certificate authority.", { secret: true }),
     variable("QUALIFICATION_NODE_CLIENT_CERT_B64", "generated-per-qualification", "Base64 disposable Control client certificate.", { secret: true }),
     variable("QUALIFICATION_NODE_CLIENT_KEY_B64", "generated-per-qualification", "Base64 disposable Control client private key.", { secret: true }),
