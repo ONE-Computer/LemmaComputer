@@ -337,6 +337,22 @@ test("optional OAuth applications require complete credential pairs", () => {
   });
   assert.equal(services.litellm.GOOGLE_WORKSPACE_MCP_CLIENT_ID, "google-workspace-client");
   assert.equal(services.litellm.GOOGLE_WORKSPACE_MCP_CLIENT_SECRET, "google-workspace-secret");
+  // Control publishes credential-gated connectors from this signal, so it must
+  // name the configured groups and must never carry the secrets themselves.
+  assert.equal(services["control-api"].CONFIGURED_STATIC_MCP_CLIENTS, "google-workspace");
+  assert.equal(services["control-api"].GOOGLE_WORKSPACE_MCP_CLIENT_SECRET, undefined);
+
+  const none = projectServiceEnvironment(validCustomerManagedEnvironment());
+  assert.equal(none["control-api"].CONFIGURED_STATIC_MCP_CLIENTS, "");
+
+  const both = projectServiceEnvironment({
+    ...validCustomerManagedEnvironment(),
+    LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID: "google-workspace-client",
+    LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET: "google-workspace-secret",
+    LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID: "github-client",
+    LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET: "github-secret",
+  });
+  assert.equal(both["control-api"].CONFIGURED_STATIC_MCP_CLIENTS, "google-workspace,github");
 });
 
 test("strict profile validation rejects implicit and mixed profile selection", () => {

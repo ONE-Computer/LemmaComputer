@@ -4,10 +4,18 @@ import test from "node:test";
 import type { IdentityContext, LemmaComputerError, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
-import { connectorCatalog, withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
+import {
+  connectorCatalog,
+  staticCredentialGroups,
+  withheldConnectors,
+} from "../apps/control-api/src/connector-catalog.js";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
+// A deployment that has registered both provider OAuth applications. Without
+// them, the connectors depending on those credentials are not published.
+const allCredentials = [...staticCredentialGroups];
+const configured = new Set(staticCredentialGroups);
 const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "lemmacomputer-control" };
 const connected: OAuthConnectionStatus = {
   state: "connected",
@@ -109,6 +117,7 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   const service = new Microsoft365ConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   const started = await service.start(alpha);
   const request = gateway.started[0]!;
@@ -132,6 +141,7 @@ test("connection state is one-time and cannot be finished by another user", asyn
   const service = new Microsoft365ConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await service.start(alpha);
   const state = gateway.started[0]!.state;
@@ -169,6 +179,7 @@ test("the default catalog covers the required categories and registers a remote 
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
 
   const catalog = await service.list(alpha);
@@ -188,7 +199,7 @@ test("the default catalog covers the required categories and registers a remote 
     category: "Search",
     brand: "exa",
   });
-  const exaDefinition = connectorCatalog(alpha.tenantId, "http://localhost:3001")
+  const exaDefinition = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
     .find((connector) => connector.id === "exa");
   assert.deepEqual(exaDefinition && {
     endpointUrl: exaDefinition.endpointUrl,
@@ -202,7 +213,7 @@ test("the default catalog covers the required categories and registers a remote 
   const researchedEndpoints = Object.fromEntries(
     ["gmail", "google-drive", "google-calendar", "canva", "monday", "clickup", "calendly", "fireflies", "massive", "supabase", "stripe"]
       .map((id) => {
-        const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001")
+        const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
           .find((candidate) => candidate.id === id);
         return [id, connector && {
           endpointUrl: connector.endpointUrl,
@@ -298,6 +309,7 @@ test("every approved remote MCP card lazily starts its provider flow only after 
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   for (const connectorId of ["exa", "github", "notion", "neon", "monday"]) await service.start(alpha, connectorId);
   assert.deepEqual(gateway.started.map((request) => request.serverName), [
@@ -322,6 +334,7 @@ test("unconnected connector policy inspection never probes provider grants or to
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
 
   await assert.rejects(
@@ -404,6 +417,7 @@ test("hosted tool policy requires an explicit tool decision and a current connec
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
 
@@ -442,6 +456,7 @@ test("only explicitly approved connected catalog services contribute workspace t
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const basePolicy: RuntimePolicy = {
@@ -478,6 +493,7 @@ test("a disconnected Microsoft 365 primary cannot suppress an approved connected
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "exa");
   await saveCurrentConnectorToolPolicy(service, alpha, "exa", { web_search: "allow" });
@@ -520,6 +536,7 @@ test("repeated agent discovery never probes the connected Microsoft 365 provider
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "microsoft-365");
   gateway.statusServers.length = 0;
@@ -554,6 +571,7 @@ test("hosted connector OAuth binds the selected catalog entry and refuses cross-
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
 
   await service.start(alpha, "linear");
@@ -576,6 +594,7 @@ test("new hosted connector tools are blocked pending review and persist explicit
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
 
@@ -639,6 +658,7 @@ test("a same-name provider tool change revokes cached projection and rejects a s
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const review = await service.connectorToolPolicy(alpha, "linear");
@@ -681,6 +701,7 @@ test("organization connector access policy locks member changes and removes disa
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const reviewed = await saveCurrentConnectorToolPolicy(service, alpha, "linear", {
@@ -958,6 +979,7 @@ test("expired connections share one safe renewal and re-read the connected state
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
 
@@ -979,6 +1001,7 @@ test("failed silent renewal exposes reconnect state and removes stale connector 
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const policy: RuntimePolicy = {
@@ -1025,6 +1048,7 @@ test("connector projection cache preserves the current workspace agent selection
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
   await completeFixtureConnection(service, gateway, alpha, "linear");
   const claude: RuntimeAgentPolicy = {
@@ -1079,6 +1103,7 @@ test("gateway-configured connectors connect without reconciling a LiteLLM row", 
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
   });
 
   // config/litellm/config.yaml owns these rows and carries their static
@@ -1130,7 +1155,7 @@ test("a withheld catalog entry stays unreachable even after an earlier release s
 
   const catalog = await service.list(alpha);
   assert.ok(!catalog.connections.some((connector) => connector.id === "slack"));
-  for (const withheld of withheldConnectors()) {
+  for (const withheld of withheldConnectors(configured)) {
     assert.ok(
       !catalog.connections.some((connector) => connector.id === withheld.id),
       `withheld connector ${withheld.id} must not be listed`,
@@ -1144,4 +1169,50 @@ test("a withheld catalog entry stays unreachable even after an earlier release s
   // A withheld endpoint must also lose its gateway egress grant.
   assert.equal(await service.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.slack.com", port: 443 }), false);
   assert.equal(await service.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.notion.com", port: 443 }), true);
+});
+
+test("a connector needing operator credentials is unpublished until the deployment configures them", async () => {
+  const gateway = new FakeConnectionGateway();
+  // A deployment that has registered no provider OAuth application. Listing
+  // Gmail here would offer a card whose Connect can only fail: LiteLLM resolves
+  // an empty client_id and its authorize endpoint refuses the redirect.
+  const unconfigured = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  const catalog = await unconfigured.list(alpha);
+  const listed = new Set(catalog.connections.map((connector) => connector.id));
+  for (const connectorId of ["gmail", "google-drive", "google-calendar", "github"]) {
+    assert.ok(!listed.has(connectorId), `${connectorId} must not be listed without its credentials`);
+    await assert.rejects(
+      unconfigured.start(alpha, connectorId),
+      (error: LemmaComputerError) => error.code === "MCP_CONNECTOR_NOT_FOUND",
+    );
+  }
+  assert.deepEqual(gateway.started, []);
+  // Microsoft 365 carries its own deployment-owned authorization origin and is
+  // never gated on a provider OAuth application.
+  assert.ok(listed.has("microsoft-365"));
+  assert.ok(listed.has("notion"));
+  // An unconfigured connector also loses its gateway egress grant.
+  assert.equal(
+    await unconfigured.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
+    false,
+  );
+
+  const configuredService = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: ["google-workspace"],
+  });
+  const withGoogle = new Set((await configuredService.list(alpha)).connections.map((connector) => connector.id));
+  assert.ok(withGoogle.has("gmail"), "configuring Google Workspace publishes its connectors");
+  assert.ok(withGoogle.has("google-drive"));
+  assert.ok(withGoogle.has("google-calendar"));
+  assert.ok(!withGoogle.has("github"), "GitHub stays unpublished on its own credential group");
+  assert.equal(
+    await configuredService.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
+    true,
+  );
 });

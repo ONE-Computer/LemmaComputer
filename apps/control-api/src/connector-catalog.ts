@@ -11,11 +11,23 @@ export type ConnectorActivation = {
   message: string;
 };
 
-// `withheld` keeps an entry in source without publishing it. A withheld
-// connector is never seeded, listed, connectable, or granted gateway egress,
-// but its name, branding, icon, and scopes survive so restoring it is a
-// one-line change once the blocking condition is resolved.
-type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId"> & { withheld?: string };
+// An entry is published only when it can actually complete a connection.
+// `withheld` withholds it unconditionally; `requiresCredentials` withholds it
+// until the deployment configures that credential group. Either way the entry
+// stays in source, so its name, branding, icon, and scopes survive and nothing
+// has to be rebuilt when the blocking condition clears.
+type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId"> & {
+  withheld?: string;
+  requiresCredentials?: StaticCredentialGroup;
+};
+
+// Credential groups a deployment can configure. Each one is a provider OAuth
+// application the operator registers, matching a coupled environment pair in
+// scripts/deployment-config.mjs and a `client_id` in config/litellm/config.yaml.
+export type StaticCredentialGroup = "google-workspace" | "github";
+export const staticCredentialGroups: readonly StaticCredentialGroup[] = ["google-workspace", "github"];
+export const isStaticCredentialGroup = (value: string): value is StaticCredentialGroup =>
+  (staticCredentialGroups as readonly string[]).includes(value);
 
 const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "createdBy">): CatalogConnector => ({
   ...connector,
@@ -31,12 +43,15 @@ const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "
 // origin or to issue static client credentials.
 const REGISTRATION_ALLOWLISTED =
   "The provider restricts dynamic client registration to its own approved callback hosts";
-// A provider that publishes no registration endpoint requires the operator to
-// create an OAuth application in the provider's developer portal and supply
-// static credentials, the way GitHub and Google Workspace already are wired in
-// config/litellm/config.yaml. Withheld until those credentials exist.
-const STATIC_CREDENTIALS_REQUIRED =
-  "The provider publishes no registration endpoint and needs operator-supplied OAuth app credentials";
+// A provider that publishes no registration endpoint needs an operator-created
+// OAuth application. Unlike Google Workspace and GitHub, these have no gateway
+// row or environment pair yet, so no deployment can configure them. Restoring
+// one means adding its `mcp_servers` entry to config/litellm/config.yaml, its
+// coupled environment pair and credential group to
+// scripts/deployment-config.mjs, then replacing this line with
+// `requiresCredentials`.
+const STATIC_CREDENTIALS_UNWIRED =
+  "The provider publishes no registration endpoint and has no deployment credential group yet";
 
 const readyActivation: ConnectorActivation = { readiness: "ready", action: "connect", message: "This approved service is ready to connect." };
 // Catalog entries are approved remote MCP endpoints. Discovery and any
@@ -54,6 +69,7 @@ export const connectorActivation = (_connector: Pick<ConnectorDefinition, "id" |
 const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "gmail",
+    requiresCredentials: "google-workspace",
     serverId: "lemmacomputer_gmail",
     serverName: "lemmacomputer_gmail",
     name: "Gmail",
@@ -68,6 +84,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "google-drive",
+    requiresCredentials: "google-workspace",
     serverId: "lemmacomputer_google_drive",
     serverName: "lemmacomputer_google_drive",
     name: "Google Drive",
@@ -82,6 +99,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "google-calendar",
+    requiresCredentials: "google-workspace",
     serverId: "lemmacomputer_google_calendar",
     serverName: "lemmacomputer_google_calendar",
     name: "Google Calendar",
@@ -149,7 +167,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "asana",
-    withheld: STATIC_CREDENTIALS_REQUIRED,
+    withheld: STATIC_CREDENTIALS_UNWIRED,
     serverId: "lemmacomputer_asana",
     serverName: "lemmacomputer_asana",
     name: "Asana",
@@ -250,7 +268,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "box",
-    withheld: STATIC_CREDENTIALS_REQUIRED,
+    withheld: STATIC_CREDENTIALS_UNWIRED,
     serverId: "lemmacomputer_box",
     serverName: "lemmacomputer_box",
     name: "Box",
@@ -279,6 +297,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "github",
+    requiresCredentials: "github",
     serverId: "lemmacomputer_github",
     serverName: "lemmacomputer_github",
     name: "GitHub",
@@ -365,7 +384,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "hubspot",
-    withheld: STATIC_CREDENTIALS_REQUIRED,
+    withheld: STATIC_CREDENTIALS_UNWIRED,
     serverId: "lemmacomputer_hubspot",
     serverName: "lemmacomputer_hubspot",
     name: "HubSpot",
@@ -395,7 +414,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "slack",
-    withheld: STATIC_CREDENTIALS_REQUIRED,
+    withheld: STATIC_CREDENTIALS_UNWIRED,
     serverId: "lemmacomputer_slack",
     serverName: "lemmacomputer_slack",
     name: "Slack",
@@ -540,7 +559,15 @@ const remoteCatalog: CatalogConnector[] = [
   }),
 ];
 
-export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin: string): SaveConnectorRegistryRecord[] => [
+// `configuredCredentials` is the set of credential groups this deployment has
+// supplied. Control never sees the secrets themselves, only which groups exist,
+// so an unconfigured Google Workspace or GitHub connector is withheld rather
+// than listed and failing at the authorize redirect with an empty client id.
+export const connectorCatalog = (
+  tenantId: string,
+  microsoftAuthorizationOrigin: string,
+  configuredCredentials: ReadonlySet<StaticCredentialGroup> = new Set(),
+): SaveConnectorRegistryRecord[] => [
   {
     tenantId,
     id: "microsoft-365",
@@ -560,13 +587,25 @@ export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin:
     createdBy: "lemmacomputer",
   },
   ...remoteCatalog
-    .filter((connector) => !connector.withheld)
-    .map(({ withheld: _withheld, ...connector }) => ({ tenantId, ...connector })),
+    .filter((connector) => isPublishable(connector, configuredCredentials))
+    .map(({ withheld: _withheld, requiresCredentials: _requiresCredentials, ...connector }) => ({ tenantId, ...connector })),
 ];
 
-// Withheld entries and why, for operator documentation and for the test that
-// keeps every withholding reason deliberate rather than incidental.
-export const withheldConnectors = (): Array<{ id: string; name: string; reason: string }> =>
+const isPublishable = (connector: CatalogConnector, configuredCredentials: ReadonlySet<StaticCredentialGroup>) => {
+  if (connector.withheld) return false;
+  return !connector.requiresCredentials || configuredCredentials.has(connector.requiresCredentials);
+};
+
+// Entries this deployment does not publish, and why. Drives operator
+// documentation and the tests that keep each exclusion deliberate.
+export const withheldConnectors = (
+  configuredCredentials: ReadonlySet<StaticCredentialGroup> = new Set(),
+): Array<{ id: string; name: string; reason: string }> =>
   remoteCatalog
-    .filter((connector) => connector.withheld)
-    .map((connector) => ({ id: connector.id, name: connector.name, reason: connector.withheld! }));
+    .filter((connector) => !isPublishable(connector, configuredCredentials))
+    .map((connector) => ({
+      id: connector.id,
+      name: connector.name,
+      reason: connector.withheld
+        ?? `The deployment has not configured the ${connector.requiresCredentials} OAuth application`,
+    }));
