@@ -57,6 +57,7 @@ test("an explicit provider-link failure remains visible on the no-organization s
 
 test("a verified hosted consumer receives personal tenant setup without organization registration", async ({ page }) => {
   let personalTenantRequests = 0;
+  let personalTenantRequest: { contentType?: string; body: string | null } | null = null;
   await page.unroute("**/api/v1/auth/product-session");
   await page.route("**/api/v1/auth/product-session", (route) => route.fulfill({
     status: 200,
@@ -71,6 +72,10 @@ test("a verified hosted consumer receives personal tenant setup without organiza
   }));
   await page.route("**/api/v1/auth/personal-tenant", async (route) => {
     personalTenantRequests += 1;
+    personalTenantRequest = {
+      contentType: route.request().headers()["content-type"],
+      body: route.request().postData(),
+    };
     await route.fulfill({
       status: 201,
       json: {
@@ -86,6 +91,7 @@ test("a verified hosted consumer receives personal tenant setup without organiza
   await expect(page.getByRole("heading", { name: "Setting up your personal workspace" })).toBeVisible();
   await expect(page.getByLabel("Organization name")).toHaveCount(0);
   await expect.poll(() => personalTenantRequests).toBe(1);
+  expect(personalTenantRequest).toEqual({ contentType: undefined, body: null });
 });
 
 test("an account with personal and enterprise memberships can switch context or create another organization", async ({ page }) => {
