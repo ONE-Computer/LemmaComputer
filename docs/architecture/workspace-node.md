@@ -102,6 +102,22 @@ runs as UID/GID 1000 without effective capabilities. Electron sandboxing and
 Cowork add no capability; in particular, the runtime does not add network,
 namespace, mount, device, `MKNOD`, or `SYS_CHROOT` capabilities.
 
+## Optional workspace capabilities
+
+Applications and AI agents are selections inside one workspace contract; they
+are not separate workspace modes. Both arrays may be empty. An empty selection
+still provisions the sandbox, persistent home, desktop service, and
+authenticated desktop ingress relay. The node exposes no catalog application
+launchers, starts no agent broker, receives no model alias or gateway grant,
+and creates no LiteLLM or Control application relay. Public egress remains a
+separate policy decision and may still require the governed egress proxy.
+
+Selecting the first AI agent makes a model alias mandatory and causes Control
+to issue only that agent's governed gateway and bridge authority. Removing the
+last agent sets the model selection to null and revokes the workspace's AI
+grants. Selecting applications exposes only their reviewed launchers; it does
+not imply an AI provider or agent runtime.
+
 ## Chromium and Electron process sandbox
 
 The application boundary and reasons for catalog gating are recorded in

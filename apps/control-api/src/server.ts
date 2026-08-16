@@ -243,7 +243,7 @@ const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedA
 export type CompatibleSandboxSelection = {
   profileId: SandboxProfileId;
   applicationIds: SandboxApplicationId[];
-  modelAlias: SandboxModelAlias;
+  modelAlias: SandboxModelAlias | null;
   requestedServiceClass: ExplicitWorkspaceServiceClass;
   agentIds: AgentCatalogId[];
   changed: boolean;
@@ -274,9 +274,13 @@ export const compatibleSandboxSelection = (
   const agentIds = saved
     ? saved.agentIds.filter((id) => agents.includes(id))
     : defaultAgentIds(document, agents);
-  const modelAlias = governedRoutingAvailable
-    ? "lemmacomputer-auto" as const
-    : saved ? models.includes(saved.modelAlias) ? saved.modelAlias : null : models[0] ?? null;
+  const modelAlias = agentIds.length === 0
+    ? null
+    : governedRoutingAvailable
+      ? "lemmacomputer-auto" as const
+      : saved?.modelAlias && models.includes(saved.modelAlias)
+        ? saved.modelAlias
+        : models[0] ?? null;
   const requestedServiceClass = saved
     ? saved.requestedServiceClass === undefined
       ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
@@ -284,7 +288,7 @@ export const compatibleSandboxSelection = (
         ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
         : null
     : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses);
-  if (!profileId || !applicationIds.length || !agentIds.length || !modelAlias || !requestedServiceClass) return null;
+  if (!profileId || (agentIds.length > 0 && !modelAlias) || !requestedServiceClass) return null;
   return {
     profileId,
     applicationIds,
@@ -937,7 +941,10 @@ export function createControlServer(
   };
   const assertProviderConfiguration = async (actor: SessionPrincipal, policy: RuntimePolicy) => {
     if (!providerSettings) return;
-    for (const modelAlias of new Set([policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])])) {
+    const selectedModelAliases = policy.agents === undefined
+      ? policy.modelAlias ? [policy.modelAlias] : []
+      : policy.agents.map((agent) => agent.modelAlias);
+    for (const modelAlias of new Set(selectedModelAliases)) {
       await providerSettings.assertConfigured(actor, modelAlias);
     }
   };
@@ -971,6 +978,7 @@ export function createControlServer(
       && telegram.credentialId
       && telegram.tokenVersion
       && telegram.defaultAgentId
+      && configuration.agentIds.includes(telegram.defaultAgentId)
       ? [{
         adapter: "telegram",
         credentialRef: telegram.credentialId,
@@ -1486,7 +1494,9 @@ export function createControlServer(
     };
   };
   const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
-    [policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])]
+    (policy.agents === undefined
+      ? policy.modelAlias ? [policy.modelAlias] : []
+      : policy.agents.map((agent) => agent.modelAlias))
       .some((modelAlias) => managedProviderForAlias(modelAlias) === provider)
   );
   const revokeTenantProviderWorkspaceGrants = async (tenantId: string, provider: ManagedProviderName) => {
@@ -4388,22 +4398,30 @@ export function createControlServer(
     const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !availableModels.length || !availableAgents.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, agent, or model tier", 500);
-    if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
+    if (!availableProfiles.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile or model tier", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const savedProfile = saved ? sandboxProfiles.find((profile) => profile.id === saved.profileId) : undefined;
     const selectedProfile = savedProfile ?? availableProfiles[0]!;
     const profileId = selectedProfile.id;
-    const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
-    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
+    const applicationIds = saved?.applicationIds.filter((id) => availableApplications.some((application) => application.id === id));
     const requestedServiceClass = explicitWorkspaceServiceClass(
       saved?.requestedServiceClass ?? document.defaultServiceClass,
       assignedServiceClasses,
     );
     if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
-    const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
-    const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
-    const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
+    const agentIds = saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id));
+    const selectedApplicationIds = saved ? applicationIds ?? [] : defaultApplicationIds(document, assignedApplications);
+    const selectedAgentIds = saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds);
+    if (selectedAgentIds.length > 0 && !availableModels.length) {
+      throw new LemmaComputerError("POLICY_INVALID", "The active policy has AI agents but no supported model route", 500);
+    }
+    const modelAlias = selectedAgentIds.length === 0
+      ? null
+      : governedRoutingAvailable
+        ? "lemmacomputer-auto"
+        : saved?.modelAlias && availableModels.some((model) => model.alias === saved.modelAlias)
+          ? saved.modelAlias
+          : availableModels[0]!.alias;
     const workspaceEgress = await workspaceEgressFor(actor, effective, grantId, profileId);
     const profileCurrentlyAllowed = availableProfiles.some((profile) => profile.id === profileId);
     const runtime = effective && profileCurrentlyAllowed
@@ -4443,7 +4461,7 @@ export function createControlServer(
       applicationIds: selectedApplicationIds,
       modelAlias,
       requestedServiceClass,
-      routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
+      routePreferenceMigrationRequired: selectedAgentIds.length > 0 && governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
       profile: selectedProfile,
       availableProfiles,
       availableApplications,
@@ -4473,11 +4491,17 @@ export function createControlServer(
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
     const serviceClasses = assignedWorkspaceServiceClasses(document);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
+    const modelAlias = input.agentIds.length === 0
+      ? null
+      : governedRoutingAvailable
+        ? "lemmacomputer-auto"
+        : input.modelAlias;
     const agents = assignedAgentIds(document);
     if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias)))) {
+      throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    }
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const previousSettings = await store.getSandboxSettings?.(actor.identity, input.grantId);
@@ -4504,7 +4528,7 @@ export function createControlServer(
       grantId: input.grantId,
       profileId: input.profileId as SandboxProfileId,
       applicationIds: input.applicationIds,
-      modelAlias: modelAlias as SandboxModelAlias,
+      modelAlias: modelAlias as SandboxModelAlias | null,
       requestedServiceClass: input.requestedServiceClass,
       agentIds: input.agentIds,
     });
@@ -5253,6 +5277,13 @@ export function createControlServer(
           "The selected model route's image capability could not be verified",
           503,
           true,
+        );
+      }
+      if (!policy.modelAlias) {
+        throw new LemmaComputerError(
+          "WORKSPACE_AI_NOT_SELECTED",
+          "This workspace does not have an AI agent or model route selected",
+          409,
         );
       }
       const capabilities = await gateway.modelCapabilities(policy.modelAlias);

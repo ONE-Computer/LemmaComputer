@@ -40,8 +40,15 @@ test("a removed agent is reconciled to the still-allowed saved selection", () =>
   });
 });
 
-test("a workspace whose only selected agent was removed requires an explicit new selection", () => {
-  assert.equal(compatibleSandboxSelection(document, saved(["claude-cli"]), false), null);
+test("a workspace whose only selected agent was removed reconciles to the safer base workspace", () => {
+  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-cli"]), false), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox", "google-chrome"],
+    modelAlias: null,
+    requestedServiceClass: "balanced",
+    agentIds: [],
+    changed: true,
+  });
 });
 
 test("a legacy workspace without saved sandbox settings adopts the constrained policy defaults", () => {

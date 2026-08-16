@@ -223,10 +223,13 @@ Read the worktree-specific URL instead of assuming a port:
 grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
 ```
 
-Create the first account in the Web UI. Configure model-provider deployments
-under **AI control plane -> Models & providers**, then configure Pricing, Model
-routes, Team rollout, and workspace policy. Provider credentials belong in the
-product UI, not `.env`.
+Create the first account in the Web UI. A base workspace needs no application,
+AI-agent, or model-provider selection: leave both catalogs clear and create the
+workspace to qualify desktop provisioning and lifecycle in isolation. Configure
+model-provider deployments under **AI control plane -> Models & providers**
+only when the test selects an AI agent, then configure Pricing, Model routes,
+Team rollout, and workspace policy as required by that AI path. Provider
+credentials belong in the product UI, not `.env`.
 
 ### Local configuration ownership
 
@@ -519,10 +522,13 @@ and validation procedure are in
 
 ### Switch an existing worktree to remote mode
 
-First start and configure the ordinary worktree. The qualifier deliberately
-reuses its users, organizations, providers, pricing, routes, policies,
-PostgreSQL volumes, and workspace-home volumes. It does not dump or copy a
-database.
+First start and configure the ordinary worktree. For placement and desktop
+lifecycle testing, create a base workspace with no applications or AI agents;
+this deliberately removes provider configuration from the qualification's
+critical path. Add an AI agent and provider route only when the test itself
+needs the gateway or agent bridge. The qualifier reuses the worktree's users,
+organizations, optional providers, pricing, routes, policies, PostgreSQL
+volumes, and workspace-home volumes. It does not dump or copy a database.
 
 Stop every workspace through LemmaComputer, then validate without changing
 containers:
@@ -586,7 +592,17 @@ Cowork, stop its workspaces, run `down`, then run `up --cowork`.
 ### Remote-node acceptance checklist
 
 - Sign in with an existing worktree account and expected organization.
-- Create and open disposable and managed workspaces.
+- Create and open a managed base workspace with no applications or AI agents.
+- Inspect that base workspace and verify its application and agent selections
+  are empty, no model alias or gateway credential is projected, and no Gateway
+  or Control application relay is created. The desktop ingress relay remains
+  required so the user can open the base desktop.
+- Restart and reconnect to the base workspace through the product route; this
+  is the minimum placement and lifecycle qualification and needs no provider.
+- Separately, when qualifying AI behavior, select an agent, configure its
+  provider route, and create or restart the workspace.
+- Create and open disposable and managed workspaces when both profile types are
+  in the test scope.
 - Test an allowed and denied public destination.
 - Complete a governed model request and verify provider credentials are absent from the sandbox.
 - Complete Hermes Desktop and Hermes CLI turns.
@@ -597,7 +613,7 @@ Cowork, stop its workspaces, run `down`, then run `up --cowork`.
   `lemmacomputer-workspace-electron`, retains `no-new-privileges`, and does not
   add capabilities or host devices for the Electron applications.
 - Open Claude Desktop, verify Cowork virtualization, and complete a Cowork action.
-- Restart and reconnect to the workspace through the product route.
+- Restart and reconnect to the AI-enabled workspace through the product route.
 - Run two workspaces concurrently and verify separate IDs, networks, relays, and home volumes.
 - Stop one workspace and confirm the other remains reachable.
 - Inspect audit events without exposing certificates, tokens, prompts, or provider secrets.

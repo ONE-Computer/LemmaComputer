@@ -657,7 +657,9 @@ export function resolveProtectedBaselinePolicy(input: ProtectedBaselineResolutio
   requireSelected([selection.workspaceProfile], workspaceProfileIds, "POLICY_WORKSPACE_PROFILE_DENIED", "workspace profile");
   requireSelected(selection.agentIds, agentIds, "POLICY_AGENT_DENIED", "agent");
   requireSelected(selection.applicationIds, applicationIds, "POLICY_APPLICATION_DENIED", "application");
-  requireSelected([selection.modelAlias], modelAliases, "POLICY_MODEL_DENIED", "model");
+  if (selection.modelAlias !== null) {
+    requireSelected([selection.modelAlias], modelAliases, "POLICY_MODEL_DENIED", "model");
+  }
   requireSelected([selection.serviceClass], serviceClasses, "POLICY_SERVICE_CLASS_DENIED", "service class");
   requireSelected(selection.connectorIds, connectorIds, "POLICY_CONNECTOR_DENIED", "connector");
   if (effortRank(selection.reasoningEffort) > effortRank(maximumReasoningEffort)) {

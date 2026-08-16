@@ -212,6 +212,44 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   await expect(page.getByRole("radiogroup", { name: "Default model mode" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
 });
 
+test("workspace configuration can save a base workspace with no applications or AI agents", async ({ page }) => {
+  let savedConfiguration: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedConfiguration = route.request().postDataJSON();
+    }
+    await route.continue();
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const applications = page.locator('section[aria-labelledby="sandbox-applications-heading"]');
+  const agents = page.locator('section[aria-labelledby="sandbox-agents-heading"]');
+  for (const checkbox of await applications.getByRole("checkbox").all()) {
+    if (await checkbox.isChecked()) await checkbox.uncheck({ force: true });
+  }
+  for (const checkbox of await agents.getByRole("checkbox").all()) {
+    if (await checkbox.isChecked()) await checkbox.uncheck({ force: true });
+  }
+  await expect(applications.locator('input[type="checkbox"]:checked')).toHaveCount(0);
+  await expect(agents.locator('input[type="checkbox"]:checked')).toHaveCount(0);
+
+  await expect(page.getByText("No additional applications selected. The base managed desktop will still launch.")).toBeVisible();
+  await expect(page.getByText("No AI agents selected. This workspace does not require a model provider or receive AI credentials.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Default model mode" })).toHaveCount(0);
+  await expect(page.getByText(/Schema v2 .* base workspace/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save configuration" })).toBeEnabled();
+  await page.getByRole("button", { name: "Save configuration" }).click();
+
+  await expect.poll(() => savedConfiguration).not.toBeNull();
+  expect(savedConfiguration).toMatchObject({
+    applicationIds: [],
+    agentIds: [],
+    modelAlias: null,
+  });
+});
+
 test("workspace configuration distinguishes policy-disabled agents from unqualified clients", async ({ page }) => {
   await page.route("**/api/v1/sandbox-settings**", async (route) => {
     const response = await route.fetch();

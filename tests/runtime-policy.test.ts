@@ -349,3 +349,32 @@ test("optional Chrome, Claude CLI, and Hermes Agent Desktop stay off until selec
   ]);
   assert.equal(new Set(selected.agents?.map((agent) => agent.agentId)).size, 4);
 });
+
+test("an empty capability selection projects a base workspace without a model route", () => {
+  const effective: EffectivePolicy = {
+    assignmentId: "assignment-base", policyBundleId: "bundle-1", policyVersionId: "version-base", version: 1,
+    documentHash: "8".repeat(64), assignedBy: "admin-1", assignedAt: "2026-08-16T00:00:00.000Z",
+    agentId: "agent-1", vendorUserId: "oc-user-1",
+    document: {
+      schemaVersion: 1,
+      workspaceProfiles: ["claude-desktop-standard-v1"],
+      agents: ["claude-desktop", "claude-cli", "hermes-claw"],
+      applications: ["firefox", "google-chrome"],
+      modelAliases: ["lemmacomputer-claude"],
+      networkProfile: "controlled-egress-v1",
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders"] } } },
+    },
+  };
+
+  const base = runtimePolicyFor(
+    effective,
+    null,
+    "claude-desktop-standard-v1",
+    [],
+    [],
+  );
+
+  assert.deepEqual(base.agents, []);
+  assert.deepEqual(base.applications, []);
+  assert.equal(base.modelAlias, null);
+});

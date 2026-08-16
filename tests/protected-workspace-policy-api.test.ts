@@ -264,7 +264,7 @@ test("guardrail activation is refused when an existing runtime cannot be revoked
   }
 });
 
-test("an active workspace with an incompatible saved selection remains stopped for review", async () => {
+test("an active workspace whose only selected agent becomes incompatible restarts as a base workspace", async () => {
   const calls: Array<{ method: string; input: unknown }> = [];
   const store = new MemoryWorkspaceStore();
   const created = await store.createOrGet(identity("administrator"), "personal", "policy-incompatible-workspace");
@@ -287,7 +287,7 @@ test("an active workspace with an incompatible saved selection remains stopped f
     destroyWorkspace: async () => {},
     create: async () => {
       creates += 1;
-      return { state: "ready", providerId: "must-not-be-created" };
+      return { state: "ready", providerId: "base-workspace-runtime" };
     },
   } as unknown as ControllerClient, {
     revokeWorkspace: async () => {},
@@ -304,16 +304,16 @@ test("an active workspace with an incompatible saved selection remains stopped f
     assert.deepEqual(response.json().enforcement, {
       stopped: 1,
       alreadyStopped: 0,
-      reconciled: 0,
-      actionRequired: 1,
-      restarted: 0,
+      reconciled: 1,
+      actionRequired: 0,
+      restarted: 1,
       restartFailed: 0,
     });
-    assert.equal(creates, 0);
-    const stopped = await store.getOwned(identity("administrator"), created.id);
-    assert.equal(stopped?.state, "stopped");
-    assert.equal(stopped?.providerId, null);
-    assert.equal(stopped?.failureCode, null);
+    assert.equal(creates, 1);
+    const restarted = await store.getOwned(identity("administrator"), created.id);
+    assert.equal(restarted?.state, "ready");
+    assert.equal(restarted?.providerId, "base-workspace-runtime");
+    assert.equal(restarted?.failureCode ?? null, null);
   } finally {
     await app.close();
   }

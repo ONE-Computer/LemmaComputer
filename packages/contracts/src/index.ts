@@ -69,6 +69,8 @@ export const sandboxApplicationIds = ["firefox", "google-chrome", "visual-studio
 export const sandboxApplicationIdSchema = z.enum(sandboxApplicationIds);
 export type SandboxApplicationId = z.infer<typeof sandboxApplicationIdSchema>;
 
+const uniqueWorkspaceSelections = <T>(values: T[]) => new Set(values).size === values.length;
+
 export const sandboxApplicationSchema = z.object({
   id: sandboxApplicationIdSchema,
   displayName: z.string().min(1),
@@ -529,12 +531,22 @@ export const sandboxConfigurationSchema = z.object({
   profileId: sandboxProfileIdSchema,
   executionMode: executionModeSchema.default("managed"),
   egressMode: egressModeSchema.default("restricted"),
-  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
-  agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length),
-  modelAlias: sandboxModelAliasSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length)
+    .refine(uniqueWorkspaceSelections, "Application selections must not contain duplicates"),
+  agentIds: z.array(agentCatalogIdSchema).max(agentCatalogIds.length)
+    .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
+  modelAlias: sandboxModelAliasSchema.nullable(),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   egress: runtimeEgressPolicySchema.nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if ((value.agentIds.length === 0) !== (value.modelAlias === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the workspace has AI agents",
+    });
+  }
+});
 export type SandboxConfiguration = z.infer<typeof sandboxConfigurationSchema>;
 
 // The runtime still uses the historical `hermes-claw` catalog identifier.
@@ -571,12 +583,22 @@ export const workspaceManifestSandboxSchema = z.object({
   profileId: sandboxProfileIdSchema,
   executionMode: executionModeSchema,
   egressMode: egressModeSchema,
-  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
-  agentIds: z.array(workspaceManifestAgentCatalogIdSchema).min(1).max(workspaceManifestAgentCatalogIds.length),
-  modelAlias: sandboxModelAliasSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length)
+    .refine(uniqueWorkspaceSelections, "Application selections must not contain duplicates"),
+  agentIds: z.array(workspaceManifestAgentCatalogIdSchema).max(workspaceManifestAgentCatalogIds.length)
+    .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
+  modelAlias: sandboxModelAliasSchema.nullable(),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   egress: runtimeEgressPolicySchema.nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if ((value.agentIds.length === 0) !== (value.modelAlias === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the workspace has AI agents",
+    });
+  }
+});
 export type WorkspaceManifestSandbox = z.infer<typeof workspaceManifestSandboxSchema>;
 
 export const workspaceManifestChannelSchema = z.object({
@@ -598,7 +620,17 @@ export const workspaceManifestSchema = z.object({
       context.addIssue({ code: "custom", message: "A workspace can declare each channel adapter only once" });
     }
   }),
-}).strict();
+}).strict().superRefine((value, context) => {
+  for (const [index, channel] of value.channels.entries()) {
+    if (!value.sandbox.agentIds.includes(channel.defaultAgentId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["channels", index, "defaultAgentId"],
+        message: "A messaging channel must use an AI agent selected for the workspace",
+      });
+    }
+  }
+});
 export type WorkspaceManifest = z.infer<typeof workspaceManifestSchema>;
 
 export const egressDecisionReasonSchema = z.enum([
@@ -624,40 +656,58 @@ export type EgressDecision = z.infer<typeof egressDecisionSchema>;
 export const sandboxSettingsSchema = z.object({
   grantId: z.string().min(1).max(128),
   profileId: sandboxProfileIdSchema,
-  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length),
-  modelAlias: sandboxModelAliasSchema,
+  applicationIds: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length)
+    .refine(uniqueWorkspaceSelections, "Application selections must not contain duplicates"),
+  modelAlias: sandboxModelAliasSchema.nullable(),
   requestedServiceClass: workspaceRequestedServiceClassSchema,
   routePreferenceMigrationRequired: z.boolean(),
   profile: sandboxProfileSchema,
   availableProfiles: z.array(sandboxProfileSchema).min(1),
-  availableApplications: z.array(sandboxApplicationSchema).min(1),
-  availableModels: z.array(z.object({ alias: sandboxModelAliasSchema, displayName: z.string().min(1), provider: z.string().min(1) })).min(1),
+  availableApplications: z.array(sandboxApplicationSchema),
+  availableModels: z.array(z.object({ alias: sandboxModelAliasSchema, displayName: z.string().min(1), provider: z.string().min(1) })),
   availableServiceClasses: z.array(z.object({
     value: workspaceRequestedServiceClassSchema,
     displayName: z.string().min(1),
     description: z.string().min(1),
   }).strict()).min(1),
-  agentIds: z.array(agentCatalogIdSchema).min(1),
-  availableAgents: z.array(agentCatalogEntrySchema).min(1),
+  agentIds: z.array(agentCatalogIdSchema)
+    .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
+  availableAgents: z.array(agentCatalogEntrySchema),
   securityGroup: egressSecurityGroupVersionSchema.optional(),
   availableSecurityGroups: z.array(egressSecurityGroupVersionSchema).optional(),
   egress: runtimeEgressPolicySchema.optional(),
   manifest: workspaceManifestSchema,
   updatedAt: z.iso.datetime().nullable(),
+}).superRefine((value, context) => {
+  if ((value.agentIds.length === 0) !== (value.modelAlias === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the workspace has AI agents",
+    });
+  }
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 
 export const saveSandboxSettingsSchema = z.object({
   grantId: z.string().min(1).max(128).default("personal"),
   profileId: sandboxProfileIdSchema,
-  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).default(["firefox"]),
-  modelAlias: sandboxModelAliasSchema.optional(),
+  applicationIds: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length)
+    .refine(uniqueWorkspaceSelections, "Application selections must not contain duplicates")
+    .default(["firefox"]),
+  modelAlias: sandboxModelAliasSchema.nullable().optional(),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("balanced"),
-  agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(
-    (ids) => new Set(ids).size === ids.length,
-    "Agent selections must not contain duplicates",
-  ),
-}).strict();
+  agentIds: z.array(agentCatalogIdSchema).max(agentCatalogIds.length)
+    .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
+}).strict().superRefine((value, context) => {
+  if ((value.agentIds.length === 0) !== (value.modelAlias == null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the workspace has AI agents",
+    });
+  }
+});
 
 export const workspaceViewSchema = z.object({
   id: z.uuid(),
@@ -665,14 +715,14 @@ export const workspaceViewSchema = z.object({
   state: workspaceStateSchema,
   readiness: readinessSchema,
   modelRoute: modelRouteSchema.optional(),
-  applications: z.array(sandboxApplicationIdSchema).min(1).optional(),
+  applications: z.array(sandboxApplicationIdSchema).optional(),
   agents: z.array(z.object({
     id: agentCatalogIdSchema,
     displayName: z.string().min(1),
     clientVersion: z.string().min(1),
     agentId: z.string().min(1),
     state: z.enum(["selected", "starting", "ready", "degraded", "unavailable"]),
-  }).strict()).min(1).optional(),
+  }).strict()).optional(),
   policyAssignment: z.object({
     version: z.number().int().positive(),
     hash: z.string().regex(/^[a-f0-9]{64}$/),
@@ -686,7 +736,7 @@ export const workspaceViewSchema = z.object({
     id: z.string().min(1),
     client: z.string().min(1),
     clientVersion: z.string().min(1),
-    modelAlias: z.string().min(1),
+    modelAlias: z.string().min(1).nullable(),
     executionMode: executionModeSchema,
     egressMode: egressModeSchema,
     persistence: z.literal("persistent-home"),
@@ -816,12 +866,19 @@ export const runtimePolicySchema = z.object({
   egressMode: egressModeSchema.default("restricted"),
   agentId: z.string().min(1),
   agentProfile: agentProfileSchema,
-  agents: z.array(runtimeAgentPolicySchema).min(1).max(agentCatalogIds.length).optional(),
-  applications: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).optional(),
+  agents: z.array(runtimeAgentPolicySchema).max(agentCatalogIds.length)
+    .refine(
+      (agents) => uniqueWorkspaceSelections(agents.map((agent) => agent.catalogId)),
+      "Runtime agents must not contain duplicates",
+    )
+    .optional(),
+  applications: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length)
+    .refine(uniqueWorkspaceSelections, "Runtime applications must not contain duplicates")
+    .optional(),
   networkProfile: z.literal("controlled-egress-v1"),
   egress: runtimeEgressPolicySchema.optional(),
   clipboard: clipboardPolicySchema.optional(),
-  modelAlias: z.string().min(1).max(128),
+  modelAlias: z.string().min(1).max(128).nullable(),
   mcpServer: z.string().min(1).max(128),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
   maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
@@ -837,6 +894,15 @@ export const runtimePolicySchema = z.object({
     z.string().min(1).max(128),
     z.enum(["allow", "approval_required", "deny"]),
   ),
+}).superRefine((value, context) => {
+  const hasActiveAgents = value.agents === undefined || value.agents.length > 0;
+  if (hasActiveAgents === (value.modelAlias === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the runtime has AI agents",
+    });
+  }
 });
 export type RuntimePolicy = z.infer<typeof runtimePolicySchema>;
 
@@ -873,10 +939,26 @@ export const policyBundlePayloadSchema = z.strictObject({
     catalogId: agentCatalogIdSchema,
     agentId: z.string().min(1).max(128),
     memoryMiB: z.number().int().positive().max(65_536),
-  })).min(1).max(agentCatalogIds.length),
+  })).max(agentCatalogIds.length),
   issuedAt: z.iso.datetime(),
   notBefore: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
+}).superRefine((value, context) => {
+  const expectedAgentIds = value.policy.agents === undefined
+    ? [value.policy.agentId]
+    : value.policy.agents.map((agent) => agent.agentId);
+  const resourceAgentIds = value.agentResources.map((resource) => resource.agentId);
+  if (
+    new Set(resourceAgentIds).size !== resourceAgentIds.length
+    || expectedAgentIds.length !== resourceAgentIds.length
+    || expectedAgentIds.some((agentId) => !resourceAgentIds.includes(agentId))
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["agentResources"],
+      message: "Signed agent resources must match the runtime's selected AI agents",
+    });
+  }
 });
 export type PolicyBundlePayload = z.infer<typeof policyBundlePayloadSchema>;
 
@@ -2091,13 +2173,21 @@ export type ProductReleaseVerificationKeySet = z.infer<typeof productReleaseVeri
 
 export const protectedPolicySelectionSchema = z.strictObject({
   workspaceProfile: sandboxProfileIdSchema,
-  agentIds: z.array(agentCatalogIdSchema).min(1).max(agentCatalogIds.length).refine(uniquePolicyValues, "Selected agents must be unique"),
-  applicationIds: z.array(sandboxApplicationIdSchema).min(1).max(sandboxApplicationIds.length).refine(uniquePolicyValues, "Selected applications must be unique"),
-  modelAlias: sandboxModelAliasSchema,
+  agentIds: z.array(agentCatalogIdSchema).max(agentCatalogIds.length).refine(uniquePolicyValues, "Selected agents must be unique"),
+  applicationIds: z.array(sandboxApplicationIdSchema).max(sandboxApplicationIds.length).refine(uniquePolicyValues, "Selected applications must be unique"),
+  modelAlias: sandboxModelAliasSchema.nullable(),
   serviceClass: workspaceRequestedServiceClassSchema,
   reasoningEffort: workspaceReasoningEffortSchema,
   egressMode: egressModeSchema,
   connectorIds: z.array(protectedPolicyConnectorIdSchema).max(128).refine(uniquePolicyValues, "Selected connectors must be unique"),
+}).superRefine((value, context) => {
+  if ((value.agentIds.length === 0) !== (value.modelAlias === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["modelAlias"],
+      message: "A model route is required exactly when the workspace has AI agents",
+    });
+  }
 });
 export type ProtectedPolicySelection = z.infer<typeof protectedPolicySelectionSchema>;
 

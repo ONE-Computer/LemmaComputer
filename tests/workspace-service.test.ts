@@ -17,8 +17,10 @@ class FakeController implements ControllerClient {
   lastPolicyBundle: SignedPolicyBundle | undefined;
   lastAccessGeneration: number | undefined;
   lastEgressProxy: EgressProxyGrant | undefined;
+  lastCreateInput: Parameters<ControllerClient["create"]>[0] | undefined;
   async create(input: Parameters<ControllerClient["create"]>[0]): Promise<Sandbox> {
     this.creates += 1;
+    this.lastCreateInput = input;
     this.lastGateway = input.gateway;
     this.lastAgentBridge = input.agentBridge;
     this.lastPolicy = input.policy;
@@ -311,6 +313,53 @@ test("workspace lifetime remains UI-managed while its gateway grant can renew", 
   assert.equal(current?.state, "ready");
   assert.equal(controller.creates, 1);
   assert.equal(gateway.grants, 2);
+});
+
+test("a base workspace creates, opens, and restarts without gateway or agent authority", async () => {
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  let bridgeIssues = 0;
+  const basePolicy: RuntimePolicy = {
+    ...policy,
+    agents: [],
+    applications: [],
+    modelAlias: null,
+  };
+  const service = new WorkspaceService(
+    new MemoryWorkspaceStore(),
+    controller,
+    gateway,
+    {
+      baseUrl: "http://lemmacomputer-control:4100",
+      issue: () => {
+        bridgeIssues += 1;
+        return "base-workspace-must-not-receive-this-token";
+      },
+    },
+  );
+
+  const created = await service.create(alex, basePolicy, "base", "base-create-0001", "correlation-base-create");
+  assert.equal(created.state, "ready");
+  assert.deepEqual(created.applications, []);
+  assert.deepEqual(created.agents, []);
+  assert.equal(created.profile?.modelAlias, null);
+  assert.equal(created.modelRoute, undefined);
+  assert.equal(gateway.grants, 0);
+  assert.equal(bridgeIssues, 0);
+  assert.equal(controller.lastCreateInput?.gateway, undefined);
+  assert.equal(controller.lastCreateInput?.agentBridge, undefined);
+  assert.equal(controller.lastCreateInput?.agentGrants, undefined);
+  assert.equal(controller.lastCreateInput?.chatRuntimes, undefined);
+
+  await service.open(alex, basePolicy, created.id);
+  await service.restart(alex, basePolicy, created.id, "correlation-base-restart");
+  assert.equal(gateway.grants, 0);
+  assert.equal(bridgeIssues, 0);
+  assert.equal(controller.creates, 2);
+  await assert.rejects(
+    service.testGateway(alex, basePolicy, created.id),
+    (error: unknown) => error instanceof LemmaComputerError && error.code === "WORKSPACE_AI_NOT_SELECTED",
+  );
 });
 
 test("an active workspace grant can adopt a new policy without recreating the sandbox", async () => {

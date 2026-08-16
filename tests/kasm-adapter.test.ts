@@ -1100,6 +1100,50 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
     assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED=true"));
     assert.ok(JSON.stringify(sandboxCreates.at(-1)!.body).includes("LEMMACOMPUTER_COWORK_ENABLED=false"));
 
+    const baseWorkspaceId = "88888888-8888-4888-8888-888888888888";
+    const { egress: _selectedEgress, ...policyWithoutEgress } = policy;
+    const basePolicy = {
+      ...policyWithoutEgress,
+      policyVersionId: "policy-version-base",
+      policyHash: "8".repeat(64),
+      agents: [],
+      applications: [],
+      modelAlias: null,
+    };
+    const baseSignedPolicy = policyFixture(basePolicy, baseWorkspaceId);
+    await standardAdapter.create({
+      workspaceId: baseWorkspaceId,
+      accessGeneration: 1,
+      authority: {
+        tenantId: "acme",
+        subjectId: "alex",
+        workspaceId: baseWorkspaceId,
+        accessGeneration: 1,
+        correlationId: "correlation-base-workspace",
+        policyDigest: basePolicy.policyHash,
+        policyKeyId: baseSignedPolicy.bundle.keyId,
+      },
+      policy: basePolicy,
+      policyBundle: baseSignedPolicy.bundle,
+      policyVerificationKeys: baseSignedPolicy.keys,
+    });
+    const baseCreate = requests.filter((item) => (
+      item.method === "POST"
+      && item.path.startsWith(`/containers/create?name=lemmacomputer-sandbox-${baseWorkspaceId}`)
+    )).at(-1)!;
+    const baseLabels = baseCreate.body.Labels as Record<string, string>;
+    const baseEnvironment = baseCreate.body.Env as string[];
+    assert.equal(baseLabels["com.lemmacomputer.enabled-agents"], "");
+    assert.equal(baseLabels["com.lemmacomputer.enabled-applications"], "");
+    assert.equal(baseLabels["com.lemmacomputer.gateway-attached"], "false");
+    assert.equal(baseLabels["com.lemmacomputer.control-attached"], "false");
+    assert.equal(baseLabels["com.lemmacomputer.model-alias"], undefined);
+    assert.ok(baseEnvironment.includes("LEMMACOMPUTER_ENABLED_AGENTS="));
+    assert.ok(baseEnvironment.includes("LEMMACOMPUTER_ENABLED_APPLICATIONS="));
+    assert.equal(baseEnvironment.some((value) => value.startsWith("LEMMACOMPUTER_GATEWAY_")), false);
+    assert.equal(baseEnvironment.some((value) => value.startsWith("LEMMACOMPUTER_MODEL_ALIAS=")), false);
+    assert.equal(baseEnvironment.some((value) => value.startsWith("LEMMACOMPUTER_AGENT_BRIDGE_TOKEN=")), false);
+
     await adapter.purgeWorkspace("b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508", 1);
     assert.ok(requests.some((item) => item.method === "DELETE" && item.path === `/volumes/${workspaceVolume}?force=true`));
   } finally {

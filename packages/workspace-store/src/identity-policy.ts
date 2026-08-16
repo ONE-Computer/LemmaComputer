@@ -92,7 +92,7 @@ const agentCatalogIdFor = (profile: unknown): AgentCatalogId => ({
 
 export const runtimePolicyFor = (
   policy: EffectivePolicy,
-  selectedModelAlias?: string,
+  selectedModelAlias?: string | null,
   selectedWorkspaceProfile?: string,
   selectedAgentIds?: AgentCatalogId[],
   selectedApplicationIds?: SandboxApplicationId[],
@@ -117,12 +117,10 @@ export const runtimePolicyFor = (
   const workspaceProfiles = Array.isArray(document.workspaceProfiles)
     ? document.workspaceProfiles.filter((value): value is string => typeof value === "string")
     : typeof document.workspaceProfile === "string" ? [document.workspaceProfile] : [];
-  const modelAlias = selectedModelAlias ?? allowedModelAliases[0];
   const workspaceProfile = selectedWorkspaceProfile ?? workspaceProfiles[0];
   const clipboard = document.clipboard && typeof document.clipboard === "object" && !Array.isArray(document.clipboard)
     ? document.clipboard as Record<string, unknown>
     : defaultClipboardPolicy;
-  if (!modelAlias || !allowedModelAliases.includes(modelAlias)) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "The selected model route is not assigned by the active policy", 403);
   if (!workspaceProfile || !workspaceProfiles.includes(workspaceProfile)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "The selected sandbox profile is not assigned by the active policy", 403);
   const hasAgentCatalog = Array.isArray(document.agents) || selectedAgentIds !== undefined;
   const configuredAgentIds: AgentCatalogId[] = Array.isArray(document.agents)
@@ -137,11 +135,18 @@ export const runtimePolicyFor = (
     : configuredAgentIds;
   const defaultAgentIds = configuredDefaultAgentIds.length ? configuredDefaultAgentIds : configuredAgentIds;
   const agentIds: AgentCatalogId[] = hasAgentCatalog ? selectedAgentIds ?? defaultAgentIds : configuredAgentIds;
-  if (!agentIds.length || new Set(agentIds).size !== agentIds.length) {
-    throw new LemmaComputerError("AGENT_SELECTION_INVALID", "At least one unique workspace agent must be selected", 400);
+  if (new Set(agentIds).size !== agentIds.length) {
+    throw new LemmaComputerError("AGENT_SELECTION_INVALID", "Each unique workspace agent may be selected only once", 400);
   }
   if (agentIds.some((id) => !configuredAgentIds.includes(id))) {
     throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "A selected agent is not assigned by the active policy", 403);
+  }
+  const modelAlias = agentIds.length === 0 ? null : selectedModelAlias ?? allowedModelAliases[0];
+  if (modelAlias !== null && !allowedModelAliases.includes(modelAlias)) {
+    throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "The selected model route is not assigned by the active policy", 403);
+  }
+  if (agentIds.length > 0 && modelAlias === null) {
+    throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "A workspace with AI agents requires an assigned model route", 403);
   }
   const configuredApplicationIds = Array.isArray(document.applications)
     ? document.applications.filter((value): value is SandboxApplicationId => typeof value === "string" && sandboxApplicationIds.includes(value as SandboxApplicationId))
@@ -150,8 +155,8 @@ export const runtimePolicyFor = (
     ? document.defaultApplications.filter((value): value is SandboxApplicationId => typeof value === "string" && configuredApplicationIds.includes(value as SandboxApplicationId))
     : configuredApplicationIds;
   const applicationIds = selectedApplicationIds ?? defaultApplicationIds;
-  if (!applicationIds.length || new Set(applicationIds).size !== applicationIds.length) {
-    throw new LemmaComputerError("APPLICATION_SELECTION_INVALID", "At least one unique sandbox application must be selected", 400);
+  if (new Set(applicationIds).size !== applicationIds.length) {
+    throw new LemmaComputerError("APPLICATION_SELECTION_INVALID", "Workspace application selections must be unique", 400);
   }
   if (applicationIds.some((id) => !configuredApplicationIds.includes(id))) {
     throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "A selected application is not assigned by the active policy", 403);
@@ -165,7 +170,7 @@ export const runtimePolicyFor = (
       agentProfile: agentProfileFor(catalogId),
       displayName: catalog.displayName,
       clientVersion: catalog.clientVersion,
-      modelAlias,
+      modelAlias: modelAlias!,
       mcpServer,
       allowedTools: tools as string[],
       toolPolicies,
@@ -225,7 +230,7 @@ export const runtimePolicyFor = (
     executionMode,
     egressMode,
     agentId: primaryAgent?.agentId ?? policy.agentId,
-    agentProfile: primaryAgent?.agentProfile ?? document.agentProfile,
+    agentProfile: primaryAgent?.agentProfile ?? document.agentProfile ?? "lemmacomputer-default-agent",
     ...(agents ? { agents } : {}),
     applications: applicationIds,
     networkProfile: document.networkProfile,

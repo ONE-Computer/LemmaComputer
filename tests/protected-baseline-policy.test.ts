@@ -297,6 +297,22 @@ test("effective policy intersects allow lists, applies deny precedence, and keep
   assert.equal(resolve(verified).effectiveHash, effective.effectiveHash);
 });
 
+test("protected policy resolution permits the same base workspace selection", () => {
+  const { verified } = fixture();
+  const effective = resolve(verified, {
+    agentIds: [],
+    applicationIds: [],
+    modelAlias: null,
+    connectorIds: [],
+    reasoningEffort: "disabled",
+  });
+
+  assert.deepEqual(effective.selection.agentIds, []);
+  assert.deepEqual(effective.selection.applicationIds, []);
+  assert.equal(effective.selection.modelAlias, null);
+  assert.deepEqual(effective.selection.connectorIds, []);
+});
+
 test("baseline-denied, organization-denied, over-ceiling, and unknown selections fail closed", () => {
   const { verified } = fixture();
   const rejected = [
