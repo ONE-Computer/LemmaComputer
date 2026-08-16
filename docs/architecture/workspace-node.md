@@ -1,5 +1,8 @@
 # Workspace node deployment
 
+The rationale for sticky placement and the remote mutual-TLS trust boundary is
+recorded in [ADR 0006](../adr/0006-hosted-c-minus-workspace-node-placement-and-trust.md).
+
 LemmaComputer has one Docker/KasmVNC workspace runtime and two placements. A
 `colocated` node runs beside the reference application stack for
 customer-managed installations and worktrees. A `remote` node runs the same

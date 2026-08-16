@@ -41,8 +41,9 @@ checkout's `.env`, or use `compose.hosted.yaml` to approximate hosted.
 1. Treat the user's request as the task contract. If a GitHub issue exists, also read its definition of success and unresolved `blocked by` relationships.
 2. Select the setup from the table above and follow the single workflow guide. Read `docs/guides/local-deployment.md` only when the task specifically needs the customer-managed Entra or Microsoft 365 integration flow.
 3. Use one task per branch and one branch per worktree. Do not develop directly on `main`.
-4. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
-5. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
+4. Create task worktrees only under the primary checkout's `.worktrees/<task-name>` directory (plural), never as repository siblings or directly in the repository root.
+5. Run `npm run worktree:init` once in a new worktree, then `npm run dev:doctor` at the start of each work session.
+6. Keep changes inside the task scope. Record substantial follow-up work separately instead of expanding the task silently.
 
 Branch names should use `<issue>-<short-name>` when an issue exists and `<short-name>` otherwise, unless the user or execution environment requires a prefix. Parallel worktrees must never share `.env`, Compose project names, container names, ports, networks, images, volumes, or databases.
 

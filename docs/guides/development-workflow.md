@@ -87,13 +87,21 @@ checkout:
 
 ```bash
 git fetch origin
-mkdir -p ../onecomputer-worktrees
-git worktree add ../onecomputer-worktrees/<task-name> \
+mkdir -p .worktrees
+git worktree add .worktrees/<task-name> \
   -b <issue>-<short-name> origin/main
-cd ../onecomputer-worktrees/<task-name>
+cd .worktrees/<task-name>
 npm run worktree:init
 npm run dev:doctor
 ```
+
+The canonical task-worktree directory is the primary checkout's literal
+`.worktrees/` directory (plural). Do not create task worktrees as siblings of
+the repository, directly in the repository root, or in an improvised directory.
+Keeping one predictable containment path makes ownership, cleanup, Docker
+namespace inspection, and agent handoff repeatable. The directory is ignored by
+Git; each child remains a normal Git worktree with its own branch and generated
+runtime identity.
 
 When there is no issue, use a short descriptive branch name. Follow an explicit
 user-supplied branch name when provided.
@@ -230,6 +238,34 @@ model-provider deployments under **AI control plane -> Models & providers**
 only when the test selects an AI agent, then configure Pricing, Model routes,
 Team rollout, and workspace policy as required by that AI path. Provider
 credentials belong in the product UI, not `.env`.
+
+### Verify a local account without external email delivery
+
+An initialized development worktree uses the captured authentication-email
+transport. Sign-up, verification tokens, Better Auth records, sessions, and the
+personal-tenant onboarding path remain real; only delivery to an external
+mailbox is replaced.
+
+1. Open the worktree-specific Web URL and choose **Create account**.
+2. Enter a test name, email address, and password, then submit the form.
+3. After the UI confirms that the worktree captured the message, choose
+   **Open local verification email**.
+4. The browser opens the captured message's real, same-origin verification URL.
+   Complete sign-in and personal-workspace onboarding normally.
+
+The same capture transport supports local password-recovery links. It consumes
+the latest matching message for that email and purpose; it is not a universal
+authentication bypass and it cannot retrieve another worktree's messages. The
+capture endpoint is exposed only when all three conditions hold:
+
+- `LEMMACOMPUTER_INSTALLATION_KIND=worktree`;
+- `LEMMACOMPUTER_RUNTIME_ENVIRONMENT=development`; and
+- `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=capture`.
+
+Production configuration rejects the capture transport and requires real
+transactional email. If the local button is absent, run `npm run env:check` and
+confirm those generated worktree values instead of adding Postmark credentials
+or editing `.env.example`.
 
 ### Local configuration ownership
 
