@@ -229,6 +229,49 @@ test("provider-neutral customer sign-in exposes configured methods and safe acco
   });
 });
 
+test("a worktree signup opens its captured verification email without external delivery", async ({ page }) => {
+  let captureRequest: Record<string, unknown> | null = null;
+  let verificationTarget = "";
+  await page.unroute("**/api/v1/auth/customer-capabilities");
+  await page.route("**/api/v1/auth/customer-capabilities", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      emailPassword: true,
+      passkey: true,
+      socialProviders: [],
+      companySso: false,
+      developmentEmailCapture: true,
+    }),
+  }));
+  await page.route("**/api/v1/auth/customer/sign-up/email", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ user: { id: "new-user" } }),
+  }));
+  await page.route("**/api/v1/auth/development-email-capture", async (route) => {
+    captureRequest = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ url: verificationTarget }),
+    });
+  });
+
+  await page.goto("/");
+  verificationTarget = `${new URL(page.url()).origin}/?email-verified=1`;
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.getByLabel("Full name").fill("Local Tester");
+  await page.getByLabel("Work email").fill("local@example.test");
+  await page.getByLabel("Password").fill("correct horse battery staple");
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+
+  await expect(page.getByRole("status")).toContainText("captures email locally");
+  await page.getByRole("button", { name: "Open local verification email" }).click();
+  await expect(page).toHaveURL(verificationTarget);
+  expect(captureRequest).toEqual({ email: "local@example.test", kind: "email-verification" });
+});
+
 test("sign-in and sign-up actions remain reachable on a compact laptop viewport", async ({ page }) => {
   await page.unroute("**/api/v1/auth/customer-capabilities");
   await page.route("**/api/v1/auth/customer-capabilities", (route) => route.fulfill({

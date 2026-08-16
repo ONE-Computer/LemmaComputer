@@ -794,7 +794,9 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
           ...(invited ? { callbackURL } : {}),
         });
         setVerificationRecipient(email);
-        setStatus(invited ? "" : "Check your email to verify your account, then return here to sign in.");
+        setStatus(invited ? "" : capabilities?.developmentEmailCapture
+          ? "This worktree captures email locally. Open the captured verification email below."
+          : "Check your email to verify your account, then return here to sign in.");
       } else if (mode === "recovery") {
         await authApi.requestPasswordReset(email, `${window.location.origin}/reset-password`);
         setStatus("If an account exists for that email, a reset link is on its way.");
@@ -826,9 +828,29 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setStatus("");
     try {
       await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : "/");
-      setStatus("Verification email sent. Check your inbox and junk folder, then open the link to continue.");
+      setStatus(capabilities?.developmentEmailCapture
+        ? "A new local verification email was captured. Open it below."
+        : "Verification email sent. Check your inbox and junk folder, then open the link to continue.");
     } catch (sendError) {
       setFormError(sendError.message ?? "The verification email could not be sent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openDevelopmentVerification = async () => {
+    const recipient = (verificationRecipient || email).trim();
+    if (!recipient) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      if (!verificationRecipient) {
+        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : "/");
+      }
+      const captured = await authApi.takeDevelopmentEmail(recipient, "email-verification");
+      if (!captured?.url) throw new Error("The captured verification email is unavailable.");
+      window.location.assign(captured.url);
+    } catch (captureError) {
+      setFormError(captureError.message ?? "The captured verification email could not be opened.");
     } finally {
       setBusy(false);
     }
@@ -886,6 +908,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
           <span>We sent a verification link to <strong>{verificationRecipient}</strong>. Open it in this browser to verify your email and finish joining {invitationContext?.organizationDisplayName ?? "the organization"} automatically.</span>
           {status && <div className="signin-status" role="status">{status}</div>}
           {formError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Email could not be sent</strong>{formError}</span></div>}
+          {capabilities?.developmentEmailCapture && <button className="primary-button signin-button" type="button" disabled={busy} onClick={openDevelopmentVerification}>{busy ? "Opening…" : "Open local verification email"}</button>}
           <button className="primary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>{busy ? "Sending…" : "Resend verification email"}</button>
           <button className="secondary-button signin-button" type="button" disabled={busy} onClick={onSignedIn}>I’ve verified my email</button>
           <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Use an existing account instead</button>
@@ -943,6 +966,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
               {mode === "two-factor" && <label>{useBackupCode ? "Backup code" : "Authenticator code"}<input inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" required value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} /></label>}
               <button className="primary-button signin-button" type="submit" onClick={mode === "company-sso" ? (event) => { event.preventDefault(); startCompanySso(); } : undefined} disabled={busy || invitationBusy}>{busy || invitationBusy ? "Please wait…" : ({ signin: "Sign in", signup: "Create account", recovery: "Send reset link", reset: "Reset password", "two-factor": "Verify", "company-sso": "Continue" }[mode])}</button>
             </form>
+            {!invited && mode === "signup" && capabilities?.developmentEmailCapture && (verificationRecipient || email.trim()) && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={openDevelopmentVerification}>{busy ? "Opening…" : "Open local verification email"}</button>}
             {!invited && mode === "signup" && verificationRecipient && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>Resend verification email</button>}
             {mode === "signin" && <div className="signin-secondary-actions"><button type="button" onClick={() => changeMode("recovery")}>Forgot password?</button>{!invited && <button type="button" onClick={() => changeMode("signup")}>Create account</button>}</div>}
             {invited && mode === "signin" && <button className="signin-back-button" type="button" onClick={() => changeMode("signup")}>Create a new account</button>}

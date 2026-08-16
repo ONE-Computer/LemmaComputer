@@ -275,6 +275,10 @@ export const authApi = {
     email,
     callbackURL: new URL(callbackURL, window.location.origin).toString(),
   })),
+  takeDevelopmentEmail: (email: string, kind: "email-verification" | "password-recovery") => request("/api/v1/auth/development-email-capture", mutation("POST", {
+    email,
+    kind,
+  })),
   resetPassword: (token: string, newPassword: string) => request("/api/v1/auth/customer/reset-password", mutation("POST", { token, newPassword })),
   signInWithSocialProvider: (provider: string, callbackURL = "/") => {
     const errorPath = callbackURL === "/invite" ? "/invite" : "/";

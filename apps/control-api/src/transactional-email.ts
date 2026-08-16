@@ -86,6 +86,12 @@ export class CaptureTransactionalEmailAdapter implements TransactionalEmailAdapt
     return this.messages.splice(index, 1)[0] ?? null;
   }
 
+  takeLatest(to: string, kind: TransactionalEmailKind): TransactionalEmailMessage | null {
+    const index = this.messages.findLastIndex((message) => message.to === to && message.kind === kind);
+    if (index < 0) return null;
+    return this.messages.splice(index, 1)[0] ?? null;
+  }
+
   clear() {
     this.messages.splice(0, this.messages.length);
   }

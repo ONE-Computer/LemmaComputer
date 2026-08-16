@@ -47,7 +47,7 @@ import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminR
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 import { createCustomerAuthentication, createCustomerSsoAuthentication, customerAuthenticationBasePath, customerAuthenticationControlPath, parseVersionedBetterAuthSecrets, registerCustomerAuthenticationRoutes, type CustomerAuthentication } from "./customer-authentication.js";
-import { createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
+import { CaptureTransactionalEmailAdapter, createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
 import {
   customerInvitationContextMaxAgeSeconds,
   createBetterAuthSessionReader,
@@ -598,6 +598,7 @@ export function createControlServer(
       mode: "email" | "copy-link";
       email?: TransactionalEmailAdapter;
     };
+    developmentEmailCapture?: Pick<CaptureTransactionalEmailAdapter, "takeLatest">;
     closeCustomerAuthentication?: () => Promise<void>;
     platformAuthentication?: PlatformAuthentication;
     platformBetterAuthService?: BetterAuthPlatformOperatorAuthenticationService;
@@ -2232,7 +2233,30 @@ export function createControlServer(
       passkey: options.plugins?.some((plugin) => plugin.id === "passkey") === true,
       socialProviders: Object.keys(options.socialProviders ?? {}).sort(),
       companySso: Boolean(security.tenantSsoAdministration),
+      ...(security.developmentEmailCapture ? { developmentEmailCapture: true } : {}),
     });
+  });
+  app.post("/v1/auth/development-email-capture", async (request, reply) => {
+    if (!security.developmentEmailCapture || !connectionOptions.publicWebUrl) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_CAPTURE_UNAVAILABLE", "Development email capture is unavailable", 404);
+    }
+    const publicOrigin = new URL(connectionOptions.publicWebUrl).origin;
+    if (request.headers.origin !== publicOrigin) {
+      throw new LemmaComputerError("FORBIDDEN", "Development email capture requires the worktree Web origin", 403);
+    }
+    const input = z.strictObject({
+      email: z.email().max(320).transform((value) => value.toLowerCase()),
+      kind: z.enum(["email-verification", "password-recovery"]),
+    }).parse(request.body ?? {});
+    const message = security.developmentEmailCapture.takeLatest(input.email, input.kind);
+    if (!message) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_NOT_FOUND", "No captured development email is available", 404);
+    }
+    const actionUrl = message.text.split(/\r?\n/).map((line) => line.trim()).find((line) => /^https?:\/\//.test(line));
+    if (!actionUrl || new URL(actionUrl).origin !== publicOrigin) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_INVALID", "The captured development email is invalid", 500);
+    }
+    return reply.header("cache-control", "no-store").send({ url: actionUrl });
   });
   app.post("/v1/auth/customer-sso", async (request, reply) => {
     const tenantSsoAdministration = security.tenantSsoAdministration;
@@ -5896,6 +5920,12 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         mode: env.INVITATION_DELIVERY_MODE,
         email: transactionalEmail,
       },
+      developmentEmailCapture:
+        env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+        && env.RUNTIME_ENVIRONMENT === "development"
+        && transactionalEmail instanceof CaptureTransactionalEmailAdapter
+          ? transactionalEmail
+          : undefined,
       closeCustomerAuthentication: () => authenticationPool.end(),
       platformAuthentication,
       platformBetterAuthService,
