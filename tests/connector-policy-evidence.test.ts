@@ -143,6 +143,37 @@ test("PostgreSQL persists immutable connector policy changes and workspace deliv
     assert.ok(egressOrigins.includes("https://auth.reports.example"));
     assert.ok(!egressOrigins.includes("https://mcp.withdrawn.example"), "a built-in row must not authorize egress");
     assert.ok(!egressOrigins.includes("https://auth.withdrawn.example"));
+    // One shared LiteLLM keys its server table on server_id alone and resolves
+    // a connection by name, so a tenant-owned gateway name has to be unique
+    // across tenants. The database is the last line: a collision must fail
+    // closed rather than resolve to the other tenant's connector.
+    const neighbourTenantId = `connector-evidence-${crypto.randomUUID()}`;
+    await pool.query("INSERT INTO tenants (id,external_tenant_id,display_name) VALUES ($1,$2,'Connector evidence neighbour')", [neighbourTenantId, `external-${neighbourTenantId}`]);
+    await pool.query("INSERT INTO organizations (id,display_name) VALUES ($1,'Connector evidence neighbour')", [neighbourTenantId]);
+    await assert.rejects(
+      () => store.saveConnector({
+        ...connector(neighbourTenantId),
+        serverId: `server-${neighbourTenantId}-reports`,
+        serverName: `lemmacomputer_${tenantId}_reports`,
+      }),
+      /connector_registry_custom_server_name_key/,
+      "a second tenant cannot claim a tenant-owned gateway name already in use",
+    );
+    // Built-in rows deliberately name one shared gateway server in every
+    // tenant, so the constraint must not reach them.
+    await store.saveConnector({
+      ...connector(neighbourTenantId, "shared-built-in"),
+      serverName: "lemmacomputer_shared_built_in",
+      source: "built-in",
+      createdBy: "lemmacomputer",
+    });
+    await store.saveConnector({
+      ...connector(tenantId, "shared-built-in"),
+      serverName: "lemmacomputer_shared_built_in",
+      source: "built-in",
+      createdBy: "lemmacomputer",
+    });
+
     await assert.rejects(
       pool.query("UPDATE connector_policy_change_events SET actor_user_id='tampered' WHERE tenant_id=$1 AND id=$2::uuid", [tenantId, applied.event.id]),
       /immutable/,

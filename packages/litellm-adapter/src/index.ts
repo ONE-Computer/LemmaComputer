@@ -680,9 +680,17 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     for (const input of inputs) {
       const exact = servers.find((server) => server.server_id === input.serverId);
       if (exact) {
-        if (exact.server_name !== input.serverName || exact.url !== input.url) {
+        if (exact.url !== input.url) {
           throw new LemmaComputerError("MCP_REGISTRATION_CONFLICT", `The ${input.name} connector registration does not match the approved catalog`, 409);
         }
+        // A matching server_id means this is Control's own row, so a differing
+        // server_name is drift to repair rather than a conflict: tenant-owned
+        // names are derived from the server id, and a record created before
+        // that derivation still carries the old name. Renaming preserves the
+        // row's stored credentials and every per-user OAuth token, because the
+        // gateway purges tokens only when a mint-relevant field changes and the
+        // name is not one of them.
+        const needsRename = exact.server_name !== input.serverName;
         // Apply the Control-owned egress classification to records created by
         // an earlier release. Also rebuild records whose OAuth metadata was
         // unavailable during gateway startup. LiteLLM starts before Control's
@@ -695,8 +703,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           || typeof exact.token_url !== "string"
           || !exact.token_url;
         const needsProfileRepair = Boolean(input.egressProfile && existingProfile !== input.egressProfile);
-        if (needsProfileRepair || missingOAuthMetadata) {
+        if (needsRename || needsProfileRepair || missingOAuthMetadata) {
           const repair: JsonObject = { server_id: input.serverId };
+          if (needsRename) {
+            repair.server_name = input.serverName;
+            repair.alias = input.serverName;
+          }
           if (needsProfileRepair) {
             repair.mcp_info = { lemmacomputer_egress_profile: input.egressProfile! };
           }

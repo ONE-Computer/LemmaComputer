@@ -152,6 +152,30 @@ not see Gmail, Drive, or Calendar at all, rather than seeing cards whose Connect
 fails at the authorize redirect with an empty client id. Registering the
 application and restarting Control publishes them with no code change.
 
+### Gateway server names
+
+`connector_registry.server_name` is the name Control uses to address a
+connector in LiteLLM. `LiteLLM_MCPServerTable` keys only on `server_id`, and
+the adapter resolves a connection by name, so any name a tenant can influence
+must be unique across every tenant rather than only within one. A shared
+gateway would otherwise hold two rows called `lemmacomputer_reports` and
+resolve between them arbitrarily.
+
+Tenant-owned rows therefore take their name from `tenantOwnedServerName`, which
+appends the row's own `server_id` to the connector id. Never build one by
+formatting a tenant-supplied string. `connector_registry_custom_server_name_key`
+enforces the same rule in the database, and `MemoryConnectorRegistryStore`
+mirrors it so the constraint is provable without PostgreSQL.
+
+Built-in rows are the deliberate exception: every tenant's built-in entry names
+the same shared gateway server, so the constraint covers `source='custom'` only.
+
+Renaming is safe to reconcile. `ensureOAuthMcpServers` matches on `server_id`,
+so a row whose stored name has drifted is renamed in place through
+`PUT /v1/mcp/server`; the gateway purges stored per-user OAuth tokens only when
+a mint-relevant field changes, and the name is not one of them. A differing
+`url` for the same `server_id` is still catalog drift and remains a conflict.
+
 ### Connector checklist
 
 1. Pin the connector artifact and dependency lock. Review its authentication,

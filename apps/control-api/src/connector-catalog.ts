@@ -29,6 +29,22 @@ export const staticCredentialGroups: readonly StaticCredentialGroup[] = ["google
 export const isStaticCredentialGroup = (value: string): value is StaticCredentialGroup =>
   (staticCredentialGroups as readonly string[]).includes(value);
 
+// LiteLLM keys `LiteLLM_MCPServerTable` on `server_id` alone, and the adapter
+// resolves a connection by `server_name`. A tenant-owned row therefore needs a
+// name that is unique across the whole gateway, not merely inside its tenant:
+// two tenants each adding a connector called "Reports" would otherwise produce
+// two rows named `lemmacomputer_reports` and resolve between them arbitrarily.
+// The row's own `server_id` is already unique, so deriving the suffix from it
+// makes the name unique by construction without putting the tenant id on the
+// gateway. Keep this in step with the SQL in the connector server-name
+// migration, which recomputes exactly this value.
+const SERVER_NAME_LIMIT = 96;
+export const tenantOwnedServerName = (connectorId: string, serverId: string) => {
+  const discriminator = serverId.replace(/[^0-9a-zA-Z]/g, "").toLowerCase();
+  const prefix = `lemmacomputer_${connectorId.replace(/-/g, "_")}`.slice(0, SERVER_NAME_LIMIT - discriminator.length - 1);
+  return `${prefix}_${discriminator}`;
+};
+
 const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "createdBy">): CatalogConnector => ({
   ...connector,
   policySupport: "automatic",

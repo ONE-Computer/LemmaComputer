@@ -939,6 +939,15 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
   async saveConnector(record: SaveConnectorRegistryRecord) {
     const key = this.key(record.tenantId, record.id);
     if (this.records.has(key)) throw new Error("Connector already exists");
+    // Mirrors connector_registry_custom_server_name_key. A tenant-owned row
+    // names a server in a gateway that may be shared by every tenant, so its
+    // name has to be unique across tenants and not only within one. Built-in
+    // rows deliberately repeat the same shared name per tenant.
+    if (record.source === "custom" && [...this.records.values()].some((existing) => (
+      existing.source === "custom" && existing.serverName === record.serverName
+    ))) {
+      throw new Error("Connector gateway server name already exists");
+    }
     const now = new Date();
     const saved: ConnectorRegistryRecord = {
       ...record,

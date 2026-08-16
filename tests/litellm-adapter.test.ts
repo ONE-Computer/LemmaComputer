@@ -622,6 +622,72 @@ test("managed remote registrations rediscover missing OAuth metadata without rep
   }
 });
 
+test("a tenant-owned record whose gateway name was recomputed is renamed in place, not refused", async () => {
+  const requests: Array<{ method: string; url: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {},
+    });
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{
+        server_id: "8f14e45f-ea8f-4b13-9c9f-1d3a5b7c9e11",
+        server_name: "lemmacomputer_reports",
+        url: "https://mcp.reports.example/mcp",
+        authorization_url: "https://auth.reports.example/authorize",
+        token_url: "https://auth.reports.example/token",
+        mcp_info: { lemmacomputer_egress_profile: "strict_remote" },
+      }]));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  const registration = {
+    serverId: "8f14e45f-ea8f-4b13-9c9f-1d3a5b7c9e11",
+    serverName: "lemmacomputer_reports_8f14e45fea8f4b139c9f1d3a5b7c9e11",
+    name: "Reports",
+    description: "Company reports.",
+    url: "https://mcp.reports.example/mcp",
+    scopes: ["reports.read"],
+    egressProfile: "strict_remote" as const,
+  };
+  try {
+    await liveAdapter.ensureOAuthMcpServers([registration]);
+    const repair = requests.find((request) => request.method === "PUT" && request.url === "/v1/mcp/server");
+    assert.ok(repair, "a stale gateway name is repaired rather than reported as a conflict");
+    assert.deepEqual(repair.body, {
+      server_id: "8f14e45f-ea8f-4b13-9c9f-1d3a5b7c9e11",
+      server_name: "lemmacomputer_reports_8f14e45fea8f4b139c9f1d3a5b7c9e11",
+      alias: "lemmacomputer_reports_8f14e45fea8f4b139c9f1d3a5b7c9e11",
+    });
+    // The rename must not carry credentials, so the row keeps its stored OAuth
+    // client and every per-user token minted against it.
+    assert.equal("credentials" in repair.body, false);
+    assert.equal(requests.some((request) => request.method === "POST" && request.url === "/v1/mcp/server"), false);
+
+    // A record that answers to the same server id from a different endpoint is
+    // still catalog drift and must not be silently adopted.
+    await assert.rejects(
+      () => liveAdapter.ensureOAuthMcpServers([{ ...registration, url: "https://mcp.attacker.example/mcp" }]),
+      { code: "MCP_REGISTRATION_CONFLICT" },
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("connector discovery performs dynamic client registration when credentials are not supplied", async () => {
   const requests: Array<{ method: string; url: string; authorization: string; body: Record<string, unknown> }> = [];
   const server = createServer(async (request, response) => {

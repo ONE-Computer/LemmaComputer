@@ -22,6 +22,7 @@ import {
 import {
   connectorActivation,
   connectorCatalog,
+  tenantOwnedServerName,
   type ConnectorDefinition,
   type StaticCredentialGroup,
 } from "./connector-catalog.js";
@@ -34,6 +35,14 @@ type PendingConnection = {
   codeVerifier: string;
   expiresAt: number;
 };
+
+/**
+ * The connector fields the gateway needs to reconcile a durable LiteLLM row.
+ */
+type ManagedConnectorRegistration = Pick<
+  ConnectorDefinition,
+  "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes" | "source"
+>;
 
 type PendingConnectorDiscovery = {
   inputDigest: string;
@@ -475,8 +484,14 @@ export class McpConnectionService {
       ? `${slug}-${createHash("sha256").update(validatedInput.endpointUrl).digest("hex").slice(0, 8)}`
       : slug;
     const serverId = randomUUID();
-    const serverName = `lemmacomputer_${id.replace(/-/g, "_")}`.slice(0, 96);
-    if (existing.some((connector) => connector.serverName === serverName)) {
+    // Derive the gateway name from this row's own server id. A tenant-local
+    // uniqueness check cannot protect a shared LiteLLM, where `server_name` is
+    // not unique and connections resolve by name; the derivation is what keeps
+    // one tenant's row from answering for another's. The duplicate this tenant
+    // can still create is a second connector with the same name and endpoint,
+    // which collides on `id` rather than on the gateway name.
+    const serverName = tenantOwnedServerName(id, serverId);
+    if (existing.some((connector) => connector.id === id)) {
       throw new LemmaComputerError("MCP_CONNECTOR_EXISTS", "A connector with this name already exists", 409);
     }
     const record = {
@@ -825,14 +840,14 @@ export class McpConnectionService {
     };
   }
 
-  private async connectionStatus(identity: IdentityContext, connector: Pick<ConnectorDefinition, "id" | "serverName">): Promise<OAuthConnectionStatus> {
+  private async connectionStatus(identity: IdentityContext, connector: ManagedConnectorRegistration & Pick<ConnectorDefinition, "id">): Promise<OAuthConnectionStatus> {
     const serverName = connector.serverName;
     const key = JSON.stringify([identity.tenantId, identity.subjectId, serverName]);
     const pending = this.connectionStatusStates.get(key);
     if (pending) return pending;
 
     const resolution = (async () => {
-      const current = await this.gateway.userOAuthConnectionStatus(identity, serverName);
+      const current = await this.reconciledConnectionStatus(identity, connector);
       if (current.state !== "expired") return this.persistConnectionStatus(identity, connector, current);
       try {
         await this.gateway.userOAuthConnectionTools(identity, serverName);
@@ -849,6 +864,28 @@ export class McpConnectionService {
       return await resolution;
     } finally {
       if (this.connectionStatusStates.get(key) === resolution) this.connectionStatusStates.delete(key);
+    }
+  }
+
+  /**
+   * A tenant-owned row whose gateway name was recomputed resolves by the new
+   * name only once the gateway record carries it. Reconcile once on the first
+   * unresolved read so an already-connected connector heals in place, instead
+   * of staying dark until someone selects Connect again. The reconciliation is
+   * an upsert by server id, so it renames rather than replaces and the stored
+   * connection survives.
+   */
+  private async reconciledConnectionStatus(
+    identity: IdentityContext,
+    connector: ManagedConnectorRegistration,
+  ): Promise<OAuthConnectionStatus> {
+    try {
+      return await this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
+    } catch (error) {
+      const unresolved = error instanceof LemmaComputerError && error.code === "MCP_CONNECTION_NOT_REGISTERED";
+      if (!unresolved || !this.isOnDemandConnector(connector)) throw error;
+      await this.ensureManagedConnectorServers([connector]);
+      return this.gateway.userOAuthConnectionStatus(identity, connector.serverName);
     }
   }
 
@@ -911,10 +948,7 @@ export class McpConnectionService {
     return connector;
   }
 
-  private async ensureManagedConnectorServers(connectors: Array<Pick<
-    ConnectorDefinition,
-    "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes" | "source"
-  >>) {
+  private async ensureManagedConnectorServers(connectors: ManagedConnectorRegistration[]) {
     const managed = connectors
       .filter((connector) => this.isOnDemandConnector(connector))
       .map((connector) => ({
