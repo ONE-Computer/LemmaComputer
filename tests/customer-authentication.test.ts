@@ -908,3 +908,46 @@ test("Control mounts the embedded handler only under the customer authentication
     await app.close();
   }
 });
+
+test("anonymous worktree signup can consume its captured verification link", async () => {
+  const { authentication, email } = fixture();
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    "customer-auth-test-proxy-token-at-least-24-characters",
+    undefined,
+    undefined,
+    { publicWebUrl: origin },
+    {
+      customerAuthentication: authentication,
+      developmentEmailCapture: email,
+      customerProductAuthentication: { resolve: async () => ({ status: "anonymous" }) } as never,
+      agentBridgeSecret: "customer-auth-capture-agent-secret-at-least-32-characters",
+    },
+  );
+  try {
+    await email.send({
+      kind: "email-verification",
+      to: "anonymous@example.test",
+      subject: "Verify your email for LemmaComputer",
+      text: `Finish creating your account.\n\n${origin}/api/v1/auth/customer/verify-email?token=secret\n\nIgnore this email if it was unexpected.`,
+      html: "<p>Captured locally.</p>",
+    });
+
+    const captured = await app.inject({
+      method: "POST",
+      url: "/v1/auth/development-email-capture",
+      headers: {
+        origin,
+        "content-type": "application/json",
+        "x-lemmacomputer-proxy-token": "customer-auth-test-proxy-token-at-least-24-characters",
+      },
+      payload: { email: "anonymous@example.test", kind: "email-verification" },
+    });
+
+    assert.equal(captured.statusCode, 200);
+    assert.deepEqual(captured.json(), { url: `${origin}/api/v1/auth/customer/verify-email?token=secret` });
+  } finally {
+    await app.close();
+  }
+});

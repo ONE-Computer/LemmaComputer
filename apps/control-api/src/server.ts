@@ -1100,6 +1100,7 @@ export function createControlServer(
     if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
       || requestPath.startsWith("/v1/auth/external-id/")) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
+      || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
       || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/personal-tenant"
       || requestPath === "/v1/auth/owner-step-up"
