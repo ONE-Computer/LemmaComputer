@@ -33,6 +33,7 @@ const principal: SessionPrincipal = {
   email: "alex@example.test",
   displayName: "Alex Morgan",
   tenantDisplayName: "Example Organization",
+  tenantKind: "organization",
   roles: ["employee", "administrator"],
   identity: { tenantId: "organization-1", subjectId: "tenant-user-1", audience: "lemmacomputer-control" },
 };
@@ -76,6 +77,7 @@ const fixture = () => {
       membershipId,
       organizationId: "organization-1",
       organizationDisplayName: "Example Organization",
+      tenantKind: "organization",
       userId: "tenant-user-1",
       status: "active",
       role: "owner",
@@ -90,10 +92,15 @@ const fixture = () => {
     },
     createCustomerOrganization: async (input) => {
       organizationCreations.push(input);
-      selected = principal;
+      selected = { ...principal, tenantKind: input.tenantKind };
       return {
         replayed: false,
-        organization: { id: "organization-1", slug: "example-organization", displayName: "Example Organization" },
+        organization: {
+          id: "organization-1",
+          slug: "example-organization",
+          displayName: input.organizationDisplayName,
+          kind: input.tenantKind,
+        },
         membership: { id: membershipId, status: "active", role: "owner" },
       };
     },
@@ -260,12 +267,36 @@ test("a verified account can atomically bootstrap an organization owner and prod
     email: "alex@example.test",
     userDisplayName: "Alex Morgan",
     organizationDisplayName: "Example Organization",
+    tenantKind: "organization",
     idempotencyKey: "44444444-4444-4444-8444-444444444444",
     installationKind: "hosted",
     now: new Date("2026-08-09T02:00:00.000Z"),
     expiresAt: verifiedSession.session.expiresAt,
   }]);
   assert.equal((await service.resolve(headers)).status, "authorized");
+});
+
+test("a verified hosted account can idempotently bootstrap a personal tenant without organization input", async () => {
+  const { service, organizationCreations } = fixture();
+
+  const created = await service.createPersonalTenant(headers, {
+    idempotencyKey: "77777777-7777-4777-8777-777777777777",
+  });
+
+  assert.equal(created.organization.kind, "personal");
+  assert.equal(created.organization.displayName, "Alex Morgan's workspace");
+  assert.equal(organizationCreations[0]?.tenantKind, "personal");
+  assert.equal(organizationCreations[0]?.organizationDisplayName, "Alex Morgan's workspace");
+  const customerManaged = new CustomerProductAuthenticationService(
+    { getSession: async () => verifiedSession },
+    fixture().store,
+    () => new Date("2026-08-09T02:00:00.000Z"),
+    { installationKind: "customer-managed" },
+  );
+  await assert.rejects(
+    () => customerManaged.createPersonalTenant(headers, { idempotencyKey: "77777777-7777-4777-8777-777777777777" }),
+    { code: "PERSONAL_TENANT_NOT_AVAILABLE" },
+  );
 });
 
 test("organization bootstrap rejects anonymous sessions and fails closed without store support", async () => {
@@ -328,6 +359,7 @@ test("unverified and malformed Better Auth sessions fail closed", async () => {
 test("Control exposes explicit product-session selection and denies tenant routes before selection", async () => {
   let active = false;
   const organizationRequests: Array<{ displayName: string; idempotencyKey: string }> = [];
+  const personalTenantRequests: Array<{ idempotencyKey: string }> = [];
   const protectedOperations: Array<Record<string, unknown>> = [];
   const verifiedStepUpCodes: string[] = [];
   let recordedStepUp = false;
@@ -348,6 +380,7 @@ test("Control exposes explicit product-session selection and denies tenant route
         membershipId,
         organizationId: "organization-1",
         organizationDisplayName: "Example Organization",
+        tenantKind: "organization",
         userId: "tenant-user-1",
         status: "active" as const,
         role: "owner" as const,
@@ -363,7 +396,16 @@ test("Control exposes explicit product-session selection and denies tenant route
       active = true;
       return {
         replayed: false,
-        organization: { id: "organization-1", slug: "example-organization", displayName: input.displayName },
+        organization: { id: "organization-1", slug: "example-organization", displayName: input.displayName, kind: "organization" as const },
+        membership: { id: membershipId, status: "active" as const, role: "owner" as const },
+      };
+    },
+    createPersonalTenant: async (_headers: Headers, input: { idempotencyKey: string }) => {
+      personalTenantRequests.push(input);
+      active = true;
+      return {
+        replayed: false,
+        organization: { id: "personal-1", slug: "alex-personal", displayName: "Alex Morgan's workspace", kind: "personal" as const },
         membership: { id: membershipId, status: "active" as const, role: "owner" as const },
       };
     },
@@ -437,6 +479,17 @@ test("Control exposes explicit product-session selection and denies tenant route
     const status = await app.inject({ method: "GET", url: "/v1/auth/product-session", headers: proxyHeaders });
     assert.equal(status.statusCode, 200);
     assert.equal(status.json().status, "membership-required");
+
+    const personalIdempotencyKey = "44444444-4444-4444-8444-444444444444";
+    const personalTenant = await app.inject({
+      method: "POST",
+      url: "/v1/auth/personal-tenant",
+      headers: { ...proxyHeaders, "idempotency-key": personalIdempotencyKey },
+    });
+    assert.equal(personalTenant.statusCode, 201);
+    assert.equal(personalTenant.json().organization.kind, "personal");
+    assert.deepEqual(personalTenantRequests, [{ idempotencyKey: personalIdempotencyKey }]);
+    active = false;
 
     const missingIdempotency = await app.inject({
       method: "POST",

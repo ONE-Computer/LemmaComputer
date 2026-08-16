@@ -38,6 +38,16 @@ Only a step-up-authenticated platform administrator can mutate placement:
 - the corresponding GET routes expose nodes and assignments to the workforce
   operator realm, never the customer realm.
 
+The workforce operator UI exposes those registry, admission, and assignment
+operations. It also writes `workspace.defaultSharedNodeId` through the audited
+platform-configuration boundary. When that setting names an active registered
+node, hosted self-service onboarding atomically assigns new personal and
+organization tenants to it. A missing setting leaves explicit operator
+placement available; a configured but invalid or unavailable node fails
+onboarding closed instead of silently choosing another node. Dedicated
+placement is an explicit operator or entitlement decision and is never inferred
+from SSO configuration.
+
 Registration starts a node as `active`. A draining node owns and serves its
 existing workspaces but is not eligible when a new workspace copies its tenant
 assignment. A disabled node is fail-closed for all routed lifecycle calls.

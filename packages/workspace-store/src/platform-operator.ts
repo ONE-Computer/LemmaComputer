@@ -18,6 +18,7 @@ import {
   type PlatformSupportElevationRequest,
   type PlatformSupportScope,
 } from "@lemmacomputer/contracts";
+import { tenantKindSchema, type TenantKind } from "./identity-policy.js";
 
 export type PlatformOperatorSession = {
   principal: PlatformOperatorPrincipal;
@@ -145,6 +146,9 @@ export type PlatformTenantLifecycleState = z.infer<typeof platformTenantLifecycl
 export type PlatformTenantLifecycle = {
   id: string;
   displayName: string;
+  tenantKind: TenantKind;
+  workspaceNodeId: string | null;
+  workspaceNodeState: WorkspaceNode["state"] | null;
   lifecycleState: PlatformTenantLifecycleState;
   reason: string | null;
   updatedByOperatorId: string | null;
@@ -561,16 +565,22 @@ export class PostgresPlatformOperatorStore {
   async listTenantLifecycle(session: PlatformOperatorSession): Promise<PlatformTenantLifecycle[]> {
     this.requireRoleAuthority(session, "tenant.lifecycle.read");
     const result = await this.pool.query(
-      `SELECT tenant.id,tenant.display_name,
+      `SELECT tenant.id,tenant.display_name,tenant.kind AS tenant_kind,
+         assignment.workspace_node_id,node.state AS workspace_node_state,
          COALESCE(lifecycle.lifecycle_state,'active') AS lifecycle_state,
          lifecycle.reason,lifecycle.updated_by_operator_id,lifecycle.updated_at
        FROM tenants tenant
        LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=tenant.id
+       LEFT JOIN tenant_workspace_node_assignments assignment ON assignment.tenant_id=tenant.id
+       LEFT JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
        ORDER BY tenant.display_name,tenant.id`,
     );
     return result.rows.map((row) => ({
       id: String(row.id),
       displayName: String(row.display_name),
+      tenantKind: tenantKindSchema.parse(row.tenant_kind),
+      workspaceNodeId: row.workspace_node_id === null ? null : workspaceNodeIdSchema.parse(row.workspace_node_id),
+      workspaceNodeState: row.workspace_node_state === null ? null : workspaceNodeStateSchema.parse(row.workspace_node_state),
       lifecycleState: platformTenantLifecycleStateSchema.parse(row.lifecycle_state),
       reason: row.reason === null ? null : String(row.reason),
       updatedByOperatorId: row.updated_by_operator_id === null ? null : String(row.updated_by_operator_id),
@@ -592,7 +602,15 @@ export class PostgresPlatformOperatorStore {
     try {
       await client.query("BEGIN");
       const principal = (await this.requireCurrentSessionAuthority(client, session, "tenant.lifecycle.manage", now)).principal;
-      const tenant = await client.query("SELECT id,display_name FROM tenants WHERE id=$1 FOR UPDATE", [input.tenantId]);
+      const tenant = await client.query(
+        `SELECT tenant.id,tenant.display_name,tenant.kind AS tenant_kind,
+           assignment.workspace_node_id,node.state AS workspace_node_state
+         FROM tenants tenant
+         LEFT JOIN tenant_workspace_node_assignments assignment ON assignment.tenant_id=tenant.id
+         LEFT JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
+         WHERE tenant.id=$1 FOR UPDATE OF tenant`,
+        [input.tenantId],
+      );
       if (!tenant.rowCount) throw new LemmaComputerError("PLATFORM_TENANT_NOT_FOUND", "Tenant was not found", 404);
       const currentLifecycle = await client.query(
         "SELECT lifecycle_state FROM platform_tenant_lifecycle WHERE tenant_id=$1 FOR UPDATE",
@@ -691,6 +709,13 @@ export class PostgresPlatformOperatorStore {
       return {
         id: String(tenant.rows[0].id),
         displayName: String(tenant.rows[0].display_name),
+        tenantKind: tenantKindSchema.parse(tenant.rows[0].tenant_kind),
+        workspaceNodeId: tenant.rows[0].workspace_node_id === null
+          ? null
+          : workspaceNodeIdSchema.parse(tenant.rows[0].workspace_node_id),
+        workspaceNodeState: tenant.rows[0].workspace_node_state === null
+          ? null
+          : workspaceNodeStateSchema.parse(tenant.rows[0].workspace_node_state),
         lifecycleState: platformTenantLifecycleStateSchema.parse(result.rows[0].lifecycle_state),
         reason: String(result.rows[0].reason),
         updatedByOperatorId: String(result.rows[0].updated_by_operator_id),

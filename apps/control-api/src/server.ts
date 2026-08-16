@@ -70,7 +70,7 @@ import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
-  "resolve" | "selectMembership" | "createOrganization" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
+  "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
   | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession"
 >;
 type TenantSsoAdministrationBoundary = Pick<
@@ -1070,7 +1070,8 @@ export function createControlServer(
       || requestPath.startsWith("/v1/auth/external-id/")) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
       || requestPath === "/v1/auth/customer-sso"
-      || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/owner-step-up"
+      || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/personal-tenant"
+      || requestPath === "/v1/auth/owner-step-up"
       || requestPath === "/v1/auth/invitations/context" || requestPath === "/v1/auth/invitations/accept") return;
     let customerResolution: CustomerProductAuthenticationResolution | undefined;
     if (security.customerProductAuthentication && !security.testIdentityMode) {
@@ -1515,6 +1516,7 @@ export function createControlServer(
         email: `${channelIdentity.subjectId}@example.test`,
         displayName: channelIdentity.subjectId,
         tenantDisplayName: channelIdentity.tenantId,
+        tenantKind: "organization",
         roles: ["employee"],
         identity: channelIdentity,
       };
@@ -2175,7 +2177,20 @@ export function createControlServer(
     const resourceCapabilities = current.effectiveAuthorization?.valid
       ? current.effectiveAuthorization.grants.filter((grant) => grant.scope.type !== "organization")
       : [];
-    return { user: { id: current.userId, email: current.email, displayName: current.displayName }, tenant: { id: current.tenantId, displayName: current.tenantDisplayName }, roles: current.roles, capabilities, resourceCapabilities, effectivePolicy };
+    const memberships = current.accountUserId && security.identityPolicyStore?.listCustomerMemberships
+      ? await security.identityPolicyStore.listCustomerMemberships(current.accountUserId)
+      : [];
+    return {
+      user: { id: current.userId, email: current.email, displayName: current.displayName },
+      tenant: { id: current.tenantId, displayName: current.tenantDisplayName, kind: current.tenantKind },
+      memberships,
+      organizationCreationAvailable:
+        (connectionOptions.installationKind ?? "customer-managed") !== "customer-managed",
+      roles: current.roles,
+      capabilities,
+      resourceCapabilities,
+      effectivePolicy,
+    };
   });
   app.get("/v1/auth/customer-capabilities", async (_request, reply) => {
     if (!security.customerAuthentication) {
@@ -2232,6 +2247,8 @@ export function createControlServer(
       account: { id: resolution.accountUserId },
       user: resolution.user,
       memberships: resolution.memberships,
+      personalTenantAvailable:
+        (connectionOptions.installationKind ?? "customer-managed") !== "customer-managed",
       ...(resolution.status === "authorized" ? {
         activeMembership: {
           id: resolution.principal.membershipId,
@@ -2257,6 +2274,20 @@ export function createControlServer(
         role: selected.role,
       },
     });
+  });
+  app.post<{ Headers: { "idempotency-key"?: string } }>("/v1/auth/personal-tenant", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const idempotencyKey = z.uuid().parse(request.headers["idempotency-key"]);
+    const created = await security.customerProductAuthentication.createPersonalTenant(
+      fromNodeHeaders(request.raw.headers),
+      { idempotencyKey },
+    );
+    return reply
+      .header("cache-control", "no-store")
+      .code(created.replayed ? 200 : 201)
+      .send(created);
   });
   app.post<{ Body: { displayName: string }; Headers: { "idempotency-key"?: string } }>(
     "/v1/auth/organizations",
@@ -3336,6 +3367,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity: targetIdentity,
     };
@@ -3392,6 +3424,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity: targetIdentity,
     };
@@ -4444,6 +4477,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity,
     };

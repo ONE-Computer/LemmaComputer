@@ -66,6 +66,15 @@ That domain foundation is valuable and remains in place. Better Auth replaces
 the provider-specific customer authentication mechanics; it does not replace
 the product organization and authorization model.
 
+The internal tenant boundary is universal, but the customer experience is not.
+A verified hosted consumer can bootstrap exactly one `personal` tenant without
+entering an organization name. The personal tenant still owns its membership,
+workspaces, credentials, policy, usage, and audit scope. A company remains an
+explicit `organization` tenant that can admit multiple members and configure
+enterprise identity. One account may belong to both kinds and explicitly
+switch its active product membership. SSO configures how an organization's
+members authenticate; it never changes tenant kind or compute placement.
+
 This decision deliberately changes the earlier managed-CIAM trust boundary.
 The open-source Better Auth framework implements password hashing, TOTP,
 passkeys, OAuth, SAML, OIDC, session security, and secret encryption, while the

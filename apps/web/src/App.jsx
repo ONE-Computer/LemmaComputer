@@ -1153,6 +1153,8 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
   const [selectionError, setSelectionError] = useState("");
   const [securityOpen, setSecurityOpen] = useState(false);
   const organizationIdempotencyKey = useRef(crypto.randomUUID());
+  const personalIdempotencyKey = useRef(crypto.randomUUID());
+  const automaticSelectionStarted = useRef("");
   const memberships = customerSession?.memberships ?? [];
   const selectMembership = async (membershipId) => {
     setBusyMembershipId(membershipId);
@@ -1177,17 +1179,45 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
       setBusyMembershipId("");
     }
   };
+  const automaticMembership = memberships.length === 1 && memberships[0]?.tenantKind === "personal"
+    ? memberships[0]
+    : null;
+  const provisionPersonalTenant = async () => {
+    setBusyMembershipId("personal");
+    setSelectionError("");
+    try {
+      await authApi.createPersonalTenant(personalIdempotencyKey.current);
+      await onSelected();
+    } catch (provisioningError) {
+      setSelectionError(provisioningError.message ?? "Your personal workspace could not be prepared.");
+      setBusyMembershipId("");
+      automaticSelectionStarted.current = "";
+    }
+  };
+  useEffect(() => {
+    if (!customerSession?.personalTenantAvailable && !automaticMembership) return;
+    const operation = automaticMembership ? `membership:${automaticMembership.membershipId}` : "personal:create";
+    if (automaticSelectionStarted.current === operation) return;
+    automaticSelectionStarted.current = operation;
+    if (automaticMembership) void selectMembership(automaticMembership.membershipId);
+    else if (!memberships.length) void provisionPersonalTenant();
+  }, [automaticMembership?.membershipId, customerSession?.personalTenantAvailable, memberships.length]);
+  const personalSetup = Boolean(customerSession?.personalTenantAvailable && !memberships.length) || Boolean(automaticMembership);
   return <><main className="signin-screen">
     <section className="signin-card organization-selection-card">
       <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
       <p>Signed in as {customerSession.user.email}</p>
-      <h1>{memberships.length ? "Choose an organization" : "Create your organization"}</h1>
-      <span>{memberships.length
-        ? "Your identity does not grant tenant access by itself. Choose one active membership for this session."
-        : "Set up your organization. You will become its protected owner, and access can be assigned to other people separately."}</span>
+      <h1>{personalSetup ? "Setting up your personal workspace" : memberships.length ? "Choose an organization" : "Create your organization"}</h1>
+      <span>{personalSetup
+        ? "Your private account space is being prepared. No organization registration is required."
+        : memberships.length
+          ? "Choose the organization you want to use for this session."
+          : "Set up your organization. You will become its protected owner, and access can be assigned to other people separately."}</span>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Account security was not updated</strong>{error}</span></div>}
       {selectionError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Organization was not selected</strong>{selectionError}</span></div>}
-      {memberships.length
+      {personalSetup
+        ? <div className="signin-status" role="status">{busyMembershipId ? "Preparing secure access…" : "Personal workspace setup paused."}</div>
+        : memberships.length
         ? <div className="organization-selection-list">
           {memberships.map((membership) => <button
             key={membership.membershipId}
@@ -1216,6 +1246,11 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
             {busyMembershipId === "organization" ? "Creating organization…" : "Create organization"}
           </button>
         </form>}
+      {personalSetup && !busyMembershipId && <button className="primary-button signin-button" type="button" onClick={() => {
+        automaticSelectionStarted.current = "";
+        if (automaticMembership) void selectMembership(automaticMembership.membershipId);
+        else void provisionPersonalTenant();
+      }}>Try again</button>}
       <button className="secondary-button signin-button" type="button" onClick={() => setSecurityOpen(true)}>Manage account security</button>
       <button className="signin-back-button" type="button" onClick={onSignOut}>Sign out</button>
       <small><ShieldCheckmark24Regular aria-hidden="true" />Only an active, server-verified membership can open organization data.</small>
@@ -5308,6 +5343,8 @@ export function App() {
   const [drawer, setDrawer] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [accountSecurityOpen, setAccountSecurityOpen] = useState(accountSecurityOpenFromLocation);
+  const [organizationCreateOpen, setOrganizationCreateOpen] = useState(false);
+  const [organizationCreating, setOrganizationCreating] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [operation, setOperation] = useState(null);
@@ -5378,6 +5415,7 @@ export function App() {
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
   const [revisionSaving, setRevisionSaving] = useState(false);
   const surfacedApprovalIds = useRef(new Set());
+  const organizationCreationIdempotencyKey = useRef(crypto.randomUUID());
   const invitationInitializationStarted = useRef(false);
   const mainContentRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -7153,6 +7191,21 @@ export function App() {
   const logout = async () => {
     try { await authApi.logout(); } finally { window.location.assign("/"); }
   };
+  const switchOrganization = async () => {
+    setProfileOpen(false);
+    await authApi.revokeProductSession();
+    window.location.assign("/");
+  };
+  const createEnterpriseOrganization = async (displayName) => {
+    setOrganizationCreating(true);
+    try {
+      await authApi.createOrganization(displayName, organizationCreationIdempotencyKey.current);
+      window.location.assign("/");
+    } catch (creationError) {
+      showApiError(creationError);
+      setOrganizationCreating(false);
+    }
+  };
   const switchInvitationAccount = async () => {
     setAuthLoading(true);
     try {
@@ -7199,7 +7252,7 @@ export function App() {
       onSignedIn={() => refreshAuthentication(invitationAcceptable)}
     />;
   }
-  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen);
+  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen || organizationCreateOpen);
 
   return (
     <div className="app-shell">
@@ -7243,10 +7296,16 @@ export function App() {
             <div id="sidebar-account-menu" className="sidebar-account-menu" role="group" aria-label="Account menu">
               <div className="sidebar-menu-profile">
                 <span className="sidebar-menu-avatar"><Person24Regular aria-hidden="true" /></span>
-                <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
+                <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small><small>{session.tenant.kind === "personal" ? "Personal workspace" : session.tenant.displayName}</small></span>
               </div>
               <div className="sidebar-account-menu-actions">
                 <button type="button" onClick={() => selectNav("AI usage")}><LeafThree24Regular aria-hidden="true" /><span>My AI usage</span><ChevronRight16Regular aria-hidden="true" /></button>
+                {(session.memberships?.length ?? 0) > 1 && <button type="button" onClick={switchOrganization}><Apps24Regular aria-hidden="true" /><span>Switch organization</span><ChevronRight16Regular aria-hidden="true" /></button>}
+                {session.organizationCreationAvailable && <button type="button" onClick={() => {
+                  organizationCreationIdempotencyKey.current = crypto.randomUUID();
+                  setOrganizationCreateOpen(true);
+                  setProfileOpen(false);
+                }}><Add24Regular aria-hidden="true" /><span>Create organization</span><ChevronRight16Regular aria-hidden="true" /></button>}
                 <span className="sidebar-menu-divider" aria-hidden="true" />
                 {canOpenAiControlPlane && <>
                   <span className="sidebar-menu-section-label">Organization</span>
@@ -7522,6 +7581,16 @@ export function App() {
       >
         <AccountSecurityPanel onSessionChanged={refreshAuthentication} onSignOutAll={logout} />
       </ModalDialog>}
+
+      {organizationCreateOpen && <TextPromptDialog
+        title="Create an organization"
+        description="Create a separate company space for members, policies, billing, and enterprise access. Your personal workspace remains available."
+        label="Organization name"
+        confirmLabel="Create organization"
+        busy={organizationCreating}
+        onConfirm={createEnterpriseOrganization}
+        onCancel={() => setOrganizationCreateOpen(false)}
+      />}
 
 
       {drawer === "request" && operation && (

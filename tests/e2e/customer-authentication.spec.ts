@@ -55,6 +55,67 @@ test("an explicit provider-link failure remains visible on the no-organization s
   );
 });
 
+test("a verified hosted consumer receives personal tenant setup without organization registration", async ({ page }) => {
+  let personalTenantRequests = 0;
+  await page.unroute("**/api/v1/auth/product-session");
+  await page.route("**/api/v1/auth/product-session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      status: "membership-required",
+      account: { id: "11111111-1111-4111-8111-111111111111" },
+      user: { id: "11111111-1111-4111-8111-111111111111", name: "Alex Morgan", email: "alex@example.test" },
+      memberships: [],
+      personalTenantAvailable: true,
+    }),
+  }));
+  await page.route("**/api/v1/auth/personal-tenant", async (route) => {
+    personalTenantRequests += 1;
+    await route.fulfill({
+      status: 201,
+      json: {
+        replayed: false,
+        organization: { id: "personal-1", displayName: "Alex Morgan's workspace", kind: "personal" },
+        membership: { id: "33333333-3333-4333-8333-333333333333", role: "owner", status: "active" },
+      },
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Setting up your personal workspace" })).toBeVisible();
+  await expect(page.getByLabel("Organization name")).toHaveCount(0);
+  await expect.poll(() => personalTenantRequests).toBe(1);
+});
+
+test("an account with personal and enterprise memberships can switch context or create another organization", async ({ page }) => {
+  await page.unroute("**/api/v1/auth/session");
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    status: 200,
+    json: {
+      user: { id: "personal-user", email: "alex@example.test", displayName: "Alex Morgan" },
+      tenant: { id: "personal-tenant", displayName: "Alex Morgan's workspace", kind: "personal" },
+      memberships: [
+        { membershipId: "11111111-1111-4111-8111-111111111111", organizationDisplayName: "Alex Morgan's workspace", tenantKind: "personal", status: "active", role: "owner" },
+        { membershipId: "22222222-2222-4222-8222-222222222222", organizationDisplayName: "Northwind", tenantKind: "organization", status: "active", role: "admin" },
+      ],
+      organizationCreationAvailable: true,
+      roles: ["owner", "administrator"],
+      capabilities: [],
+      resourceCapabilities: [],
+      effectivePolicy: null,
+    },
+  }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Alex Morgan/ }).click();
+
+  await expect(page.getByRole("button", { name: "Switch organization" })).toBeVisible();
+  await page.getByRole("button", { name: "Create organization" }).click();
+  await expect(page.getByRole("heading", { name: "Create an organization" })).toBeVisible();
+  await expect(page.getByLabel("Organization name")).toBeVisible();
+});
+
 test("social sign-in preserves the selected provider in its safe error callback", async ({ page }) => {
   let signInRequest: Record<string, unknown> | null = null;
   await page.route("**/api/v1/auth/customer/sign-in/social", async (route) => {

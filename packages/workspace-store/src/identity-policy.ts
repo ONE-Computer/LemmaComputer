@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
+import { z } from "zod";
 import { defaultClipboardPolicy, egressSecurityGroupVersionSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, m365ToolCatalog, ownedAgentCatalog, recentAuthenticationStepUpWindowMs, runtimePolicySchema, sandboxApplicationIds, type AgentCatalogId, type AgentProfile, type EgressSecurityGroupVersion, type EgressSecurityGroupRule, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy, type SandboxApplicationId, type SandboxProfileId } from "@lemmacomputer/contracts";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import {
@@ -19,6 +20,8 @@ import {
 
 export type LemmaComputerUserStatus = "active" | "disabled";
 export type MembershipAdmissionMode = "directory-jit" | "existing-membership-only";
+export const tenantKindSchema = z.enum(["personal", "organization"]);
+export type TenantKind = z.infer<typeof tenantKindSchema>;
 export type { LemmaComputerRole, OrganizationMembershipStatus, OrganizationPermission, OrganizationRole } from "./rbac.js";
 
 export const shouldAssignDefaultPolicyOnAuthentication = (
@@ -46,6 +49,7 @@ export type SessionPrincipal = {
   email: string;
   displayName: string;
   tenantDisplayName: string;
+  tenantKind: TenantKind;
   roles: LemmaComputerRole[];
   identity: IdentityContext;
 };
@@ -298,6 +302,7 @@ export type CustomerProductMembership = {
   membershipId: string;
   organizationId: string;
   organizationDisplayName: string;
+  tenantKind: TenantKind;
   userId: string;
   status: OrganizationMembershipStatus;
   role: OrganizationRole;
@@ -309,6 +314,7 @@ export type CustomerOrganizationCreation = {
     id: string;
     slug: string;
     displayName: string;
+    kind: TenantKind;
   };
   membership: {
     id: string;
@@ -341,6 +347,7 @@ export interface CustomerProductSessionStore {
     email: string;
     userDisplayName: string;
     organizationDisplayName: string;
+    tenantKind: TenantKind;
     idempotencyKey: string;
     installationKind: "customer-managed" | "hosted" | "worktree";
     expiresAt: Date;
@@ -454,6 +461,7 @@ export type OrganizationSsoConnectionSummary = {
 };
 
 export interface IdentityPolicyStore {
+  listCustomerMemberships?(accountUserId: string): Promise<CustomerProductMembership[]>;
   createLoginAttempt(input: { stateHash: string; verifierCiphertext: string; nonce: string; returnPath: string; expiresAt: Date }): Promise<void>;
   consumeLoginAttempt(stateHash: string, now: Date): Promise<OidcLoginAttempt | null>;
   resolveAuthenticatedIdentity(input: AuthenticatedIdentity): Promise<SessionPrincipal>;
@@ -760,6 +768,7 @@ const mapPrincipal = (row: Record<string, unknown>): SessionPrincipal => ({
   email: String(row.email),
   displayName: String(row.display_name),
   tenantDisplayName: String(row.tenant_display_name),
+  tenantKind: tenantKindSchema.parse(row.tenant_kind),
   roles: [
     String(row.membership_role) as OrganizationRole,
     row.membership_role === "owner" || row.membership_role === "admin" ? "administrator" : "employee",
@@ -770,7 +779,8 @@ const mapPrincipal = (row: Record<string, unknown>): SessionPrincipal => ({
 const principalColumns = `
   SELECT u.id AS user_id, m.account_user_id, m.organization_id, m.id AS membership_id,
     m.status AS membership_status, m.role AS membership_role,
-    u.email, u.display_name, t.display_name AS tenant_display_name`;
+    u.email, u.display_name, t.display_name AS tenant_display_name,
+    t.kind AS tenant_kind`;
 
 const homePrincipalSelect = `${principalColumns}
   FROM users u
@@ -1250,9 +1260,11 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     const result = await this.pool.query(
       `SELECT membership.id AS membership_id,membership.organization_id,
          organization.display_name AS organization_display_name,
-         membership.subject_user_id AS user_id,membership.status,membership.role
+         tenant.kind AS tenant_kind,membership.subject_user_id AS user_id,
+         membership.status,membership.role
        FROM organization_memberships membership
        JOIN organizations organization ON organization.id=membership.organization_id
+       JOIN tenants tenant ON tenant.id=membership.organization_id
        WHERE membership.account_user_id=$1
        ORDER BY organization.display_name,membership.organization_id`,
       [accountUserId],
@@ -1261,6 +1273,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       membershipId: String(row.membership_id),
       organizationId: String(row.organization_id),
       organizationDisplayName: String(row.organization_display_name),
+      tenantKind: tenantKindSchema.parse(row.tenant_kind),
       userId: String(row.user_id),
       status: String(row.status) as OrganizationMembershipStatus,
       role: String(row.role) as OrganizationRole,
@@ -1396,6 +1409,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     email: string;
     userDisplayName: string;
     organizationDisplayName: string;
+    tenantKind: TenantKind;
     idempotencyKey: string;
     installationKind: "customer-managed" | "hosted" | "worktree";
     expiresAt: Date;
@@ -1408,6 +1422,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     const requestFingerprint = createHash("sha256")
       .update(JSON.stringify({
         organizationDisplayName: input.organizationDisplayName,
+        tenantKind: input.tenantKind,
         installationKind: input.installationKind,
       }))
       .digest("hex");
@@ -1465,6 +1480,44 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       await this.ensurePolicyFoundation(client, organizationId, subjectUserId);
       await this.assignMvpPolicyWithClient(client, organizationId, subjectUserId, subjectUserId);
     };
+    const ensureDefaultSharedNodePlacement = async (organizationId: string) => {
+      if (input.installationKind !== "hosted") return null;
+      const configured = await client.query(
+        `SELECT configuration.value,configuration.updated_by_operator_id
+         FROM platform_configuration configuration
+         WHERE configuration.key='workspace.defaultSharedNodeId'`,
+      );
+      if (!configured.rowCount) return null;
+      const workspaceNodeId = z.string().safeParse(configured.rows[0].value);
+      if (!workspaceNodeId.success) {
+        throw new LemmaComputerError(
+          "WORKSPACE_DEFAULT_SHARED_NODE_INVALID",
+          "The hosted default shared workspace node configuration is invalid",
+          503,
+          true,
+        );
+      }
+      const node = await client.query(
+        "SELECT id FROM workspace_nodes WHERE id=$1 AND state='active' FOR SHARE",
+        [workspaceNodeId.data],
+      );
+      if (!node.rowCount) {
+        throw new LemmaComputerError(
+          "WORKSPACE_DEFAULT_SHARED_NODE_UNAVAILABLE",
+          "The hosted default shared workspace node is unavailable",
+          503,
+          true,
+        );
+      }
+      await client.query(
+        `INSERT INTO tenant_workspace_node_assignments (
+           tenant_id,workspace_node_id,reason,updated_by_operator_id,created_at,updated_at
+         ) VALUES ($1,$2,'Automatic shared workspace placement',$3,$4,$4)
+         ON CONFLICT (tenant_id) DO NOTHING`,
+        [organizationId, workspaceNodeId.data, configured.rows[0].updated_by_operator_id, input.now],
+      );
+      return workspaceNodeId.data;
+    };
     try {
       await client.query("BEGIN");
       await client.query(
@@ -1490,9 +1543,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const replay = await client.query(
         `SELECT request.request_fingerprint,organization.id AS organization_id,
            organization.slug,organization.display_name,membership.id AS membership_id,
-           membership.subject_user_id,membership.status,membership.role
+           membership.subject_user_id,membership.status,membership.role,tenant.kind AS tenant_kind
          FROM organization_onboarding_requests request
          JOIN organizations organization ON organization.id=request.organization_id
+         JOIN tenants tenant ON tenant.id=organization.id
          JOIN organization_memberships membership ON membership.id=request.membership_id
          WHERE request.account_user_id=$1 AND request.idempotency_key_hash=$2`,
         [input.accountUserId, idempotencyKeyHash],
@@ -1506,6 +1560,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
           throw new LemmaComputerError("ORGANIZATION_OWNER_NOT_ACTIVE", "The organization owner is not active", 403);
         }
         await ensureOwnerWorkspaceFoundation(String(row.subject_user_id), String(row.organization_id));
+        await ensureDefaultSharedNodePlacement(String(row.organization_id));
         await establishProductContext(String(row.subject_user_id), String(row.membership_id), String(row.organization_id));
         await client.query("COMMIT");
         return {
@@ -1514,9 +1569,44 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
             id: String(row.organization_id),
             slug: String(row.slug),
             displayName: String(row.display_name),
+            kind: tenantKindSchema.parse(row.tenant_kind),
           },
           membership: { id: String(row.membership_id), status: "active", role: "owner" },
         };
+      }
+      if (input.tenantKind === "personal") {
+        const personal = await client.query(
+          `SELECT organization.id AS organization_id,organization.slug,organization.display_name,
+             membership.id AS membership_id,membership.subject_user_id,membership.status,membership.role,
+             tenant.kind AS tenant_kind
+           FROM tenants tenant
+           JOIN organizations organization ON organization.id=tenant.id
+           JOIN organization_memberships membership
+             ON membership.organization_id=tenant.id AND membership.account_user_id=$1
+           WHERE tenant.personal_owner_account_user_id=$1
+           FOR UPDATE OF tenant,organization,membership`,
+          [input.accountUserId],
+        );
+        if (personal.rowCount) {
+          const row = personal.rows[0];
+          if (row.status !== "active" || row.role !== "owner") {
+            throw new LemmaComputerError("PERSONAL_TENANT_OWNER_NOT_ACTIVE", "The personal tenant owner is not active", 403);
+          }
+          await ensureOwnerWorkspaceFoundation(String(row.subject_user_id), String(row.organization_id));
+          await ensureDefaultSharedNodePlacement(String(row.organization_id));
+          await establishProductContext(String(row.subject_user_id), String(row.membership_id), String(row.organization_id));
+          await client.query("COMMIT");
+          return {
+            replayed: true,
+            organization: {
+              id: String(row.organization_id),
+              slug: String(row.slug),
+              displayName: String(row.display_name),
+              kind: tenantKindSchema.parse(row.tenant_kind),
+            },
+            membership: { id: String(row.membership_id), status: "active", role: "owner" },
+          };
+        }
       }
       if (input.installationKind === "customer-managed") {
         const organizations = await client.query("SELECT count(*)::integer AS count FROM organizations");
@@ -1547,9 +1637,12 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       const subjectUserId = `user_${randomUUID().replaceAll("-", "")}`;
       const membershipId = randomUUID();
       await client.query(
-        `INSERT INTO tenants (id,external_tenant_id,display_name,administrator_bootstrapped_at,created_at)
-         VALUES ($1,$2,$3,$4,$4)`,
-        [organizationId, `self-service:${organizationId}`, input.organizationDisplayName, input.now],
+        `INSERT INTO tenants (
+           id,external_tenant_id,display_name,administrator_bootstrapped_at,created_at,
+           kind,personal_owner_account_user_id
+         ) VALUES ($1,$2,$3,$4,$4,$5,$6)`,
+        [organizationId, `self-service:${organizationId}`, input.organizationDisplayName, input.now,
+          input.tenantKind, input.tenantKind === "personal" ? input.accountUserId : null],
       );
       await client.query(
         `INSERT INTO organizations (id,display_name,slug,status,created_at,updated_at)
@@ -1592,11 +1685,17 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
         [input.accountUserId, idempotencyKeyHash, requestFingerprint, organizationId, membershipId, input.now],
       );
       await ensureOwnerWorkspaceFoundation(subjectUserId, organizationId);
+      await ensureDefaultSharedNodePlacement(organizationId);
       await establishProductContext(subjectUserId, membershipId, organizationId);
       await client.query("COMMIT");
       return {
         replayed: false,
-        organization: { id: organizationId, slug: organizationSlug, displayName: input.organizationDisplayName },
+        organization: {
+          id: organizationId,
+          slug: organizationSlug,
+          displayName: input.organizationDisplayName,
+          kind: input.tenantKind,
+        },
         membership: { id: membershipId, status: "active", role: "owner" },
       };
     } catch (error) {
