@@ -610,10 +610,29 @@ def _is_trusted_provider_probe(kwargs):
 
 def _set_internal_provider_probe_context(kwargs, route):
     """Bind a trusted probe to the exact provider route without forwarding it."""
-    provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
-    deployment_id = (
+    trusted = _trusted_key_metadata(kwargs)
+    route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
+    route_deployment_id = (
         route.get("lemmacomputer_deployment_id") if isinstance(route, dict) else None
     )
+    trusted_provider = trusted.get("lemmacomputer_provider")
+    trusted_deployment_id = trusted.get("lemmacomputer_deployment_id")
+    if (
+        isinstance(route_provider, str)
+        and isinstance(trusted_provider, str)
+        and route_provider != trusted_provider
+    ) or (
+        isinstance(route_deployment_id, str)
+        and isinstance(trusted_deployment_id, str)
+        and route_deployment_id != trusted_deployment_id
+    ):
+        raise RuntimeError("Provider route test binding does not match the concrete route")
+    # LiteLLM v1.93 can omit custom provider metadata from the deployment hook
+    # while preserving the exact deployment ID. Recover only from the
+    # authenticated, Control-issued probe key projection; request metadata is
+    # never trusted for this exemption.
+    provider = route_provider or trusted_provider
+    deployment_id = route_deployment_id or trusted_deployment_id
     source_call_id = _litellm_call_id(kwargs)
     if not all(
         isinstance(value, str) and bool(value)
@@ -642,14 +661,15 @@ def _verified_provider_probe_reentry(kwargs, route, call_type):
     binding = _verified_usage_chain(context.get("signedBinding"))
     if not isinstance(binding, dict):
         return False
-    provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
-    deployment_id = (
+    route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
+    route_deployment_id = (
         route.get("lemmacomputer_deployment_id") if isinstance(route, dict) else None
     )
     if (
         binding.get("kind") != PROVIDER_ROUTE_TEST_EXEMPTION
-        or binding.get("provider") != provider
-        or binding.get("deploymentId") != deployment_id
+        or not isinstance(binding.get("provider"), str)
+        or binding.get("deploymentId") != route_deployment_id
+        or (isinstance(route_provider, str) and binding.get("provider") != route_provider)
     ):
         return False
     # Context variables are copied into LiteLLM's internal request task. Mutate

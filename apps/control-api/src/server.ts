@@ -21,7 +21,7 @@ import { isStaticCredentialGroup, type StaticCredentialGroup } from "./connector
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
-import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
+import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, RoutedControllerClient, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
@@ -48,7 +48,7 @@ import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminR
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
 import { createCustomerAuthentication, createCustomerSsoAuthentication, customerAuthenticationBasePath, customerAuthenticationControlPath, parseVersionedBetterAuthSecrets, registerCustomerAuthenticationRoutes, type CustomerAuthentication } from "./customer-authentication.js";
-import { createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
+import { CaptureTransactionalEmailAdapter, createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
 import {
   customerInvitationContextMaxAgeSeconds,
   createBetterAuthSessionReader,
@@ -58,6 +58,13 @@ import {
 import { fromNodeHeaders } from "better-auth/node";
 import { registerPlatformOperatorRoutes, type PlatformOperatorAuthenticationBoundary, type PlatformOperatorStoreBoundary } from "./platform-operator-routes.js";
 import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.js";
+import {
+  BetterAuthPlatformOperatorAuthenticationService,
+  createPlatformAuthentication,
+  platformAuthenticationControlPath,
+  registerPlatformAuthenticationRoutes,
+  type PlatformAuthentication,
+} from "./platform-better-authentication.js";
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
 import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
@@ -71,7 +78,7 @@ import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-
 type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
-  "resolve" | "selectMembership" | "createOrganization" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
+  "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
   | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession"
 >;
 type TenantSsoAdministrationBoundary = Pick<
@@ -237,7 +244,7 @@ const defaultAgentIds = (document: Record<string, unknown>, assigned = assignedA
 export type CompatibleSandboxSelection = {
   profileId: SandboxProfileId;
   applicationIds: SandboxApplicationId[];
-  modelAlias: SandboxModelAlias;
+  modelAlias: SandboxModelAlias | null;
   requestedServiceClass: ExplicitWorkspaceServiceClass;
   agentIds: AgentCatalogId[];
   changed: boolean;
@@ -268,9 +275,13 @@ export const compatibleSandboxSelection = (
   const agentIds = saved
     ? saved.agentIds.filter((id) => agents.includes(id))
     : defaultAgentIds(document, agents);
-  const modelAlias = governedRoutingAvailable
-    ? "lemmacomputer-auto" as const
-    : saved ? models.includes(saved.modelAlias) ? saved.modelAlias : null : models[0] ?? null;
+  const modelAlias = agentIds.length === 0
+    ? null
+    : governedRoutingAvailable
+      ? "lemmacomputer-auto" as const
+      : saved?.modelAlias && models.includes(saved.modelAlias)
+        ? saved.modelAlias
+        : models[0] ?? null;
   const requestedServiceClass = saved
     ? saved.requestedServiceClass === undefined
       ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
@@ -278,7 +289,7 @@ export const compatibleSandboxSelection = (
         ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
         : null
     : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses);
-  if (!profileId || !applicationIds.length || !agentIds.length || !modelAlias || !requestedServiceClass) return null;
+  if (!profileId || (agentIds.length > 0 && !modelAlias) || !requestedServiceClass) return null;
   return {
     profileId,
     applicationIds,
@@ -439,6 +450,7 @@ const envSchema = z.object({
   CONTROL_PORT: z.coerce.number().int().positive().default(4100),
   WEB_PROXY_TOKEN: z.string().min(24),
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
+  WORKSPACE_NODE_TOPOLOGY: z.enum(["colocated", "remote"]).default("colocated"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   CONTROLLER_TLS_CA_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
@@ -447,6 +459,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   AUTH_DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRETS: z.string().min(1),
+  PLATFORM_AUTH_DATABASE_URL: optionalEnvString(),
+  PLATFORM_BETTER_AUTH_SECRETS: optionalEnvString(),
+  PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET: optionalEnvString(32),
   BETTER_AUTH_TRUSTED_PROXY_CIDRS: z.string().default(""),
   CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: z.string().default(""),
   AUTH_EMAIL_TRANSPORT: z.enum(["capture", "postmark"]),
@@ -534,6 +549,11 @@ const envSchema = z.object({
   BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
 
+export const usesPlacementRoutedController = (input: {
+  installationKind: "customer-managed" | "hosted" | "worktree";
+  workspaceNodeTopology: "colocated" | "remote";
+}) => input.workspaceNodeTopology === "remote" && input.installationKind !== "customer-managed";
+
 const sameSecret = (received: string | undefined, expected: string) => {
   if (!received) return false;
   const left = Buffer.from(received);
@@ -587,7 +607,11 @@ export function createControlServer(
       mode: "email" | "copy-link";
       email?: TransactionalEmailAdapter;
     };
+    developmentEmailCapture?: Pick<CaptureTransactionalEmailAdapter, "takeLatest">;
     closeCustomerAuthentication?: () => Promise<void>;
+    platformAuthentication?: PlatformAuthentication;
+    platformBetterAuthService?: BetterAuthPlatformOperatorAuthenticationService;
+    closePlatformAuthentication?: () => Promise<void>;
     platformOperatorAuthentication?: PlatformOperatorAuthenticationBoundary;
     platformOperatorStore?: PlatformOperatorStoreBoundary;
     platformSecurityAlertDispatcher?: { status(): PlatformSecurityAlertDispatcherStatus };
@@ -688,6 +712,13 @@ export function createControlServer(
     security.customerSsoAuthentication,
   );
   if (security.closeCustomerAuthentication) app.addHook("onClose", security.closeCustomerAuthentication);
+  if (security.platformAuthentication && security.platformBetterAuthService) registerPlatformAuthenticationRoutes(
+    app,
+    security.platformAuthentication,
+    security.platformBetterAuthService,
+    connectionOptions.installationKind ?? "customer-managed",
+  );
+  if (security.closePlatformAuthentication) app.addHook("onClose", security.closePlatformAuthentication);
   // The fallback exists only for the explicit in-memory test identity mode. Runtime
   // boot requires AGENT_BRIDGE_SECRET and never derives this key from another trust boundary.
   const agentBridgeSecret = security.agentBridgeSecret ?? (
@@ -916,7 +947,10 @@ export function createControlServer(
   };
   const assertProviderConfiguration = async (actor: SessionPrincipal, policy: RuntimePolicy) => {
     if (!providerSettings) return;
-    for (const modelAlias of new Set([policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])])) {
+    const selectedModelAliases = policy.agents === undefined
+      ? policy.modelAlias ? [policy.modelAlias] : []
+      : policy.agents.map((agent) => agent.modelAlias);
+    for (const modelAlias of new Set(selectedModelAliases)) {
       await providerSettings.assertConfigured(actor, modelAlias);
     }
   };
@@ -950,6 +984,7 @@ export function createControlServer(
       && telegram.credentialId
       && telegram.tokenVersion
       && telegram.defaultAgentId
+      && configuration.agentIds.includes(telegram.defaultAgentId)
       ? [{
         adapter: "telegram",
         credentialRef: telegram.credentialId,
@@ -1057,6 +1092,7 @@ export function createControlServer(
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
     if (security.customerAuthentication && requestPath.startsWith(`${customerAuthenticationControlPath}/`)) return;
+    if (security.platformAuthentication && requestPath.startsWith(`${platformAuthenticationControlPath}/`)) return;
     if (requestPath.startsWith("/v1/platform/")) {
       if (connectionOptions.installationKind === "customer-managed") {
         return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found", correlationId: request.id, retryable: false } });
@@ -1067,7 +1103,10 @@ export function createControlServer(
       }
       const operator = await security.platformOperatorAuthentication.authenticate(request.headers.cookie);
       if (!operator) {
-        return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your workforce account", correlationId: request.id, retryable: false } });
+        if (requestPath === "/v1/platform/ui") {
+          return reply.code(303).header("location", "/api/v1/platform/auth/login?return=%2Fplatform").send();
+        }
+        return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your platform operator account", correlationId: request.id, retryable: false } });
       }
       platformOperatorPrincipals.set(request, operator);
       return;
@@ -1075,8 +1114,10 @@ export function createControlServer(
     if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
       || requestPath.startsWith("/v1/auth/external-id/")) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
+      || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
-      || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/owner-step-up"
+      || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/personal-tenant"
+      || requestPath === "/v1/auth/owner-step-up"
       || requestPath === "/v1/auth/invitations/context" || requestPath === "/v1/auth/invitations/accept") return;
     let customerResolution: CustomerProductAuthenticationResolution | undefined;
     if (security.customerProductAuthentication && !security.testIdentityMode) {
@@ -1459,7 +1500,9 @@ export function createControlServer(
     };
   };
   const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
-    [policy.modelAlias, ...(policy.agents?.map((agent) => agent.modelAlias) ?? [])]
+    (policy.agents === undefined
+      ? policy.modelAlias ? [policy.modelAlias] : []
+      : policy.agents.map((agent) => agent.modelAlias))
       .some((modelAlias) => managedProviderForAlias(modelAlias) === provider)
   );
   const revokeTenantProviderWorkspaceGrants = async (tenantId: string, provider: ManagedProviderName) => {
@@ -1521,6 +1564,7 @@ export function createControlServer(
         email: `${channelIdentity.subjectId}@example.test`,
         displayName: channelIdentity.subjectId,
         tenantDisplayName: channelIdentity.tenantId,
+        tenantKind: "organization",
         roles: ["employee"],
         identity: channelIdentity,
       };
@@ -2181,7 +2225,20 @@ export function createControlServer(
     const resourceCapabilities = current.effectiveAuthorization?.valid
       ? current.effectiveAuthorization.grants.filter((grant) => grant.scope.type !== "organization")
       : [];
-    return { user: { id: current.userId, email: current.email, displayName: current.displayName }, tenant: { id: current.tenantId, displayName: current.tenantDisplayName }, roles: current.roles, capabilities, resourceCapabilities, effectivePolicy };
+    const memberships = current.accountUserId && security.identityPolicyStore?.listCustomerMemberships
+      ? await security.identityPolicyStore.listCustomerMemberships(current.accountUserId)
+      : [];
+    return {
+      user: { id: current.userId, email: current.email, displayName: current.displayName },
+      tenant: { id: current.tenantId, displayName: current.tenantDisplayName, kind: current.tenantKind },
+      memberships,
+      organizationCreationAvailable:
+        (connectionOptions.installationKind ?? "customer-managed") !== "customer-managed",
+      roles: current.roles,
+      capabilities,
+      resourceCapabilities,
+      effectivePolicy,
+    };
   });
   app.get("/v1/auth/customer-capabilities", async (_request, reply) => {
     if (!security.customerAuthentication) {
@@ -2193,7 +2250,30 @@ export function createControlServer(
       passkey: options.plugins?.some((plugin) => plugin.id === "passkey") === true,
       socialProviders: Object.keys(options.socialProviders ?? {}).sort(),
       companySso: Boolean(security.tenantSsoAdministration),
+      ...(security.developmentEmailCapture ? { developmentEmailCapture: true } : {}),
     });
+  });
+  app.post("/v1/auth/development-email-capture", async (request, reply) => {
+    if (!security.developmentEmailCapture || !connectionOptions.publicWebUrl) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_CAPTURE_UNAVAILABLE", "Development email capture is unavailable", 404);
+    }
+    const publicOrigin = new URL(connectionOptions.publicWebUrl).origin;
+    if (request.headers.origin !== publicOrigin) {
+      throw new LemmaComputerError("FORBIDDEN", "Development email capture requires the worktree Web origin", 403);
+    }
+    const input = z.strictObject({
+      email: z.email().max(320).transform((value) => value.toLowerCase()),
+      kind: z.enum(["email-verification", "password-recovery"]),
+    }).parse(request.body ?? {});
+    const message = security.developmentEmailCapture.takeLatest(input.email, input.kind);
+    if (!message) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_NOT_FOUND", "No captured development email is available", 404);
+    }
+    const actionUrl = message.text.split(/\r?\n/).map((line) => line.trim()).find((line) => /^https?:\/\//.test(line));
+    if (!actionUrl || new URL(actionUrl).origin !== publicOrigin) {
+      throw new LemmaComputerError("DEVELOPMENT_EMAIL_INVALID", "The captured development email is invalid", 500);
+    }
+    return reply.header("cache-control", "no-store").send({ url: actionUrl });
   });
   app.post("/v1/auth/customer-sso", async (request, reply) => {
     const tenantSsoAdministration = security.tenantSsoAdministration;
@@ -2238,6 +2318,8 @@ export function createControlServer(
       account: { id: resolution.accountUserId },
       user: resolution.user,
       memberships: resolution.memberships,
+      personalTenantAvailable:
+        (connectionOptions.installationKind ?? "customer-managed") !== "customer-managed",
       ...(resolution.status === "authorized" ? {
         activeMembership: {
           id: resolution.principal.membershipId,
@@ -2263,6 +2345,20 @@ export function createControlServer(
         role: selected.role,
       },
     });
+  });
+  app.post<{ Headers: { "idempotency-key"?: string } }>("/v1/auth/personal-tenant", async (request, reply) => {
+    if (!security.customerProductAuthentication) {
+      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
+    }
+    const idempotencyKey = z.uuid().parse(request.headers["idempotency-key"]);
+    const created = await security.customerProductAuthentication.createPersonalTenant(
+      fromNodeHeaders(request.raw.headers),
+      { idempotencyKey },
+    );
+    return reply
+      .header("cache-control", "no-store")
+      .code(created.replayed ? 200 : 201)
+      .send(created);
   });
   app.post<{ Body: { displayName: string }; Headers: { "idempotency-key"?: string } }>(
     "/v1/auth/organizations",
@@ -3342,6 +3438,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity: targetIdentity,
     };
@@ -3398,6 +3495,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity: targetIdentity,
     };
@@ -4306,22 +4404,30 @@ export function createControlServer(
     const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
     const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !availableModels.length || !availableAgents.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile, model route, agent, or model tier", 500);
-    if (!availableApplications.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox applications", 500);
+    if (!availableProfiles.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile or model tier", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const savedProfile = saved ? sandboxProfiles.find((profile) => profile.id === saved.profileId) : undefined;
     const selectedProfile = savedProfile ?? availableProfiles[0]!;
     const profileId = selectedProfile.id;
-    const applicationIds = saved?.applicationIds?.filter((id) => availableApplications.some((application) => application.id === id));
-    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : saved && availableModels.some((model) => model.alias === saved.modelAlias) ? saved.modelAlias : availableModels[0]!.alias;
+    const applicationIds = saved?.applicationIds.filter((id) => availableApplications.some((application) => application.id === id));
     const requestedServiceClass = explicitWorkspaceServiceClass(
       saved?.requestedServiceClass ?? document.defaultServiceClass,
       assignedServiceClasses,
     );
     if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
-    const agentIds = saved?.agentIds?.filter((id) => availableAgents.some((agent) => agent.id === id));
-    const selectedApplicationIds = applicationIds?.length ? applicationIds : defaultApplicationIds(document, assignedApplications);
-    const selectedAgentIds = agentIds?.length ? agentIds : defaultAgentIds(document, availableAgentIds);
+    const agentIds = saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id));
+    const selectedApplicationIds = saved ? applicationIds ?? [] : defaultApplicationIds(document, assignedApplications);
+    const selectedAgentIds = saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds);
+    if (selectedAgentIds.length > 0 && !availableModels.length) {
+      throw new LemmaComputerError("POLICY_INVALID", "The active policy has AI agents but no supported model route", 500);
+    }
+    const modelAlias = selectedAgentIds.length === 0
+      ? null
+      : governedRoutingAvailable
+        ? "lemmacomputer-auto"
+        : saved?.modelAlias && availableModels.some((model) => model.alias === saved.modelAlias)
+          ? saved.modelAlias
+          : availableModels[0]!.alias;
     const workspaceEgress = await workspaceEgressFor(actor, effective, grantId, profileId);
     const profileCurrentlyAllowed = availableProfiles.some((profile) => profile.id === profileId);
     const runtime = effective && profileCurrentlyAllowed
@@ -4361,7 +4467,7 @@ export function createControlServer(
       applicationIds: selectedApplicationIds,
       modelAlias,
       requestedServiceClass,
-      routePreferenceMigrationRequired: governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
+      routePreferenceMigrationRequired: selectedAgentIds.length > 0 && governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
       profile: selectedProfile,
       availableProfiles,
       availableApplications,
@@ -4391,11 +4497,17 @@ export function createControlServer(
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
     const serviceClasses = assignedWorkspaceServiceClasses(document);
     const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const modelAlias = governedRoutingAvailable ? "lemmacomputer-auto" : input.modelAlias;
+    const modelAlias = input.agentIds.length === 0
+      ? null
+      : governedRoutingAvailable
+        ? "lemmacomputer-auto"
+        : input.modelAlias;
     const agents = assignedAgentIds(document);
     if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias))) throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias)))) {
+      throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
+    }
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
     if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const previousSettings = await store.getSandboxSettings?.(actor.identity, input.grantId);
@@ -4422,7 +4534,7 @@ export function createControlServer(
       grantId: input.grantId,
       profileId: input.profileId as SandboxProfileId,
       applicationIds: input.applicationIds,
-      modelAlias: modelAlias as SandboxModelAlias,
+      modelAlias: modelAlias as SandboxModelAlias | null,
       requestedServiceClass: input.requestedServiceClass,
       agentIds: input.agentIds,
     });
@@ -4450,6 +4562,7 @@ export function createControlServer(
       email: target.email,
       displayName: target.displayName,
       tenantDisplayName: actor.tenantDisplayName,
+      tenantKind: actor.tenantKind,
       roles: target.roles,
       identity,
     };
@@ -5172,6 +5285,13 @@ export function createControlServer(
           true,
         );
       }
+      if (!policy.modelAlias) {
+        throw new LemmaComputerError(
+          "WORKSPACE_AI_NOT_SELECTED",
+          "This workspace does not have an AI agent or model route selected",
+          409,
+        );
+      }
       const capabilities = await gateway.modelCapabilities(policy.modelAlias);
       if (!capabilities.vision) {
         throw new LemmaComputerError(
@@ -5472,6 +5592,28 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   }
   const authenticationPool = new postgres.Pool({ connectionString: env.AUTH_DATABASE_URL });
   const publicWebOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  let platformAuthenticationPool: postgres.Pool | undefined;
+  let platformAuthentication: PlatformAuthentication | undefined;
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree") {
+    if (!env.PLATFORM_AUTH_DATABASE_URL || !env.PLATFORM_BETTER_AUTH_SECRETS) {
+      throw new Error("Worktree platform authentication requires its isolated database and Better Auth secrets");
+    }
+    const platformAuthenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.PLATFORM_AUTH_DATABASE_URL);
+    try {
+      await platformAuthenticationSchema.assertSchemaCompatible();
+    } finally {
+      await platformAuthenticationSchema.close();
+    }
+    platformAuthenticationPool = new postgres.Pool({ connectionString: env.PLATFORM_AUTH_DATABASE_URL });
+    platformAuthentication = createPlatformAuthentication({
+      database: platformAuthenticationPool,
+      baseUrl: publicWebOrigin,
+      trustedOrigins: [publicWebOrigin],
+      versionedSecrets: parseVersionedBetterAuthSecrets(env.PLATFORM_BETTER_AUTH_SECRETS),
+      installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+      passkey: { rpId: new URL(publicWebOrigin).hostname, origin: publicWebOrigin },
+    });
+  }
   const transactionalEmail = createTransactionalEmailAdapter({
     transport: env.AUTH_EMAIL_TRANSPORT,
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
@@ -5678,10 +5820,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !platformOperatorValues.every(Boolean)) {
     throw new Error("Hosted deployments require the separate platform-operator workforce realm");
   }
-  const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+  const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
     ? PostgresPlatformOperatorStore.fromConnectionString(env.DATABASE_URL)
     : undefined;
-  const platformOperatorAuthentication = platformOperatorStore
+  const workforcePlatformOperatorAuthentication = platformOperatorStore
     && env.PLATFORM_OPERATOR_ENTRA_TENANT_ID
     && env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID
     && env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET
@@ -5696,24 +5838,66 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
       })
     : undefined;
-  const controllerTlsValues = [
+  const platformBetterAuthService = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+    && platformOperatorStore
+    && platformAuthentication
+    && platformAuthenticationPool
+    ? new BetterAuthPlatformOperatorAuthenticationService(
+        platformAuthentication,
+        platformAuthenticationPool,
+        platformOperatorStore,
+        publicWebOrigin,
+        env.LEMMACOMPUTER_INSTALLATION_KIND,
+        env.PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET,
+      )
+    : undefined;
+  await platformBetterAuthService?.initializeDevelopmentOperator();
+  const platformOperatorAuthentication = platformBetterAuthService ?? workforcePlatformOperatorAuthentication;
+  const controllerTlsClientValues = [
     env.CONTROLLER_TLS_CA_B64,
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
     env.CONTROLLER_TLS_CLIENT_KEY_B64,
-    env.CONTROLLER_TLS_SERVER_NAME,
   ];
-  if (env.CONTROLLER_URL.startsWith("https:") && !controllerTlsValues.every(Boolean)) {
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && env.WORKSPACE_NODE_TOPOLOGY !== "remote") {
+    throw new Error("Hosted deployments require remote workspace-node topology");
+  }
+  if (env.WORKSPACE_NODE_TOPOLOGY === "remote" && !controllerTlsClientValues.every(Boolean)) {
+    throw new Error("Remote workspace-node connections require mutual TLS client configuration");
+  }
+  const placementRoutedController = usesPlacementRoutedController({
+    installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+    workspaceNodeTopology: env.WORKSPACE_NODE_TOPOLOGY,
+  });
+  if (
+    !placementRoutedController
+    && env.CONTROLLER_URL.startsWith("https:")
+    && ![...controllerTlsClientValues, env.CONTROLLER_TLS_SERVER_NAME].every(Boolean)
+  ) {
     throw new Error("HTTPS workspace-node connections require complete mutual TLS client configuration");
   }
-  const controllerTransport = env.CONTROLLER_URL.startsWith("https:")
-    ? createMutualTlsFetch({
-        ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
-        clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
-        clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
-        serverName: env.CONTROLLER_TLS_SERVER_NAME!,
-      })
-    : fetch;
-  const controller = new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN, controllerTransport);
+  const controller: ControllerClient = placementRoutedController
+    ? new RoutedControllerClient(platformOperatorStore!, (node) => new HttpControllerClient(
+        node.endpointUrl,
+        env.CONTROLLER_INTERNAL_TOKEN,
+        createMutualTlsFetch({
+          ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
+          clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
+          clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
+          serverName: node.tlsServerName,
+        }),
+      ))
+    : new HttpControllerClient(
+        env.CONTROLLER_URL,
+        env.CONTROLLER_INTERNAL_TOKEN,
+        env.CONTROLLER_URL.startsWith("https:")
+          ? createMutualTlsFetch({
+              ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
+              clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
+              clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
+              serverName: env.CONTROLLER_TLS_SERVER_NAME!,
+            })
+          : fetch,
+      );
   const platformSecurityAlertDispatcher = platformOperatorStore
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET
@@ -5776,7 +5960,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         mode: env.INVITATION_DELIVERY_MODE,
         email: transactionalEmail,
       },
+      developmentEmailCapture:
+        env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+        && env.RUNTIME_ENVIRONMENT === "development"
+        && transactionalEmail instanceof CaptureTransactionalEmailAdapter
+          ? transactionalEmail
+          : undefined,
       closeCustomerAuthentication: () => authenticationPool.end(),
+      platformAuthentication,
+      platformBetterAuthService,
+      closePlatformAuthentication: platformAuthenticationPool ? () => platformAuthenticationPool!.end() : undefined,
       platformOperatorAuthentication,
       platformOperatorStore,
       platformSecurityAlertDispatcher,

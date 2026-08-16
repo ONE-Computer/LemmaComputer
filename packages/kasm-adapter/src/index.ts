@@ -407,7 +407,9 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       "hermes-desktop-managed-v1": "hermes-desktop",
       "hermes-claw-managed-v1": "hermes-claw",
     } as const)[input.policy.agentProfile as Exclude<typeof input.policy.agentProfile, "lemmacomputer-default-agent">] ?? "claude-desktop";
-    const enabledAgents = input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent];
+    const enabledAgents = input.policy.agents === undefined
+      ? input.agentGrants?.map((grant) => grant.catalogId) ?? [fallbackAgent]
+      : input.policy.agents.map((agent) => agent.catalogId);
     const enabledApplications = input.policy.applications ?? ["firefox"];
     const coworkEnabled = this.config.kvmEnabled === true && enabledAgents.includes("claude-desktop");
     const electronSandboxRequired = enabledApplications.some((application) => electronSandboxApplicationIds.has(application));
@@ -486,7 +488,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         "com.lemmacomputer.sandbox-profile": input.policy.workspaceProfile,
         "com.lemmacomputer.execution-mode": input.policy.executionMode,
         "com.lemmacomputer.egress-mode": input.policy.egressMode,
-        "com.lemmacomputer.model-alias": input.policy.modelAlias,
+        ...(enabledAgents.length ? { "com.lemmacomputer.model-alias": input.policy.modelAlias! } : {}),
         ...(this.config.timeZone ? {
           "com.lemmacomputer.time-zone": this.config.timeZone,
         } : {}),

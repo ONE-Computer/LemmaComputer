@@ -21,7 +21,7 @@ import {
   WorkspaceIngressAuthority,
   workspaceIngressAccessParameter,
 } from "@lemmacomputer/workspace-ingress-auth";
-import type { WorkspaceRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
+import type { WorkspaceNode, WorkspaceRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { AgentChatAuthority, type AgentChatAccess } from "./agent-chat.js";
 
 export type ControllerLaunch = Launch & {
@@ -53,8 +53,8 @@ export interface ControllerClient {
   }): Promise<void>;
   status(workspaceId: string, providerId: string): Promise<Sandbox>;
   open(workspaceId: string, providerId: string): Promise<ControllerLaunch>;
-  destroyWorkspace(workspaceId: string, providerId: string): Promise<void>;
-  purgeWorkspace(workspaceId: string, accessGeneration: number): Promise<WorkspacePurgeReceipt>;
+  destroyWorkspace(workspaceId: string, providerId: string, expectedWorkspaceNodeId?: string): Promise<void>;
+  purgeWorkspace(workspaceId: string, accessGeneration: number, expectedWorkspaceNodeId?: string): Promise<WorkspacePurgeReceipt>;
 }
 
 export type EgressProxyGrant = {
@@ -173,11 +173,75 @@ export class HttpControllerClient implements ControllerClient {
   }
 }
 
+export interface WorkspaceNodeDirectory {
+  resolveWorkspaceNode(workspaceId: string, expectedWorkspaceNodeId?: string): Promise<WorkspaceNode>;
+}
+
+export class RoutedControllerClient implements ControllerClient {
+  private readonly clients = new Map<string, ControllerClient>();
+
+  constructor(
+    private readonly directory: WorkspaceNodeDirectory,
+    private readonly clientForNode: (node: WorkspaceNode) => ControllerClient,
+  ) {}
+
+  private async route(workspaceId: string, expectedWorkspaceNodeId?: string) {
+    const node = await this.directory.resolveWorkspaceNode(workspaceId, expectedWorkspaceNodeId);
+    const cacheKey = `${node.id}\0${node.endpointUrl}\0${node.tlsServerName}`;
+    let client = this.clients.get(cacheKey);
+    if (!client) {
+      client = this.clientForNode(node);
+      this.clients.set(cacheKey, client);
+    }
+    return { node, client };
+  }
+
+  async create(input: Parameters<ControllerClient["create"]>[0]) {
+    const { client } = await this.route(input.workspaceId);
+    return client.create(input);
+  }
+
+  async updateEgressPolicy(providerId: string, input: Parameters<ControllerClient["updateEgressPolicy"]>[1]) {
+    const { client } = await this.route(input.workspaceId);
+    return client.updateEgressPolicy(providerId, input);
+  }
+
+  async status(workspaceId: string, providerId: string) {
+    const { client } = await this.route(workspaceId);
+    return client.status(workspaceId, providerId);
+  }
+
+  async open(workspaceId: string, providerId: string) {
+    const { client } = await this.route(workspaceId);
+    return client.open(workspaceId, providerId);
+  }
+
+  async destroyWorkspace(workspaceId: string, providerId: string, expectedWorkspaceNodeId?: string) {
+    const { client } = await this.route(workspaceId, expectedWorkspaceNodeId);
+    return client.destroyWorkspace(workspaceId, providerId);
+  }
+
+  async purgeWorkspace(workspaceId: string, accessGeneration: number, expectedWorkspaceNodeId?: string) {
+    const { node, client } = await this.route(workspaceId, expectedWorkspaceNodeId);
+    const receipt = await client.purgeWorkspace(workspaceId, accessGeneration);
+    if (receipt.nodeId !== node.id) {
+      throw new LemmaComputerError(
+        "WORKSPACE_NODE_RECEIPT_MISMATCH",
+        "Workspace purge receipt was issued by a different node",
+        502,
+      );
+    }
+    return receipt;
+  }
+}
+
 const profileClient = (profileId: RuntimePolicy["workspaceProfile"]) => profileId === "claude-desktop-standard-v1"
   ? { client: "LemmaComputer managed workspace", clientVersion: "managed-v1" }
   : profileId === "disposable-open-v1"
     ? { client: "LemmaComputer open workspace", clientVersion: "disposable-open-v1" }
     : { client: "LemmaComputer qualification CLI", clientVersion: "issue-006" };
+
+const hasAiAgents = (policy: RuntimePolicy) => policy.agents === undefined || policy.agents.length > 0;
 
 export const toView = (
   record: WorkspaceRecord,
@@ -216,7 +280,7 @@ export const toView = (
   ...(policy ? { profile: {
     id: policy.workspaceProfile,
     ...profileClient(policy.workspaceProfile),
-    modelAlias: policy.modelAlias,
+    modelAlias: hasAiAgents(policy) ? policy.modelAlias : null,
     executionMode: policy.executionMode,
     egressMode: policy.egressMode,
     persistence: "persistent-home" as const,
@@ -281,7 +345,7 @@ export class WorkspaceService {
   }
 
   private agentPolicies(policy: RuntimePolicy): RuntimePolicy[] {
-    if (!policy.agents?.length) return [policy];
+    if (policy.agents === undefined) return [policy];
     return policy.agents.map((agent) => ({
       ...policy,
       agentId: agent.agentId,
@@ -297,6 +361,7 @@ export class WorkspaceService {
   private async ensureAgentGrants(identity: IdentityContext, workspace: WorkspaceRecord, policy: RuntimePolicy) {
     const workspaceId = workspace.id;
     const policies = this.agentPolicies(policy);
+    if (policies.length === 0) return {};
     const resolved = await Promise.all(policies.map(async (agentPolicy) => ({
       policy: agentPolicy,
       gateway: await this.gateway?.ensureGrant({
@@ -347,7 +412,7 @@ export class WorkspaceService {
       : ["not_created", "stopped"].includes(record.state)
         ? { state: "applies_on_next_start" as const, reasonCode: null }
         : { state: "current" as const, reasonCode: null };
-    if (!this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity, compatibility);
+    if (!hasAiAgents(policy) || !this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity, compatibility);
     const gateway = await this.gateway.readiness(record.id, policy.agentId, policy, record.accessGeneration).catch(() => undefined);
     return toView(record, gateway, policy, integrity, compatibility);
   }
@@ -462,7 +527,7 @@ export class WorkspaceService {
       }
     }
     const authorized = this.authorizePolicy(identity, record, policy);
-    if (this.gateway && ["ready", "open"].includes(record.state)) {
+    if (hasAiAgents(policy) && this.gateway && ["ready", "open"].includes(record.state)) {
       if (!this.policyBundleAuthority || authorized) {
         await this.ensureAgentGrants(identity, record, authorized?.payload.policy ?? policy).catch(() => undefined);
       }
@@ -497,7 +562,7 @@ export class WorkspaceService {
 
   async refreshPolicyGrant(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
     const record = await this.store.getCurrent(identity, grantId);
-    if (!record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
+    if (!hasAiAgents(policy) || !record || !this.gateway || !["ready", "open"].includes(record.state)) return false;
     const authorized = this.authorizePolicy(identity, record, policy);
     const verifiedPolicy = authorized?.payload.policy ?? policy;
     await Promise.all(this.agentPolicies(verifiedPolicy).map((agentPolicy) => this.gateway!.ensureGrant({
@@ -705,6 +770,7 @@ export class WorkspaceService {
   async testGateway(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
     const record = await this.owned(identity, workspaceId);
     if (!["ready", "open"].includes(record.state)) throw new LemmaComputerError("WORKSPACE_NOT_READY", "The workspace is not ready", 409, true);
+    if (!hasAiAgents(policy)) throw new LemmaComputerError("WORKSPACE_AI_NOT_SELECTED", "This workspace has no AI agents selected", 409);
     if (!this.gateway) throw new LemmaComputerError("GATEWAY_NOT_CONFIGURED", "The model gateway is not configured", 503, true);
     const authorized = this.authorizePolicy(identity, record, policy);
     const verifiedPolicy = authorized?.payload.policy ?? policy;

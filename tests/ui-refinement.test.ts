@@ -65,7 +65,7 @@ test("workspace creation collects configuration before provisioning", async () =
   const createNameStep = app.slice(app.indexOf("const createAdditionalWorkspace"), app.indexOf("const configureMicrosoft365"));
   const saveStep = app.slice(app.indexOf("const saveWorkspaceSettings"), app.indexOf("const selectNav"));
   assert.match(app, /confirmLabel="Continue to configuration"/);
-  assert.match(app, /Choose workspace access, applications, agents, and a service level before LemmaComputer starts this workspace/);
+  assert.match(app, /review workspace access and optionally add applications or AI agents before LemmaComputer starts anything/);
   assert.match(createNameStep, /selectWorkspaceConfiguration\(grantId\)/);
   assert.doesNotMatch(createNameStep, /workspaceApi\.create/);
   assert.ok(saveStep.indexOf("sandboxApi.save(sandboxConfiguration)") < saveStep.indexOf("workspaceApi.create(configuration.grantId)"));

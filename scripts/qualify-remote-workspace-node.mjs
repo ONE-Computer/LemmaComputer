@@ -81,6 +81,7 @@ export const renderControlOverride = () => `services:
   control-api:
     environment:
       CONTROLLER_URL: https://workspace-node:4101
+      WORKSPACE_NODE_TOPOLOGY: remote
       CONTROLLER_TLS_CA_B64: \${QUALIFICATION_NODE_CA_B64:?set node CA}
       CONTROLLER_TLS_CLIENT_CERT_B64: \${QUALIFICATION_NODE_CLIENT_CERT_B64:?set Control client certificate}
       CONTROLLER_TLS_CLIENT_KEY_B64: \${QUALIFICATION_NODE_CLIENT_KEY_B64:?set Control client key}
@@ -92,6 +93,7 @@ export const renderControlOverride = () => `services:
     depends_on: !override
       db-migrate: { condition: service_completed_successfully }
       auth-db-migrate: { condition: service_completed_successfully }
+      platform-auth-db-migrate: { condition: service_completed_successfully }
       litellm: { condition: service_healthy }
       litellm-admin-proxy: { condition: service_healthy }
       openvtc-consent: { condition: service_healthy }
@@ -418,7 +420,12 @@ const up = ({ cowork }) => {
   if (existing) {
     if (cowork && !existing.cowork) throw new Error("The existing qualification was created without Cowork; stop all workspaces, run down, then run up --cowork");
     bringUp(existing);
-    process.stdout.write(`Remote workspace-node qualification was reapplied at ${existing.webUrl}.\n`);
+    process.stdout.write([
+      `Remote workspace-node qualification was reapplied at ${existing.webUrl}.`,
+      `Platform placement node: ${existing.names.nodeId}`,
+      "Platform placement endpoint: https://workspace-node:4101 (TLS name: workspace-node)",
+      "",
+    ].join("\n"));
     return;
   }
   const state = prepareState({ cowork });
@@ -436,6 +443,7 @@ const up = ({ cowork }) => {
     `Remote workspace-node qualification is ready at ${state.webUrl}.`,
     "The existing worktree databases and Compose volumes were preserved.",
     cowork ? "Cowork device projection is enabled for newly started Claude Desktop workspaces." : "Use --cowork to require and enable KVM/vsock projection.",
+    `Register ${state.names.nodeId} at https://workspace-node:4101 with TLS name workspace-node in /platform, then assign the test tenant before creating a workspace.`,
     "Run the same command with status to inspect it, or down after stopping every workspace.",
     "",
   ].join("\n"));
@@ -462,6 +470,7 @@ const status = () => {
     return;
   }
   process.stdout.write(`Remote workspace-node qualification: ${state.webUrl}\n`);
+  process.stdout.write(`Platform placement node: ${state.names.nodeId} at https://workspace-node:4101 (TLS name: workspace-node)\n`);
   run("docker", nodeComposeArguments(state, "ps"));
   run("docker", composeArguments(state, "ps", "control-api", "workspace-ingress", "remote-application-tls"));
 };

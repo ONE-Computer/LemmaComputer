@@ -86,6 +86,12 @@ const sections = [
     variable("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS", "", "Older version:secret Better Auth keys, newest first, retained only for bounded rotation decryption.", { secret: true }),
     variable("LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD", generated, "Least-privilege Better Auth runtime database password.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD", generated, "Better Auth schema migration database password.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET_VERSION", "1", "Current platform-operator Better Auth encryption and signing key version.", { kind: "integer" }),
+    variable("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET", generated, "Platform-operator Better Auth secret, isolated from customer authentication.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_PREVIOUS_SECRETS", "", "Older version:secret platform-operator Better Auth keys retained only for bounded rotation decryption.", { secret: true }),
+    variable("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD", generated, "Least-privilege platform-operator authentication runtime database password.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD", generated, "Platform-operator authentication schema migration database password.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET", generated, "Worktree-only one-time platform passkey enrollment bootstrap secret; never projected in production.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET", generated, "Workspace ingress signing secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_EGRESS_GRANT_SECRET", generated, "Egress grant derivation secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN", generated, "LiteLLM credential for the static model-provider egress proxy.", { secret: true, generated: "random" }),
@@ -467,6 +473,18 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
       if (!hasValue(values[key])) errors.push(`${key} is required when Postmark authentication email is selected`);
     }
   }
+  const isolatedPlatformAuthenticationSecrets = [
+    "LEMMACOMPUTER_BETTER_AUTH_SECRET",
+    "LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET",
+    "LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD",
+    "LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD",
+    "LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD",
+    "LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD",
+    "LEMMACOMPUTER_PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET",
+  ];
+  if (new Set(isolatedPlatformAuthenticationSecrets.map((key) => values[key])).size !== isolatedPlatformAuthenticationSecrets.length) {
+    errors.push("Customer and platform authentication secrets, database roles, and development bootstrap credentials must all be distinct");
+  }
 
   if (profileCapabilities) {
     try {
@@ -647,6 +665,12 @@ const authenticationDatabaseUrl = (v, role) => {
   const password = v(runtime ? "LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD" : "LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD");
   return `postgres://${username}:${password}@${runtimeDefaults.postgresHost}:5432/lemmacomputer_auth`;
 };
+const platformAuthenticationDatabaseUrl = (v, role) => {
+  const runtime = role === "runtime";
+  const username = runtime ? "lemmacomputer_platform_auth_runtime" : "lemmacomputer_platform_auth_migrator";
+  const password = v(runtime ? "LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD" : "LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD");
+  return `postgres://${username}:${password}@${runtimeDefaults.postgresHost}:5432/lemmacomputer_platform_auth`;
+};
 const litellmDatabaseUrl = (v) => `postgres://litellm:${v("LEMMACOMPUTER_LITELLM_POSTGRES_PASSWORD")}@${runtimeDefaults.litellmPostgresHost}:5432/litellm`;
 const gatewayProviderEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_gateway_provider_egress_v1","securityGroupId":"esg_gateway_provider_egress","version":1,"name":"Gateway provider egress","description":"Exact outbound model provider destinations.","defaultAction":"deny","rules":[{"id":"openai-api","action":"allow","protocol":"https","host":"api.openai.com","includeSubdomains":false,"port":443,"purpose":"OpenAI model API"},{"id":"anthropic-api","action":"allow","protocol":"https","host":"api.anthropic.com","includeSubdomains":false,"port":443,"purpose":"Anthropic model API"},{"id":"zai-api","action":"allow","protocol":"https","host":"api.z.ai","includeSubdomains":false,"port":443,"purpose":"Z.ai model API"},{"id":"bedrock-use1","action":"allow","protocol":"https","host":"bedrock-runtime.us-east-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-east-1"},{"id":"bedrock-usw2","action":"allow","protocol":"https","host":"bedrock-runtime.us-west-2.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock us-west-2"},{"id":"bedrock-euw1","action":"allow","protocol":"https","host":"bedrock-runtime.eu-west-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock eu-west-1"},{"id":"bedrock-apse1","action":"allow","protocol":"https","host":"bedrock-runtime.ap-southeast-1.amazonaws.com","includeSubdomains":false,"port":443,"purpose":"Bedrock ap-southeast-1"}],"documentHash":"0f7d144fd2ecfe6704dbf8c02c9cdb1a949674bba3930560cad36c367465a52f"}';
 const remoteMcpEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_remote_mcp_egress_v1","securityGroupId":"esg_remote_mcp_egress","version":1,"name":"Remote MCP egress","description":"Control-approved public MCP and OAuth destinations.","defaultAction":"deny","rules":[],"documentHash":"1d9c9a090b1bd52ad16c6a4d47c6c2958a0bb7634f6efdfc7ffb1f8fe7e7a45f"}';
@@ -694,6 +718,15 @@ export function projectServiceEnvironment(input = {}) {
       POSTGRES_PASSWORD: v("LEMMACOMPUTER_POSTGRES_PASSWORD"),
       LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD: v("LEMMACOMPUTER_AUTH_POSTGRES_RUNTIME_PASSWORD"),
       LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD: v("LEMMACOMPUTER_AUTH_POSTGRES_MIGRATOR_PASSWORD"),
+      LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD: v("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD"),
+      LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD: v("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD"),
+    },
+    "platform-auth-db-init": {
+      PGHOST: runtimeDefaults.postgresHost,
+      PGUSER: "lemmacomputer",
+      PGPASSWORD: v("LEMMACOMPUTER_POSTGRES_PASSWORD"),
+      LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD: v("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_RUNTIME_PASSWORD"),
+      LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD: v("LEMMACOMPUTER_PLATFORM_AUTH_POSTGRES_MIGRATOR_PASSWORD"),
     },
     "litellm-postgres": {
       POSTGRES_DB: "litellm",
@@ -821,11 +854,17 @@ export function projectServiceEnvironment(input = {}) {
       LEMMACOMPUTER_APP_VERSION: v("LEMMACOMPUTER_APP_VERSION"),
       LEMMACOMPUTER_INSTALLATION_KIND: v("LEMMACOMPUTER_INSTALLATION_KIND"),
     },
+    "platform-auth-db-migrate": {
+      AUTH_DATABASE_URL: platformAuthenticationDatabaseUrl(v, "migrator"),
+      LEMMACOMPUTER_APP_VERSION: v("LEMMACOMPUTER_APP_VERSION"),
+      LEMMACOMPUTER_INSTALLATION_KIND: v("LEMMACOMPUTER_INSTALLATION_KIND"),
+    },
     "control-api": {
       CONTROL_HOST: runtimeDefaults.controlHost,
       CONTROL_PORT: runtimeDefaults.controlPort,
       WEB_PROXY_TOKEN: v("LEMMACOMPUTER_WEB_PROXY_TOKEN"),
       CONTROLLER_URL: controllerUrl,
+      WORKSPACE_NODE_TOPOLOGY: v("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY"),
       CONTROLLER_INTERNAL_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
       CONTROLLER_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64"),
       CONTROLLER_TLS_CLIENT_CERT_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64"),
@@ -836,6 +875,11 @@ export function projectServiceEnvironment(input = {}) {
       DATABASE_URL: controlDatabaseUrl(v),
       AUTH_DATABASE_URL: authenticationDatabaseUrl(v, "runtime"),
       BETTER_AUTH_SECRETS: `${v("LEMMACOMPUTER_BETTER_AUTH_SECRET_VERSION")}:${v("LEMMACOMPUTER_BETTER_AUTH_SECRET")}${v("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS") ? `,${v("LEMMACOMPUTER_BETTER_AUTH_PREVIOUS_SECRETS")}` : ""}`,
+      ...(v("LEMMACOMPUTER_INSTALLATION_KIND") === "worktree" ? {
+        PLATFORM_AUTH_DATABASE_URL: platformAuthenticationDatabaseUrl(v, "runtime"),
+        PLATFORM_BETTER_AUTH_SECRETS: `${v("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET_VERSION")}:${v("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET")}${v("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_PREVIOUS_SECRETS") ? `,${v("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_PREVIOUS_SECRETS")}` : ""}`,
+        PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET: v("LEMMACOMPUTER_PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET"),
+      } : {}),
       BETTER_AUTH_TRUSTED_PROXY_CIDRS: v("LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS"),
       CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: v("LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS"),
       AUTH_EMAIL_TRANSPORT: v("LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT"),

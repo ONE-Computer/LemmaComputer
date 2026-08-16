@@ -72,8 +72,8 @@ export const platformOperatorPrincipalSchema = z.strictObject({
   authenticatedAt: z.iso.datetime(),
   recentStepUpAt: z.iso.datetime().nullable(),
 }).superRefine((value, context) => {
-  if (value.identity.provider !== "workforce-entra") {
-    context.addIssue({ code: "custom", path: ["identity", "provider"], message: "Platform operators require the workforce identity realm" });
+  if (!["workforce-entra", "better-auth"].includes(value.identity.provider)) {
+    context.addIssue({ code: "custom", path: ["identity", "provider"], message: "Platform operators require a dedicated workforce or platform authentication realm" });
   }
 });
 export type PlatformOperatorPrincipal = z.infer<typeof platformOperatorPrincipalSchema>;

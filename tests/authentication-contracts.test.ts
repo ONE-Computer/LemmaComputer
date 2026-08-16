@@ -121,6 +121,15 @@ test("customer and platform-operator realms cannot be substituted", () => {
     recentStepUpAt: "2026-08-09T03:01:00.000Z",
   } as const;
   assert.equal(platformOperatorPrincipalSchema.safeParse(operator).success, true);
+  assert.equal(platformOperatorPrincipalSchema.safeParse({
+    ...operator,
+    identity: {
+      provider: "better-auth",
+      issuer: "urn:lemmacomputer:platform-better-auth",
+      subject: "local-platform-operator",
+    },
+    assurance: { level: "aal2", factors: ["passkey"] },
+  }).success, true);
   assert.equal(customerAuthenticatedPrincipalSchema.safeParse(operator).success, false);
   assert.equal(productAuthorizationContextSchema.safeParse(operator).success, false);
 });

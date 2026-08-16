@@ -12,6 +12,7 @@ const creationInput = (overrides: Partial<Parameters<PostgresIdentityPolicyStore
   email: "owner@example.test",
   userDisplayName: "Owner Example",
   organizationDisplayName: "Example Organization",
+  tenantKind: "organization" as const,
   idempotencyKey: randomUUID(),
   installationKind: "hosted" as const,
   expiresAt: new Date("2026-08-09T03:00:00.000Z"),
@@ -162,6 +163,54 @@ test("organization onboarding is atomic, replay-safe, profile-aware, and creates
       accountUserId: customerManagedAccount,
       now: customerManaged.now,
     }))?.membershipId, first.membership.id);
+
+    const operatorId = randomUUID();
+    const sharedNodeId = `shared-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    await pool.query(
+      `INSERT INTO platform_operators (
+         id,workforce_issuer,workforce_subject,workforce_tenant_id,email,display_name
+       ) VALUES ($1,'https://operator.example.test',$2,'workforce','operator@example.test','Placement Operator')`,
+      [operatorId, `placement-${operatorId}`],
+    );
+    await pool.query(
+      `INSERT INTO workspace_nodes (
+         id,endpoint_url,tls_server_name,state,reason,
+         created_by_operator_id,updated_by_operator_id,created_at,updated_at
+       ) VALUES ($1,$2,$3,'active','Shared consumer workspace capacity',$4,$4,$5,$5)`,
+      [sharedNodeId, `https://${sharedNodeId}.nodes.internal:4101`, `${sharedNodeId}.nodes.internal`, operatorId, customerManaged.now],
+    );
+    await pool.query(
+      `INSERT INTO platform_configuration (key,value,reason,updated_by_operator_id,updated_at)
+       VALUES ('workspace.defaultSharedNodeId',$1::jsonb,'Select shared consumer workspace capacity',$2,$3)`,
+      [JSON.stringify(sharedNodeId), operatorId, customerManaged.now],
+    );
+    const personalAccount = randomUUID();
+    await store.ensureCustomerAccount({ accountUserId: personalAccount });
+    const personalInput = creationInput({
+      accountUserId: personalAccount,
+      organizationDisplayName: "Personal Owner's workspace",
+      tenantKind: "personal",
+    });
+    const personal = await store.createCustomerOrganization(personalInput);
+    const personalReplay = await store.createCustomerOrganization({
+      ...personalInput,
+      authenticationSessionId: randomUUID(),
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(personal.organization.kind, "personal");
+    assert.equal(personalReplay.replayed, true);
+    assert.equal(personalReplay.organization.id, personal.organization.id);
+    assert.deepEqual((await pool.query(
+      `SELECT tenant.kind,tenant.personal_owner_account_user_id,assignment.workspace_node_id
+       FROM tenants tenant
+       JOIN tenant_workspace_node_assignments assignment ON assignment.tenant_id=tenant.id
+       WHERE tenant.id=$1`,
+      [personal.organization.id],
+    )).rows, [{
+      kind: "personal",
+      personal_owner_account_user_id: personalAccount,
+      workspace_node_id: sharedNodeId,
+    }]);
 
     const renamed = await store.updateOrganizationDisplayName({
       organizationId: first.organization.id,

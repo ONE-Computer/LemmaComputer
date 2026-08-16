@@ -1,5 +1,8 @@
 # Workspace node deployment
 
+The rationale for sticky placement and the remote mutual-TLS trust boundary is
+recorded in [ADR 0006](../adr/0006-hosted-c-minus-workspace-node-placement-and-trust.md).
+
 LemmaComputer has one Docker/KasmVNC workspace runtime and two placements. A
 `colocated` node runs beside the reference application stack for
 customer-managed installations and worktrees. A `remote` node runs the same
@@ -15,6 +18,65 @@ tenant, subject, workspace, access generation, policy digest/key, and fixed
 gateway/Control routes. The node rechecks the provider's workspace label on
 status, open, egress update, and destroy so a provider ID cannot be substituted
 across workspaces.
+
+## Hosted C-minus placement
+
+Hosted Control uses a durable registry rather than load-balancing lifecycle
+requests across node controllers. The registry stores a stable node id, private
+HTTPS endpoint, expected certificate name, and one of `active`, `draining`, or
+`disabled`. It does not store private keys or bearer credentials. A tenant has
+one default node assignment for new workspaces, and every created workspace
+copies that node id into its own row. Changing the tenant default therefore
+affects only future workspaces; status, open, policy update, restart, stop,
+delete, and tenant-cleanup calls continue to use each workspace's persisted
+owner.
+
+Only a step-up-authenticated platform administrator can mutate placement:
+
+- `POST /v1/platform/workspace-nodes` registers a private node endpoint;
+- `PATCH /v1/platform/workspace-nodes/:workspaceNodeId/state` drains or
+  disables a node;
+- `PUT /v1/platform/tenants/:tenantId/workspace-node` changes the default for
+  new workspaces; and
+- the corresponding GET routes expose nodes and assignments to the workforce
+  operator realm, never the customer realm.
+
+The workforce operator UI exposes those registry, admission, and assignment
+operations. It also writes `workspace.defaultSharedNodeId` through the audited
+platform-configuration boundary. When that setting names an active registered
+node, hosted self-service onboarding atomically assigns new personal and
+organization tenants to it. The worktree development harness mirrors this
+placement rule in its real database; remote-node qualification then makes the
+persisted assignment authoritative for runtime routing so the same onboarding
+path is testable before hosted qualification. A missing setting leaves explicit
+operator placement available; a configured but invalid or unavailable node fails
+onboarding closed instead of silently choosing another node. Dedicated
+placement is an explicit operator or entitlement decision and is never inferred
+from SSO configuration.
+
+Registration starts a node as `active`. A draining node owns and serves its
+existing workspaces but is not eligible when a new workspace copies its tenant
+assignment. A disabled node is fail-closed for all routed lifecycle calls.
+Before disabling a node, operators must destroy or otherwise disposition its
+persisted workspaces. For a first upgrade from the previous single-node hosted
+shape, the assignment request may explicitly backfill unplaced workspace rows;
+that option is safe only when the operator has confirmed that the registered
+node is their actual legacy owner. Every mutation and backfill count is written
+to the platform audit ledger.
+
+The C-minus scheduler deliberately has no heartbeat, capacity scoring,
+automatic failover, or live workspace migration. An absent assignment, absent
+workspace owner, node mismatch, disabled node, or purge receipt bearing another
+node id fails closed. These omissions buy a productionizable multi-node shape
+without pretending that rescheduling a stateful Docker volume is safe.
+
+Control selects placement-aware routing from workspace-node topology, not from
+the deployment-profile name. `remote` topology in hosted and in the worktree
+development harness resolves every lifecycle call through the persisted
+workspace owner in the node registry. `colocated` development and
+customer-managed single-node deployments retain the explicitly configured
+direct controller client. This lets local remote qualification exercise the
+same C-minus router used by hosted without pretending that local Compose is AWS.
 
 ## Remote network contract
 
@@ -42,6 +104,22 @@ the fixed `kasm-user` UID/GID during initialization. The final desktop process
 runs as UID/GID 1000 without effective capabilities. Electron sandboxing and
 Cowork add no capability; in particular, the runtime does not add network,
 namespace, mount, device, `MKNOD`, or `SYS_CHROOT` capabilities.
+
+## Optional workspace capabilities
+
+Applications and AI agents are selections inside one workspace contract; they
+are not separate workspace modes. Both arrays may be empty. An empty selection
+still provisions the sandbox, persistent home, desktop service, and
+authenticated desktop ingress relay. The node exposes no catalog application
+launchers, starts no agent broker, receives no model alias or gateway grant,
+and creates no LiteLLM or Control application relay. Public egress remains a
+separate policy decision and may still require the governed egress proxy.
+
+Selecting the first AI agent makes a model alias mandatory and causes Control
+to issue only that agent's governed gateway and bridge authority. Removing the
+last agent sets the model selection to null and revokes the workspace's AI
+grants. Selecting applications exposes only their reviewed launchers; it does
+not imply an AI provider or agent runtime.
 
 ## Chromium and Electron process sandbox
 
@@ -77,7 +155,8 @@ capability switch, exact enforced profile label, and an unprivileged namespace
 probe are all fail-closed preconditions to workspace readiness.
 
 Set the workspace-node contract through `.env` and run `npm run env:check
--- --profile=hosted`. Remote deployments require the node URL and both private
+-- --profile=hosted`. Remote deployments require the bootstrap/qualification
+node URL and both private
 application URLs to use HTTPS, complete client and server mTLS certificate
 material, a private advertised desktop host, a private bind address, the
 restricted application network, and workspace-ingress upstream TLS
@@ -85,6 +164,11 @@ verification. Certificate private keys remain with their owning workloads:
 the node server key reaches only the node, the Control client key reaches only
 Control, the ingress client key reaches only workspace ingress, and the
 application-gateway client key reaches only the remote node controller.
+Hosted Control uses the registry endpoint and certificate name for each
+lifecycle call; the configured Control client CA/certificate/key and internal
+node token are shared C-minus credentials and should be rotated as a single
+node-fleet trust domain. Per-node credentials are a later hardening step, not a
+prerequisite for sticky routing.
 
 ## Storage and removal
 

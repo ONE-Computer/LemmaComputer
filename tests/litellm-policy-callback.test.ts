@@ -576,6 +576,8 @@ class ProbeAuth:
     metadata = {
         "lemmacomputer_purpose": "provider-route-test",
         "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
+        "lemmacomputer_provider": "openai",
+        "lemmacomputer_deployment_id": "deployment-openai",
         "lemmacomputer_policy_model_alias": "balanced",
     }
 
@@ -756,6 +758,40 @@ async def assert_provider_boundary():
         pass
     else:
         raise AssertionError("provider probe Responses binding must be single-use")
+    assert authority_calls == []
+
+    # LiteLLM v1.93 can omit custom provider metadata from a dynamically
+    # registered route while retaining its exact deployment ID. Recover the
+    # provider only from the authenticated Control-issued probe key.
+    route_without_provider = {
+        key: value for key, value in openai_route.items()
+        if key != "lemmacomputer_provider"
+    }
+    probe_without_route_provider = {
+        **probe,
+        "litellm_call_id": "probe-call-without-route-provider",
+        "litellm_params": {"model_info": route_without_provider},
+    }
+    routed_probe_without_route_provider = await callback.async_pre_call_hook(
+        ProbeAuth(), None, probe_without_route_provider, "acompletion"
+    )
+    provider_probe_without_route_provider = await callback.async_pre_call_deployment_hook(
+        routed_probe_without_route_provider, "acompletion"
+    )
+    nested_probe_without_route_provider = {
+        **provider_probe_without_route_provider,
+        "input": [{"role": "user", "content": "probe"}],
+        "litellm_call_id": "probe-responses-without-route-provider",
+        "litellm_params": {
+            **provider_probe_without_route_provider["litellm_params"],
+            "model_info": route_without_provider,
+            "aresponses": True,
+        },
+    }
+    nested_provider_probe_without_route_provider = await callback.async_pre_call_deployment_hook(
+        nested_probe_without_route_provider, "acompletion"
+    )
+    assert nested_provider_probe_without_route_provider["model"] == "openai/gpt-real"
     assert authority_calls == []
 
     admitted = {

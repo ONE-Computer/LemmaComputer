@@ -181,9 +181,26 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
   const gateway = {
     revoke: async (workspaceId: string, agentId?: string) => { revoked.push(workspaceId + ":" + (agentId ?? "")); },
   } as GatewayClient;
+  const controllerCreates: Array<Parameters<ControllerClient["create"]>[0]> = [];
+  const controller = {
+    create: async (input: Parameters<ControllerClient["create"]>[0]) => {
+      controllerCreates.push(input);
+      return { providerId: `sandbox-${input.workspaceId}`, state: "ready" as const, failureCode: null };
+    },
+    status: async (workspaceId: string, providerId: string) => ({ workspaceId, providerId, state: "ready" as const, failureCode: null }),
+    open: async () => ({ launchUrl: "https://workspace.example.test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
+    destroyWorkspace: async () => undefined,
+    purgeWorkspace: async (workspaceId: string, accessGeneration: number) => ({
+      nodeId: "provider-test-node",
+      workspaceId,
+      maximumPurgedGeneration: accessGeneration,
+      completedAt: new Date().toISOString(),
+      verified: true as const,
+    }),
+  } as ControllerClient;
   const app = createControlServer(
     workspaceStore,
-    {} as ControllerClient,
+    controller,
     proxyToken,
     gateway,
     undefined,
@@ -197,6 +214,32 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
   );
 
   try {
+    const baseGrantId = "workspace-base-no-provider";
+    await workspaceStore.saveSandboxSettings(identity, {
+      grantId: baseGrantId,
+      profileId: "claude-desktop-standard-v1",
+      applicationIds: [],
+      modelAlias: null,
+      requestedServiceClass: "balanced",
+      agentIds: [],
+    });
+    const baseWorkspace = await app.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "base-workspace-no-provider-0001" },
+      payload: { grantId: baseGrantId },
+    });
+    assert.equal(baseWorkspace.statusCode, 201);
+    assert.deepEqual(baseWorkspace.json().applications, []);
+    assert.deepEqual(baseWorkspace.json().agents, []);
+    assert.equal(baseWorkspace.json().profile.modelAlias, null);
+    assert.equal(controllerCreates.length, 1);
+    assert.equal(controllerCreates[0]?.gateway, undefined);
+    assert.equal(controllerCreates[0]?.agentBridge, undefined);
+    assert.deepEqual(controllerCreates[0]?.policy.agents, []);
+    assert.equal(controllerCreates[0]?.policy.modelAlias, null);
+    assert.equal(providerAdministration.configured.length, 0);
+
     const blocked = await app.inject({
       method: "POST",
       url: "/v1/workspaces",

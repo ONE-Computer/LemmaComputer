@@ -7,7 +7,7 @@ import { PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 
 const connectionString = process.env.WORKSPACE_SETTINGS_TEST_DATABASE_URL;
 
-test("PostgreSQL workspace settings persist governed Auto and reject unknown model aliases", {
+test("PostgreSQL workspace settings persist AI-enabled and base workspace selections", {
   skip: !connectionString,
 }, async () => {
   const store = PostgresWorkspaceStore.fromConnectionString(connectionString!);
@@ -32,6 +32,35 @@ test("PostgreSQL workspace settings persist governed Auto and reject unknown mod
     const persisted = await store.getSandboxSettings(identity, grantId);
     assert.equal(persisted?.modelAlias, "lemmacomputer-auto");
     assert.deepEqual(persisted?.applicationIds, ["firefox", "google-chrome"]);
+
+    const baseGrantId = "workspace-base-without-capabilities";
+    const base = await store.saveSandboxSettings(identity, {
+      grantId: baseGrantId,
+      profileId: "claude-desktop-standard-v1",
+      applicationIds: [],
+      modelAlias: null,
+      requestedServiceClass: "balanced",
+      agentIds: [],
+    });
+    assert.deepEqual(base.applicationIds, []);
+    assert.deepEqual(base.agentIds, []);
+    assert.equal(base.modelAlias, null);
+    assert.deepEqual(await store.getSandboxSettings(identity, baseGrantId), base);
+
+    await assert.rejects(
+      pool.query(
+        `UPDATE sandbox_settings SET model_alias='lemmacomputer-claude' WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3`,
+        [identity.tenantId, identity.subjectId, baseGrantId],
+      ),
+      /sandbox_settings_agent_model_pair/,
+    );
+    await assert.rejects(
+      pool.query(
+        `UPDATE sandbox_settings SET agent_ids='["claude-cli"]'::jsonb WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3`,
+        [identity.tenantId, identity.subjectId, baseGrantId],
+      ),
+      /sandbox_settings_agent_model_pair/,
+    );
     await assert.rejects(
       pool.query(
         `UPDATE sandbox_settings SET model_alias='lemmacomputer-unknown' WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3`,

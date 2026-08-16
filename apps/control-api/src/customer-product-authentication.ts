@@ -155,10 +155,43 @@ export class CustomerProductAuthenticationService {
       email: authenticated.user.email,
       userDisplayName: authenticated.user.name,
       organizationDisplayName,
+      tenantKind: "organization",
       idempotencyKey,
       installationKind: this.options.installationKind,
       expiresAt: authenticated.session.expiresAt,
       now: this.now(),
+    });
+  }
+
+  async createPersonalTenant(headers: Headers, input: { idempotencyKey: string }) {
+    if (this.options.installationKind === "customer-managed") {
+      throw new LemmaComputerError("PERSONAL_TENANT_NOT_AVAILABLE", "Personal tenants are unavailable in this installation", 404);
+    }
+    const synchronized = await this.synchronize(headers);
+    if (!synchronized) throw new LemmaComputerError("UNAUTHENTICATED", "Authentication is required", 401);
+    if (!this.store.createCustomerOrganization) {
+      throw new LemmaComputerError(
+        "PERSONAL_TENANT_SIGNUP_NOT_CONFIGURED",
+        "Personal tenant signup is unavailable",
+        503,
+        true,
+      );
+    }
+    const idempotencyKey = z.uuid().parse(input.idempotencyKey);
+    const { authenticated, account } = synchronized;
+    const normalizedName = authenticated.user.name.trim().replace(/\s+/g, " ");
+    const personalDisplayName = `${normalizedName.slice(0, 88).trimEnd()}'s workspace`;
+    return this.store.createCustomerOrganization({
+      accountUserId: account.accountUserId,
+      authenticationSessionId: authenticated.session.id,
+      email: authenticated.user.email,
+      userDisplayName: authenticated.user.name,
+      organizationDisplayName: personalDisplayName,
+      tenantKind: "personal",
+      idempotencyKey,
+      installationKind: this.options.installationKind,
+      now: this.now(),
+      expiresAt: authenticated.session.expiresAt,
     });
   }
 

@@ -20,11 +20,31 @@ const session = {
 
 test("platform operator workbench is a separate workforce surface with operational and elevation controls", async ({ page }, testInfo) => {
   let requestedElevation: Record<string, unknown> | undefined;
+  let registeredNode: Record<string, unknown> | undefined;
+  let placementRequest: Record<string, unknown> | undefined;
+  let sharedNodeRequest: Record<string, unknown> | undefined;
   let approved = false;
+  const nodes = [{ id: "workspace-sg-01", endpointUrl: "https://workspace-sg-01.nodes.internal:4101", tlsServerName: "workspace-sg-01.nodes.internal", state: "active" }];
   await page.route("http://platform.test/api/v1/platform/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/service-health")) return route.fulfill({ json: { health: { status: "degraded", activeIncidents: 1, checkedAt: "2026-08-09T03:10:00.000Z" } } });
-    if (path.endsWith("/tenants")) return route.fulfill({ json: { tenants: [{ id: "55555555-5555-4555-8555-555555555555", displayName: "Northwind", lifecycleState: "active" }] } });
+    if (path.endsWith("/tenants")) return route.fulfill({ json: { tenants: [{ id: "55555555-5555-4555-8555-555555555555", displayName: "Northwind", tenantKind: "organization", lifecycleState: "active", workspaceNodeId: "workspace-sg-01", workspaceNodeState: "active" }] } });
+    if (path.endsWith("/workspace-node-assignments")) return route.fulfill({ json: { assignments: [{ tenantId: "55555555-5555-4555-8555-555555555555", workspaceNodeId: "workspace-sg-01" }] } });
+    if (path.endsWith("/workspace-nodes")) {
+      if (route.request().method() === "GET") return route.fulfill({ json: { nodes } });
+      registeredNode = route.request().postDataJSON();
+      nodes.push({ ...(registeredNode as typeof nodes[number]), state: "active" });
+      return route.fulfill({ status: 201, json: { node: nodes.at(-1) } });
+    }
+    if (path.endsWith("/configuration")) return route.fulfill({ json: { configuration: [{ key: "workspace.defaultSharedNodeId", value: "workspace-sg-01" }] } });
+    if (path.endsWith("/configuration/workspace.defaultSharedNodeId")) {
+      sharedNodeRequest = route.request().postDataJSON();
+      return route.fulfill({ json: { configuration: { key: "workspace.defaultSharedNodeId", ...(sharedNodeRequest ?? {}) } } });
+    }
+    if (path.endsWith("/tenants/55555555-5555-4555-8555-555555555555/workspace-node")) {
+      placementRequest = route.request().postDataJSON();
+      return route.fulfill({ json: { assignment: placementRequest, backfilledWorkspaces: 0 } });
+    }
     if (path.endsWith("/incidents")) return route.fulfill({ json: { incidents: [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", title: "Identity callbacks degraded", severity: "high", status: "open", updatedAt: "2026-08-09T03:09:00.000Z" }] } });
     if (path.endsWith("/audit")) return route.fulfill({ json: { events: [] } });
     if (path.endsWith("/support/elevations")) {
@@ -62,6 +82,8 @@ test("platform operator workbench is a separate workforce surface with operation
   await expect(page.getByRole("heading", { name: "Update organization lifecycle" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Create incident" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Update platform configuration" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workspace nodes" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "workspace-sg-01" }).first()).toBeVisible();
   const approvableElevation = page.getByRole("row").filter({ hasText: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
   await expect(approvableElevation.getByRole("cell", { name: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" })).toBeVisible();
   const ownElevation = page.getByRole("row").filter({ hasText: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
@@ -82,6 +104,27 @@ test("platform operator workbench is a separate workforce surface with operation
     durationMinutes: 15,
     kind: "support",
   });
+
+  await page.getByLabel("Stable node ID").fill("workspace-sg-02");
+  await page.getByLabel("Private HTTPS endpoint").fill("https://workspace-sg-02.nodes.internal:4101");
+  await page.getByLabel("TLS server name").fill("workspace-sg-02.nodes.internal");
+  await page.getByLabel("Registration reason").fill("Add reviewed Singapore workspace capacity");
+  await page.getByRole("button", { name: "Register node" }).click();
+  await expect(page.getByText("Workspace node registered as active.")).toBeVisible();
+  expect(registeredNode).toMatchObject({ id: "workspace-sg-02", tlsServerName: "workspace-sg-02.nodes.internal" });
+
+  await page.locator("#placement-target").selectOption("55555555-5555-4555-8555-555555555555");
+  await page.locator("#placement-node").selectOption("workspace-sg-02");
+  await page.getByLabel("Assignment reason").fill("Move future Northwind workspaces to node two");
+  await page.getByRole("button", { name: "Assign workspace node" }).click();
+  await expect(page.getByText("Placement updated. 0 unplaced workspaces were backfilled.")).toBeVisible();
+  expect(placementRequest).toMatchObject({ workspaceNodeId: "workspace-sg-02", backfillUnplacedWorkspaces: false });
+
+  await page.getByLabel("Active shared node").selectOption("workspace-sg-02");
+  await page.getByLabel("Change reason").last().fill("Select node two for new personal tenants");
+  await page.getByRole("button", { name: "Set shared default" }).click();
+  await expect(page.getByText("New personal tenants will use workspace-sg-02.")).toBeVisible();
+  expect(sharedNodeRequest).toMatchObject({ value: "workspace-sg-02" });
 });
 
 test("security auditor workbench hides mutation controls", async ({ page }) => {
@@ -94,6 +137,9 @@ test("security auditor workbench hides mutation controls", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Update organization lifecycle" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Create incident" })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Update platform configuration" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Workspace nodes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Register workspace node" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Assign organization placement" })).toBeHidden();
 });
 
 test("Lax operator session reaches a cross-site step-up GET callback but not a cross-site POST", async ({ context, page }) => {

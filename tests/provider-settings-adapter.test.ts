@@ -202,6 +202,13 @@ test("managed provider configuration isolates tenants, validates candidates, and
         (grant.body.metadata as Record<string, unknown>).lemmacomputer_non_billable_exemption,
         "provider-route-test-v1",
       );
+      assert.ok(["openai", "anthropic", "glm"].includes(String(
+        (grant.body.metadata as Record<string, unknown>).lemmacomputer_provider,
+      )));
+      assert.equal(
+        (grant.body.metadata as Record<string, unknown>).lemmacomputer_deployment_id,
+        (grant.body.models as unknown[])[0],
+      );
     }
     const stableProbes = requests.filter((request) => (
       request.url === "/chat/completions"

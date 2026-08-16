@@ -353,6 +353,7 @@ export const testPrincipalFromHeaders = (headers: Record<string, unknown>): Sess
     email: `${userId}@example.test`,
     displayName: userId,
     tenantDisplayName: tenantId,
+    tenantKind: "organization",
     roles: ["owner", "administrator"],
     identity: { tenantId, subjectId: userId, audience: "lemmacomputer-control" },
   };

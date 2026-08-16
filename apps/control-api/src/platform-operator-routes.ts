@@ -14,6 +14,10 @@ import {
   platformIncidentSeveritySchema,
   platformIncidentStatusSchema,
   platformTenantLifecycleStateSchema,
+  workspaceNodeEndpointSchema,
+  workspaceNodeIdSchema,
+  workspaceNodeStateSchema,
+  workspaceNodeTlsServerNameSchema,
 } from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 import { renderPlatformOperatorUi } from "./platform-operator-ui.js";
@@ -35,7 +39,7 @@ export interface PlatformOperatorAuthenticationBoundary {
     clearStateCookie: string;
   }>;
   authenticate(cookieHeader: string | undefined): Promise<PlatformOperatorSession | null>;
-  logout(cookieHeader: string | undefined, correlationId: string): Promise<string>;
+  logout(cookieHeader: string | undefined, correlationId: string): Promise<string | string[]>;
 }
 
 export type PlatformOperatorStoreBoundary = Pick<PostgresPlatformOperatorStore,
@@ -55,6 +59,11 @@ export type PlatformOperatorStoreBoundary = Pick<PostgresPlatformOperatorStore,
   | "updateIncident"
   | "listPlatformConfiguration"
   | "setPlatformConfiguration"
+  | "listWorkspaceNodes"
+  | "registerWorkspaceNode"
+  | "updateWorkspaceNodeState"
+  | "listTenantWorkspaceNodeAssignments"
+  | "assignTenantWorkspaceNode"
 >;
 
 const identifierSchema = z.uuid();
@@ -112,7 +121,7 @@ export function registerPlatformOperatorRoutes(
       } catch (error) {
         const code = error instanceof LemmaComputerError ? error.code : "PLATFORM_STEP_UP_FAILED";
         request.log.warn({ code }, "Platform workforce step-up callback rejected");
-        return reply.code(303).header("location", "/api/v1/platform/ui?error=step-up-not-completed").send();
+        return reply.code(303).header("location", "/platform?error=step-up-not-completed").send();
       }
     },
   );
@@ -151,6 +160,58 @@ export function registerPlatformOperatorRoutes(
         correlationId: request.id,
       }),
     };
+  });
+
+  app.get("/v1/platform/workspace-nodes", async (request) => {
+    const session = requireAction(request, "platform.config.read");
+    return { nodes: await options.store.listWorkspaceNodes(session) };
+  });
+
+  app.post("/v1/platform/workspace-nodes", async (request, reply) => {
+    const session = requireAction(request, "platform.config.manage");
+    const input = z.strictObject({
+      id: workspaceNodeIdSchema,
+      endpointUrl: workspaceNodeEndpointSchema,
+      tlsServerName: workspaceNodeTlsServerNameSchema,
+      reason: z.string().trim().min(12).max(1000),
+    }).parse(request.body ?? {});
+    return reply.code(201).send({
+      node: await options.store.registerWorkspaceNode(session, { ...input, correlationId: request.id }),
+    });
+  });
+
+  app.patch<{ Params: { workspaceNodeId: string } }>("/v1/platform/workspace-nodes/:workspaceNodeId/state", async (request) => {
+    const session = requireAction(request, "platform.config.manage");
+    const input = z.strictObject({
+      state: workspaceNodeStateSchema,
+      reason: z.string().trim().min(12).max(1000),
+    }).parse(request.body ?? {});
+    return {
+      node: await options.store.updateWorkspaceNodeState(session, {
+        workspaceNodeId: workspaceNodeIdSchema.parse(request.params.workspaceNodeId),
+        ...input,
+        correlationId: request.id,
+      }),
+    };
+  });
+
+  app.get("/v1/platform/workspace-node-assignments", async (request) => {
+    const session = requireAction(request, "platform.config.read");
+    return { assignments: await options.store.listTenantWorkspaceNodeAssignments(session) };
+  });
+
+  app.put<{ Params: { tenantId: string } }>("/v1/platform/tenants/:tenantId/workspace-node", async (request) => {
+    const session = requireAction(request, "platform.config.manage");
+    const input = z.strictObject({
+      workspaceNodeId: workspaceNodeIdSchema,
+      reason: z.string().trim().min(12).max(1000),
+      backfillUnplacedWorkspaces: z.boolean().default(false),
+    }).parse(request.body ?? {});
+    return await options.store.assignTenantWorkspaceNode(session, {
+      tenantId: tenantIdentifierSchema.parse(request.params.tenantId),
+      ...input,
+      correlationId: request.id,
+    });
   });
 
   app.get("/v1/platform/service-health", async (request) => {

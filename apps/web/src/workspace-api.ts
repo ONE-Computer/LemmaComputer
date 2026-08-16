@@ -238,6 +238,10 @@ export const authApi = {
   customerCapabilities: () => request("/api/v1/auth/customer-capabilities", { cache: "no-store" }),
   productSession: () => request("/api/v1/auth/product-session", { cache: "no-store" }),
   selectProductMembership: (membershipId: string) => request("/api/v1/auth/product-session", mutation("PUT", { membershipId })),
+  createPersonalTenant: (idempotencyKey: string) => request("/api/v1/auth/personal-tenant", {
+    method: "POST",
+    headers: { "idempotency-key": idempotencyKey },
+  }),
   createOrganization: (displayName: string, idempotencyKey: string) => request("/api/v1/auth/organizations", {
     method: "POST",
     headers: { ...jsonHeaders, "idempotency-key": idempotencyKey },
@@ -270,6 +274,10 @@ export const authApi = {
   sendVerificationEmail: (email: string, callbackURL = "/") => request("/api/v1/auth/customer/send-verification-email", mutation("POST", {
     email,
     callbackURL: new URL(callbackURL, window.location.origin).toString(),
+  })),
+  takeDevelopmentEmail: (email: string, kind: "email-verification" | "password-recovery") => request("/api/v1/auth/development-email-capture", mutation("POST", {
+    email,
+    kind,
   })),
   resetPassword: (token: string, newPassword: string) => request("/api/v1/auth/customer/reset-password", mutation("POST", { token, newPassword })),
   signInWithSocialProvider: (provider: string, callbackURL = "/") => {

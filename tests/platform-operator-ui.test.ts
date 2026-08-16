@@ -26,3 +26,17 @@ test("operator UI encodes bootstrap JSON and optional base URL as inert data", (
   assert.match(html, /\\u003c\/script>/);
   assert.match(html, /&quot;&gt;&lt;script&gt;/);
 });
+
+test("operator UI identifies the local Better Auth realm without claiming workforce Entra", () => {
+  const html = renderPlatformOperatorUi({
+    ...session,
+    principal: {
+      ...session.principal,
+      identity: { provider: "better-auth", issuer: "urn:lemmacomputer:platform-better-auth", subject: "local-operator" },
+      assurance: { level: "aal2", factors: ["passkey"] },
+    },
+  } as PlatformOperatorSession);
+  assert.match(html, /Local platform operator realm/);
+  assert.match(html, /Worktree control plane/);
+  assert.doesNotMatch(html, /Workforce operator realm/);
+});

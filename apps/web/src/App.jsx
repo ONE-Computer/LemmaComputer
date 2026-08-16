@@ -794,7 +794,9 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
           ...(invited ? { callbackURL } : {}),
         });
         setVerificationRecipient(email);
-        setStatus(invited ? "" : "Check your email to verify your account, then return here to sign in.");
+        setStatus(invited ? "" : capabilities?.developmentEmailCapture
+          ? "This worktree captures email locally. Open the captured verification email below."
+          : "Check your email to verify your account, then return here to sign in.");
       } else if (mode === "recovery") {
         await authApi.requestPasswordReset(email, `${window.location.origin}/reset-password`);
         setStatus("If an account exists for that email, a reset link is on its way.");
@@ -826,9 +828,29 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setStatus("");
     try {
       await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : "/");
-      setStatus("Verification email sent. Check your inbox and junk folder, then open the link to continue.");
+      setStatus(capabilities?.developmentEmailCapture
+        ? "A new local verification email was captured. Open it below."
+        : "Verification email sent. Check your inbox and junk folder, then open the link to continue.");
     } catch (sendError) {
       setFormError(sendError.message ?? "The verification email could not be sent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const openDevelopmentVerification = async () => {
+    const recipient = (verificationRecipient || email).trim();
+    if (!recipient) return;
+    setBusy(true);
+    setFormError("");
+    try {
+      if (!verificationRecipient) {
+        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : "/");
+      }
+      const captured = await authApi.takeDevelopmentEmail(recipient, "email-verification");
+      if (!captured?.url) throw new Error("The captured verification email is unavailable.");
+      window.location.assign(captured.url);
+    } catch (captureError) {
+      setFormError(captureError.message ?? "The captured verification email could not be opened.");
     } finally {
       setBusy(false);
     }
@@ -886,6 +908,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
           <span>We sent a verification link to <strong>{verificationRecipient}</strong>. Open it in this browser to verify your email and finish joining {invitationContext?.organizationDisplayName ?? "the organization"} automatically.</span>
           {status && <div className="signin-status" role="status">{status}</div>}
           {formError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Email could not be sent</strong>{formError}</span></div>}
+          {capabilities?.developmentEmailCapture && <button className="primary-button signin-button" type="button" disabled={busy} onClick={openDevelopmentVerification}>{busy ? "Opening…" : "Open local verification email"}</button>}
           <button className="primary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>{busy ? "Sending…" : "Resend verification email"}</button>
           <button className="secondary-button signin-button" type="button" disabled={busy} onClick={onSignedIn}>I’ve verified my email</button>
           <button className="signin-back-button" type="button" onClick={() => changeMode("signin")}>Use an existing account instead</button>
@@ -943,6 +966,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
               {mode === "two-factor" && <label>{useBackupCode ? "Backup code" : "Authenticator code"}<input inputMode={useBackupCode ? "text" : "numeric"} autoComplete="one-time-code" required value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} /></label>}
               <button className="primary-button signin-button" type="submit" onClick={mode === "company-sso" ? (event) => { event.preventDefault(); startCompanySso(); } : undefined} disabled={busy || invitationBusy}>{busy || invitationBusy ? "Please wait…" : ({ signin: "Sign in", signup: "Create account", recovery: "Send reset link", reset: "Reset password", "two-factor": "Verify", "company-sso": "Continue" }[mode])}</button>
             </form>
+            {!invited && mode === "signup" && capabilities?.developmentEmailCapture && (verificationRecipient || email.trim()) && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={openDevelopmentVerification}>{busy ? "Opening…" : "Open local verification email"}</button>}
             {!invited && mode === "signup" && verificationRecipient && <button className="secondary-button signin-button" type="button" disabled={busy} onClick={resendVerification}>Resend verification email</button>}
             {mode === "signin" && <div className="signin-secondary-actions"><button type="button" onClick={() => changeMode("recovery")}>Forgot password?</button>{!invited && <button type="button" onClick={() => changeMode("signup")}>Create account</button>}</div>}
             {invited && mode === "signin" && <button className="signin-back-button" type="button" onClick={() => changeMode("signup")}>Create a new account</button>}
@@ -1153,6 +1177,8 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
   const [selectionError, setSelectionError] = useState("");
   const [securityOpen, setSecurityOpen] = useState(false);
   const organizationIdempotencyKey = useRef(crypto.randomUUID());
+  const personalIdempotencyKey = useRef(crypto.randomUUID());
+  const automaticSelectionStarted = useRef("");
   const memberships = customerSession?.memberships ?? [];
   const selectMembership = async (membershipId) => {
     setBusyMembershipId(membershipId);
@@ -1177,17 +1203,45 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
       setBusyMembershipId("");
     }
   };
+  const automaticMembership = memberships.length === 1 && memberships[0]?.tenantKind === "personal"
+    ? memberships[0]
+    : null;
+  const provisionPersonalTenant = async () => {
+    setBusyMembershipId("personal");
+    setSelectionError("");
+    try {
+      await authApi.createPersonalTenant(personalIdempotencyKey.current);
+      await onSelected();
+    } catch (provisioningError) {
+      setSelectionError(provisioningError.message ?? "Your personal workspace could not be prepared.");
+      setBusyMembershipId("");
+      automaticSelectionStarted.current = "";
+    }
+  };
+  useEffect(() => {
+    if (!customerSession?.personalTenantAvailable && !automaticMembership) return;
+    const operation = automaticMembership ? `membership:${automaticMembership.membershipId}` : "personal:create";
+    if (automaticSelectionStarted.current === operation) return;
+    automaticSelectionStarted.current = operation;
+    if (automaticMembership) void selectMembership(automaticMembership.membershipId);
+    else if (!memberships.length) void provisionPersonalTenant();
+  }, [automaticMembership?.membershipId, customerSession?.personalTenantAvailable, memberships.length]);
+  const personalSetup = Boolean(customerSession?.personalTenantAvailable && !memberships.length) || Boolean(automaticMembership);
   return <><main className="signin-screen">
     <section className="signin-card organization-selection-card">
       <div className="brand signin-brand" aria-label="LemmaComputer"><strong>Lemma</strong><span>Computer</span></div>
       <p>Signed in as {customerSession.user.email}</p>
-      <h1>{memberships.length ? "Choose an organization" : "Create your organization"}</h1>
-      <span>{memberships.length
-        ? "Your identity does not grant tenant access by itself. Choose one active membership for this session."
-        : "Set up your organization. You will become its protected owner, and access can be assigned to other people separately."}</span>
+      <h1>{personalSetup ? "Setting up your personal workspace" : memberships.length ? "Choose an organization" : "Create your organization"}</h1>
+      <span>{personalSetup
+        ? "Your private account space is being prepared. No organization registration is required."
+        : memberships.length
+          ? "Choose the organization you want to use for this session."
+          : "Set up your organization. You will become its protected owner, and access can be assigned to other people separately."}</span>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Account security was not updated</strong>{error}</span></div>}
       {selectionError && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Organization was not selected</strong>{selectionError}</span></div>}
-      {memberships.length
+      {personalSetup
+        ? <div className="signin-status" role="status">{busyMembershipId ? "Preparing secure access…" : "Personal workspace setup paused."}</div>
+        : memberships.length
         ? <div className="organization-selection-list">
           {memberships.map((membership) => <button
             key={membership.membershipId}
@@ -1216,6 +1270,11 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
             {busyMembershipId === "organization" ? "Creating organization…" : "Create organization"}
           </button>
         </form>}
+      {personalSetup && !busyMembershipId && <button className="primary-button signin-button" type="button" onClick={() => {
+        automaticSelectionStarted.current = "";
+        if (automaticMembership) void selectMembership(automaticMembership.membershipId);
+        else void provisionPersonalTenant();
+      }}>Try again</button>}
       <button className="secondary-button signin-button" type="button" onClick={() => setSecurityOpen(true)}>Manage account security</button>
       <button className="signin-back-button" type="button" onClick={onSignOut}>Sign out</button>
       <small><ShieldCheckmark24Regular aria-hidden="true" />Only an active, server-verified membership can open organization data.</small>
@@ -3170,7 +3229,7 @@ const explicitWorkspaceServiceClass = (value, options) => (
 function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
-  const [modelAlias, setModelAlias] = useState("");
+  const [modelAlias, setModelAlias] = useState(null);
   const [requestedServiceClass, setRequestedServiceClass] = useState("balanced");
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
@@ -3205,9 +3264,15 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const toggleApplication = (applicationId) => setApplicationIds((current) => (
     current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
   ));
-  const toggleAgent = (agentId) => setAgentIds((current) => (
-    current.includes(agentId) ? current.filter((id) => id !== agentId) : [...current, agentId]
-  ));
+  const toggleAgent = (agentId) => setAgentIds((current) => {
+    if (current.includes(agentId)) {
+      const next = current.filter((id) => id !== agentId);
+      if (next.length === 0) setModelAlias(null);
+      return next;
+    }
+    if (current.length === 0) setModelAlias(settings.modelAlias ?? settings.availableModels[0]?.alias ?? null);
+    return [...current, agentId];
+  });
   const selectedProfile = settings?.availableProfiles.find((profile) => profile.id === profileId) ?? settings?.profile;
   const disposableOpen = selectedProfile?.executionMode === "disposable-open";
   const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
@@ -3243,13 +3308,13 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
         <div>
           <p>{ownerName ? `${ownerName} · Workspace configuration` : creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
           <h1>{workspaceName(selectedWorkspace ?? { grantId: selectedGrantId })}</h1>
-          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Access, application, agent, and service-level changes apply after the workspace restarts." : creatingWorkspace ? "Choose workspace access, applications, agents, and a service level before LemmaComputer starts this workspace." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
+          <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Optional application and AI changes apply after the workspace restarts." : creatingWorkspace ? "Choose workspace access and add only the applications or AI agents this workspace needs." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
+        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a Restricted workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows Restricted workspace access. This does not choose your AI agent."}</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
@@ -3271,26 +3336,26 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-applications-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span><span><h2 id="sandbox-applications-heading">Applications</h2><p>Choose approved applications that need a desktop interface. This workspace only exposes applications that are included and policy-approved.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Laptop24Regular aria-hidden="true" /></span><span><h2 id="sandbox-applications-heading">Applications</h2><p>Add any approved desktop applications this workspace needs. Leaving every option clear keeps only the base desktop.</p></span></div>
             <fieldset className="application-grid"><legend className="sr-only">Approved applications</legend>{settings.availableApplications.map((application) => (
               <label className={`application-option${applicationIds.includes(application.id) ? " selected" : ""}`} key={application.id}><input type="checkbox" checked={applicationIds.includes(application.id)} onChange={() => toggleApplication(application.id)} /><span className="agent-check" aria-hidden="true">{applicationIds.includes(application.id) && <Checkmark16Filled />}</span><span><strong>{application.displayName}</strong><small>{application.category} · {application.version}</small><em>{application.description}</em></span></label>
             ))}</fieldset>
-            {!applicationIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved application.</p>}
+            {!applicationIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No additional applications selected. The base managed desktop will still launch.</p>}
             <div className="application-roadmap two-column" aria-label="Planned application catalog">{pendingApplications.map((application) => <div key={application.name}><span><strong>{application.name}</strong><small>{application.type}</small></span><span className="coming-soon">Coming soon</span><p>{application.detail}</p></div>)}</div>
           </section>
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-agents-heading">
-            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-agents-heading">AI agents</h2><p>Each enabled agent receives a separate governed identity, model grant, and tool scope. Unavailable clients cannot be selected.</p></span></div>
+            <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-agents-heading">AI agents</h2><p>Add AI agents only when they are needed. Each selected agent receives a separate governed identity, model grant, and tool scope.</p></span></div>
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
               const unavailableCopy = unavailableAgentCopy(choice);
               return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
             })}</section>)}</div>
-            {!agentIds.length && <p className="sandbox-selection-error" role="alert">Select at least one approved AI agent.</p>}
+            {!agentIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No AI agents selected. This workspace does not require a model provider or receive AI credentials.</p>}
           </section>
 
-          {showChannels && <TelegramChannelSection
+          {showChannels && agentIds.length > 0 && <TelegramChannelSection
             connection={telegram}
             credentials={credentials}
             agents={settings.availableAgents.filter((agent) => agentIds.includes(agent.id))}
@@ -3303,10 +3368,10 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             onCreateCredential={onCreateCredential}
           />}
 
-          <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
+          {agentIds.length > 0 && <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Default model mode</h2><p>Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.</p></span></div>
             <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
-          </section>
+          </section>}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="sandbox-security-heading">Network access</h2><p>{canManageFirewall ? "Assign the network security group for this workspace. Changes apply live without restarting." : "Network access is managed by your organization. You can review the effective access below."}</p></span></div>
@@ -3337,8 +3402,8 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
           </section>
 
           <div className="sandbox-management-footer">
-            <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · persistent home · gateway-only network</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || !applicationIds.length || !agentIds.length || selectedSecurityGroup?.needsReview}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · {applicationIds.length || agentIds.length ? `${applicationIds.length} app${applicationIds.length === 1 ? "" : "s"} · ${agentIds.length} AI agent${agentIds.length === 1 ? "" : "s"}` : "base workspace"}</small></div>
+            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
@@ -5308,6 +5373,8 @@ export function App() {
   const [drawer, setDrawer] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [accountSecurityOpen, setAccountSecurityOpen] = useState(accountSecurityOpenFromLocation);
+  const [organizationCreateOpen, setOrganizationCreateOpen] = useState(false);
+  const [organizationCreating, setOrganizationCreating] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [operation, setOperation] = useState(null);
@@ -5378,6 +5445,7 @@ export function App() {
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
   const [revisionSaving, setRevisionSaving] = useState(false);
   const surfacedApprovalIds = useRef(new Set());
+  const organizationCreationIdempotencyKey = useRef(crypto.randomUUID());
   const invitationInitializationStarted = useRef(false);
   const mainContentRef = useRef(null);
   const sidebarRef = useRef(null);
@@ -7153,6 +7221,21 @@ export function App() {
   const logout = async () => {
     try { await authApi.logout(); } finally { window.location.assign("/"); }
   };
+  const switchOrganization = async () => {
+    setProfileOpen(false);
+    await authApi.revokeProductSession();
+    window.location.assign("/");
+  };
+  const createEnterpriseOrganization = async (displayName) => {
+    setOrganizationCreating(true);
+    try {
+      await authApi.createOrganization(displayName, organizationCreationIdempotencyKey.current);
+      window.location.assign("/");
+    } catch (creationError) {
+      showApiError(creationError);
+      setOrganizationCreating(false);
+    }
+  };
   const switchInvitationAccount = async () => {
     setAuthLoading(true);
     try {
@@ -7199,7 +7282,7 @@ export function App() {
       onSignedIn={() => refreshAuthentication(invitationAcceptable)}
     />;
   }
-  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen);
+  const modalActive = Boolean(drawer || confirmation || revisionPromptOpen || sandboxCreateOpen || accountSecurityOpen || organizationCreateOpen);
 
   return (
     <div className="app-shell">
@@ -7243,10 +7326,16 @@ export function App() {
             <div id="sidebar-account-menu" className="sidebar-account-menu" role="group" aria-label="Account menu">
               <div className="sidebar-menu-profile">
                 <span className="sidebar-menu-avatar"><Person24Regular aria-hidden="true" /></span>
-                <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small></span>
+                <span><strong>{session.user.displayName}</strong><small>{session.user.email}</small><small>{session.tenant.kind === "personal" ? "Personal workspace" : session.tenant.displayName}</small></span>
               </div>
               <div className="sidebar-account-menu-actions">
                 <button type="button" onClick={() => selectNav("AI usage")}><LeafThree24Regular aria-hidden="true" /><span>My AI usage</span><ChevronRight16Regular aria-hidden="true" /></button>
+                {(session.memberships?.length ?? 0) > 1 && <button type="button" onClick={switchOrganization}><Apps24Regular aria-hidden="true" /><span>Switch organization</span><ChevronRight16Regular aria-hidden="true" /></button>}
+                {session.organizationCreationAvailable && <button type="button" onClick={() => {
+                  organizationCreationIdempotencyKey.current = crypto.randomUUID();
+                  setOrganizationCreateOpen(true);
+                  setProfileOpen(false);
+                }}><Add24Regular aria-hidden="true" /><span>Create organization</span><ChevronRight16Regular aria-hidden="true" /></button>}
                 <span className="sidebar-menu-divider" aria-hidden="true" />
                 {canOpenAiControlPlane && <>
                   <span className="sidebar-menu-section-label">Organization</span>
@@ -7503,7 +7592,7 @@ export function App() {
       {sandboxCreateOpen && (
         <TextPromptDialog
           title="Create workspace"
-          description="Choose a clear name first. You’ll review workspace access, applications, agents, and service level before LemmaComputer starts anything."
+          description="Choose a clear name first. You’ll review workspace access and optionally add applications or AI agents before LemmaComputer starts anything."
           label="Workspace name"
           defaultValue="Project workspace"
           confirmLabel="Continue to configuration"
@@ -7522,6 +7611,16 @@ export function App() {
       >
         <AccountSecurityPanel onSessionChanged={refreshAuthentication} onSignOutAll={logout} />
       </ModalDialog>}
+
+      {organizationCreateOpen && <TextPromptDialog
+        title="Create an organization"
+        description="Create a separate company space for members, policies, billing, and enterprise access. Your personal workspace remains available."
+        label="Organization name"
+        confirmLabel="Create organization"
+        busy={organizationCreating}
+        onConfirm={createEnterpriseOrganization}
+        onCancel={() => setOrganizationCreateOpen(false)}
+      />}
 
 
       {drawer === "request" && operation && (

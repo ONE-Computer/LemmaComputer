@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${LEMMACOMPUTER_ENABLED_AGENTS:=claude-desktop}"
-: "${LEMMACOMPUTER_ENABLED_APPLICATIONS:=firefox}"
+: "${LEMMACOMPUTER_ENABLED_AGENTS=claude-desktop}"
+: "${LEMMACOMPUTER_ENABLED_APPLICATIONS=firefox}"
 : "${LEMMACOMPUTER_EXECUTION_MODE:=managed}"
 : "${LEMMACOMPUTER_EGRESS_MODE:=restricted}"
 : "${LEMMACOMPUTER_TIME_ZONE:=}"
@@ -44,7 +44,7 @@ agent_enabled() {
 }
 
 IFS=',' read -r -a enabled_agents <<< "$LEMMACOMPUTER_ENABLED_AGENTS"
-(( ${#enabled_agents[@]} >= 1 && ${#enabled_agents[@]} <= 5 )) || {
+(( ${#enabled_agents[@]} <= 5 )) || {
   echo "invalid agent selection" >&2
   exit 78
 }
@@ -58,13 +58,15 @@ for enabled_agent in "${enabled_agents[@]}"; do
     exit 78
   }
 done
-[[ "$(printf '%s\n' "${enabled_agents[@]}" | sort -u | wc -l)" -eq "${#enabled_agents[@]}" ]] || {
-  echo "duplicate agent selection" >&2
-  exit 78
-}
+if (( ${#enabled_agents[@]} > 0 )); then
+  [[ "$(printf '%s\n' "${enabled_agents[@]}" | sort -u | wc -l)" -eq "${#enabled_agents[@]}" ]] || {
+    echo "duplicate agent selection" >&2
+    exit 78
+  }
+fi
 
 IFS=',' read -r -a enabled_applications <<< "$LEMMACOMPUTER_ENABLED_APPLICATIONS"
-(( ${#enabled_applications[@]} >= 1 && ${#enabled_applications[@]} <= 4 )) || {
+(( ${#enabled_applications[@]} <= 4 )) || {
   echo "invalid application selection" >&2
   exit 78
 }
@@ -75,10 +77,12 @@ for enabled_application in "${enabled_applications[@]}"; do
     exit 78
   }
 done
-[[ "$(printf '%s\n' "${enabled_applications[@]}" | sort -u | wc -l)" -eq "${#enabled_applications[@]}" ]] || {
-  echo "duplicate application selection" >&2
-  exit 78
-}
+if (( ${#enabled_applications[@]} > 0 )); then
+  [[ "$(printf '%s\n' "${enabled_applications[@]}" | sort -u | wc -l)" -eq "${#enabled_applications[@]}" ]] || {
+    echo "duplicate application selection" >&2
+    exit 78
+  }
+fi
 
 application_enabled() {
   [[ ",${LEMMACOMPUTER_ENABLED_APPLICATIONS}," == *",$1,"* ]]

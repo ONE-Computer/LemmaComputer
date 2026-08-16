@@ -16,6 +16,7 @@ const job = (overrides: Partial<ClaimedPlatformTenantCleanupJob> = {}): ClaimedP
   subjectId: "user",
   accessGeneration: 2,
   providerId: "sandbox",
+  workspaceNodeId: "workspace-node-a",
   action: "suspend",
   status: "delivering",
   attemptCount: 1,
@@ -156,7 +157,7 @@ test("controller 404 is an idempotent successful destroy", async () => {
     listModels: async () => [],
   });
 
-  await adapter.destroyWorkspace(job().workspaceId, job().providerId);
+  await adapter.destroyWorkspace(job().workspaceId, job().providerId, job().workspaceNodeId);
   await adapter.revokeGateway(job().workspaceId, job().accessGeneration);
   assert.equal(gatewayRevocations, 1);
 });

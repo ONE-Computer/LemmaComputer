@@ -41,7 +41,7 @@ const stepUpStateCookieName = "oc_platform_step_up_state";
 const callbackPath = "/api/v1/platform/auth/callback";
 const stepUpCallbackPath = "/api/v1/platform/auth/step-up/callback";
 const sessionPath = "/api/v1/platform";
-const operatorUiPath = "/api/v1/platform/ui";
+const operatorUiPath = "/platform";
 
 const cookieValue = (header: string | undefined, name: string) => {
   if (!header) return undefined;

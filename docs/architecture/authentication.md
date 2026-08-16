@@ -66,6 +66,15 @@ That domain foundation is valuable and remains in place. Better Auth replaces
 the provider-specific customer authentication mechanics; it does not replace
 the product organization and authorization model.
 
+The internal tenant boundary is universal, but the customer experience is not.
+A verified hosted consumer can bootstrap exactly one `personal` tenant without
+entering an organization name. The personal tenant still owns its membership,
+workspaces, credentials, policy, usage, and audit scope. A company remains an
+explicit `organization` tenant that can admit multiple members and configure
+enterprise identity. One account may belong to both kinds and explicitly
+switch its active product membership. SSO configures how an organization's
+members authenticate; it never changes tenant kind or compute placement.
+
 This decision deliberately changes the earlier managed-CIAM trust boundary.
 The open-source Better Auth framework implements password hashing, TOTP,
 passkeys, OAuth, SAML, OIDC, session security, and secret encryption, while the
@@ -423,14 +432,16 @@ idempotent; delivery and activation attempts are durably rate limited.
 
 ## Platform-operator realm
 
-Platform operators remain outside the customer Better Auth realm. Retain a
-separate workforce identity application, callback, cookie, session audience,
-and role model. The current workforce Entra adapter may continue serving this
-realm after the customer External ID adapter is retired.
+Platform operators remain outside the customer Better Auth realm. They have a
+separate identity store, signing keys, host-only cookie namespace, session
+audience, and role model. The hosted adapter currently uses a dedicated
+workforce Entra application. The worktree profile uses a separate Better Auth
+passkey realm so the real authorization, placement, and audit flow can be
+tested locally without an external identity provider.
 
 ```text
 Platform operator
-    -> workforce Entra
+    -> hosted: workforce Entra; worktree: platform Better Auth passkey
     -> separate platform session
     -> platform role
     -> time-bound audited support elevation
@@ -445,6 +456,15 @@ Customer
 Never add a permanent customer-account `is_global_admin` bypass. Platform
 support access requires target tenant, reason, scope, expiry, recent step-up,
 audit, and configured approval.
+
+The worktree enrollment fixture is deliberately narrower than a production
+login provider. The reference stack binds it to loopback. A generated secret
+creates one fixed local platform administrator through an internal-only
+credential route; the browser can only call the passkey surface. After the
+first verified passkey is registered, Control deletes the credential account
+and all bootstrap sessions. Subsequent access is passkey-only with required
+resident credentials and user verification. Customer sessions, customer
+cookies, and organization SSO never authenticate this realm.
 
 ## Security baseline
 
@@ -545,8 +565,8 @@ separately reviewed change with recovery and rollback evidence.
 - Never attempt to migrate Microsoft passwords or MFA secrets.
 - Retire External ID routes and configuration only after Better Auth recovery,
   rollback, and release qualification pass.
-- Keep workforce Entra for the separate platform-operator realm unless a later
-  ADR replaces it.
+- Keep hosted workforce Entra for the separate platform-operator realm unless
+  a later ADR replaces it; keep the worktree passkey fixture development-only.
 
 ## Alternatives considered
 

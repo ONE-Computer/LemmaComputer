@@ -156,6 +156,9 @@ supersession so future maintainers can understand the decision history.
 - [ADR 0005 — catalog-gated Electron sandbox profiles](adr/0005-catalog-gated-electron-sandbox.md):
   why the namespace exception is limited to release-qualified applications and
   arbitrary user-installed Electron apps do not inherit it.
+- [ADR 0006 — hosted C-minus workspace-node placement and trust](adr/0006-hosted-c-minus-workspace-node-placement-and-trust.md):
+  why hosted workspaces use sticky logical-node ownership and remote mTLS plus
+  an internal credential, while health scheduling and failover remain deferred.
 
 ## Reports
 

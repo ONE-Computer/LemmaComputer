@@ -46,3 +46,19 @@ test("model and connector transports inherit only the wrapper-issued instance id
   assert.match(broker, /headers\["x-lemmacomputer-tool-invocation-id"\] = tool_source_invocation_id/);
   assert.match(broker, /\/internal\/v1\/agent\/tool-audit\/terminal/);
 });
+
+test("the workspace entrypoint preserves an explicit empty application and agent selection", () => {
+  const entrypoint = source("docker/workspace/lemmacomputer-workspace-entrypoint.sh");
+  assert.match(entrypoint, /LEMMACOMPUTER_ENABLED_AGENTS=claude-desktop/);
+  assert.match(entrypoint, /LEMMACOMPUTER_ENABLED_APPLICATIONS=firefox/);
+  assert.doesNotMatch(entrypoint, /LEMMACOMPUTER_ENABLED_AGENTS:=claude-desktop/);
+  assert.doesNotMatch(entrypoint, /LEMMACOMPUTER_ENABLED_APPLICATIONS:=firefox/);
+  assert.match(entrypoint, /if \(\( \$\{#enabled_agents\[@\]\} > 0 \)\); then/);
+  assert.match(entrypoint, /if \(\( \$\{#enabled_applications\[@\]\} > 0 \)\); then/);
+  for (const agent of ["claude-desktop", "claude-cli", "codex-cli", "hermes-claw", "hermes-desktop"]) {
+    assert.match(entrypoint, new RegExp(`agent_enabled ${agent.replaceAll("-", "\\-")}`));
+  }
+  for (const application of ["firefox", "google-chrome", "visual-studio-code", "obsidian"]) {
+    assert.match(entrypoint, new RegExp(`application_enabled ${application.replaceAll("-", "\\-")}`));
+  }
+});

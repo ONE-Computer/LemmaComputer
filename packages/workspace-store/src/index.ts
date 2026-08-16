@@ -79,7 +79,7 @@ export type SandboxSettingsRecord = {
   grantId: string;
   profileId: SandboxProfileId;
   applicationIds: SandboxApplicationId[];
-  modelAlias: SandboxModelAlias;
+  modelAlias: SandboxModelAlias | null;
   requestedServiceClass: WorkspaceRequestedServiceClass;
   agentIds: AgentCatalogId[];
   updatedAt: Date;
@@ -468,7 +468,7 @@ export interface WorkspaceStore {
   revokeAccessGrants(workspaceId: string): Promise<WorkspaceRecord>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
-  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
+  saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias | null; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
   registerPolicyVerificationKeys?(keys: PolicyVerificationKey[]): Promise<void>;
   beginWorkspaceAdministrationCommand(input: {
     tenantId: string;
@@ -549,7 +549,7 @@ const mapSandboxSettingsRow = (row: Record<string, unknown>): SandboxSettingsRec
   grantId: String(row.grant_id),
   profileId: String(row.profile_id) as SandboxProfileId,
   applicationIds: (Array.isArray(row.application_ids) ? row.application_ids : ["firefox"]) as SandboxApplicationId[],
-  modelAlias: String(row.model_alias) as SandboxModelAlias,
+  modelAlias: row.model_alias === null ? null : String(row.model_alias) as SandboxModelAlias,
   requestedServiceClass: String(row.requested_service_class ?? "auto") as WorkspaceRequestedServiceClass,
   agentIds: (Array.isArray(row.agent_ids) ? row.agent_ids : ["claude-desktop", "hermes-claw"]) as AgentCatalogId[],
   updatedAt: new Date(String(row.updated_at)),
@@ -970,7 +970,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
         const id = randomUUID();
         const now = new Date();
         const inserted = await client.query(
-          "INSERT INTO workspaces (id,tenant_id,subject_id,grant_id,state,created_at,updated_at) VALUES ($1,$2,$3,$4,'not_created',$5,$5) RETURNING *",
+          `INSERT INTO workspaces (
+             id,tenant_id,subject_id,grant_id,state,workspace_node_id,created_at,updated_at
+           ) VALUES (
+             $1,$2,$3,$4,'not_created',(
+               SELECT assignment.workspace_node_id
+               FROM tenant_workspace_node_assignments assignment
+               JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
+               WHERE assignment.tenant_id=$2 AND node.state='active'
+             ),$5,$5
+           ) RETURNING *`,
           [id, identity.tenantId, identity.subjectId, grantId, now],
         );
         record = mapRow(inserted.rows[0]);
@@ -1170,7 +1179,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rowCount ? mapSandboxSettingsRow(result.rows[0]) : null;
   }
 
-  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }) {
+  async saveSandboxSettings(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias | null; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }) {
     const result = await this.pool.query(
       `INSERT INTO sandbox_settings (tenant_id,subject_id,grant_id,profile_id,application_ids,model_alias,requested_service_class,agent_ids,updated_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::jsonb,now())
@@ -2230,6 +2239,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
 export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, OpenVtcApprovalStore, ChannelStore, ActivityStore {
   private records = new Map<string, WorkspaceRecord>();
+  private sandboxSettings = new Map<string, SandboxSettingsRecord>();
   private workspaceAdministrationCommands = new Map<string, WorkspaceAdministrationCommandRecord>();
   private workspaceAdministrationCommandKeys = new Map<string, string>();
   private workspaceAdministrationAuditEvents: WorkspaceAdministrationAuditEvent[] = [];
@@ -2343,6 +2353,39 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     return [...this.records.values()]
       .filter((item) => item.tenantId === tenantId)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+  }
+  async getSandboxSettings(identity: IdentityContext, grantId: string) {
+    const record = this.sandboxSettings.get(`${identity.tenantId}\0${identity.subjectId}\0${grantId}`);
+    return record ? {
+      ...record,
+      applicationIds: [...record.applicationIds],
+      agentIds: [...record.agentIds],
+      updatedAt: new Date(record.updatedAt),
+    } : null;
+  }
+  async saveSandboxSettings(identity: IdentityContext, input: {
+    grantId: string;
+    profileId: SandboxProfileId;
+    applicationIds: SandboxApplicationId[];
+    modelAlias: SandboxModelAlias | null;
+    requestedServiceClass: WorkspaceRequestedServiceClass;
+    agentIds: AgentCatalogId[];
+  }) {
+    const record: SandboxSettingsRecord = {
+      ...input,
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      applicationIds: [...input.applicationIds],
+      agentIds: [...input.agentIds],
+      updatedAt: new Date(),
+    };
+    this.sandboxSettings.set(`${identity.tenantId}\0${identity.subjectId}\0${input.grantId}`, record);
+    return {
+      ...record,
+      applicationIds: [...record.applicationIds],
+      agentIds: [...record.agentIds],
+      updatedAt: new Date(record.updatedAt),
+    };
   }
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const item = this.records.get(workspaceId);

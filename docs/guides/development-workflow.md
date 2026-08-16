@@ -87,13 +87,21 @@ checkout:
 
 ```bash
 git fetch origin
-mkdir -p ../onecomputer-worktrees
-git worktree add ../onecomputer-worktrees/<task-name> \
+mkdir -p .worktrees
+git worktree add .worktrees/<task-name> \
   -b <issue>-<short-name> origin/main
-cd ../onecomputer-worktrees/<task-name>
+cd .worktrees/<task-name>
 npm run worktree:init
 npm run dev:doctor
 ```
+
+The canonical task-worktree directory is the primary checkout's literal
+`.worktrees/` directory (plural). Do not create task worktrees as siblings of
+the repository, directly in the repository root, or in an improvised directory.
+Keeping one predictable containment path makes ownership, cleanup, Docker
+namespace inspection, and agent handoff repeatable. The directory is ignored by
+Git; each child remains a normal Git worktree with its own branch and generated
+runtime identity.
 
 When there is no issue, use a short descriptive branch name. Follow an explicit
 user-supplied branch name when provided.
@@ -223,10 +231,41 @@ Read the worktree-specific URL instead of assuming a port:
 grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
 ```
 
-Create the first account in the Web UI. Configure model-provider deployments
-under **AI control plane -> Models & providers**, then configure Pricing, Model
-routes, Team rollout, and workspace policy. Provider credentials belong in the
-product UI, not `.env`.
+Create the first account in the Web UI. A base workspace needs no application,
+AI-agent, or model-provider selection: leave both catalogs clear and create the
+workspace to qualify desktop provisioning and lifecycle in isolation. Configure
+model-provider deployments under **AI control plane -> Models & providers**
+only when the test selects an AI agent, then configure Pricing, Model routes,
+Team rollout, and workspace policy as required by that AI path. Provider
+credentials belong in the product UI, not `.env`.
+
+### Verify a local account without external email delivery
+
+An initialized development worktree uses the captured authentication-email
+transport. Sign-up, verification tokens, Better Auth records, sessions, and the
+personal-tenant onboarding path remain real; only delivery to an external
+mailbox is replaced.
+
+1. Open the worktree-specific Web URL and choose **Create account**.
+2. Enter a test name, email address, and password, then submit the form.
+3. After the UI confirms that the worktree captured the message, choose
+   **Open local verification email**.
+4. The browser opens the captured message's real, same-origin verification URL.
+   Complete sign-in and personal-workspace onboarding normally.
+
+The same capture transport supports local password-recovery links. It consumes
+the latest matching message for that email and purpose; it is not a universal
+authentication bypass and it cannot retrieve another worktree's messages. The
+capture endpoint is exposed only when all three conditions hold:
+
+- `LEMMACOMPUTER_INSTALLATION_KIND=worktree`;
+- `LEMMACOMPUTER_RUNTIME_ENVIRONMENT=development`; and
+- `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=capture`.
+
+Production configuration rejects the capture transport and requires real
+transactional email. If the local button is absent, run `npm run env:check` and
+confirm those generated worktree values instead of adding Postmark credentials
+or editing `.env.example`.
 
 ### Local configuration ownership
 
@@ -519,10 +558,13 @@ and validation procedure are in
 
 ### Switch an existing worktree to remote mode
 
-First start and configure the ordinary worktree. The qualifier deliberately
-reuses its users, organizations, providers, pricing, routes, policies,
-PostgreSQL volumes, and workspace-home volumes. It does not dump or copy a
-database.
+First start and configure the ordinary worktree. For placement and desktop
+lifecycle testing, create a base workspace with no applications or AI agents;
+this deliberately removes provider configuration from the qualification's
+critical path. Add an AI agent and provider route only when the test itself
+needs the gateway or agent bridge. The qualifier reuses the worktree's users,
+organizations, optional providers, pricing, routes, policies, PostgreSQL
+volumes, and workspace-home volumes. It does not dump or copy a database.
 
 Stop every workspace through LemmaComputer, then validate without changing
 containers:
@@ -559,9 +601,17 @@ The command:
 3. creates worktree-scoped transport, application, and desktop-ingress networks;
 4. starts the controller in a separate Compose project with the node-local Docker socket;
 5. stops and removes any already-running colocated controller, disables that
-   service for the split stack, and points Control at the remote mTLS node API;
+   service for the split stack, and selects the same placement-aware router used
+   by hosted remote topology;
 6. adds test-only mTLS application endpoints for Control and LiteLLM; and
 7. retains the existing control stack, databases, users, configuration, and persistent volumes.
+
+The qualifier prints its stable node id. Open `/platform`, register that id with
+endpoint `https://workspace-node:4101` and TLS server name `workspace-node`, then
+assign the test tenant. For a legacy workspace with no persisted owner, request
+the explicit backfill only after confirming that this qualification node owns
+its existing local volume. Missing placement intentionally fails closed; the
+qualifier does not silently rewrite tenant ownership or operator audit history.
 
 Inspect or restore the topology with:
 
@@ -578,7 +628,17 @@ Cowork, stop its workspaces, run `down`, then run `up --cowork`.
 ### Remote-node acceptance checklist
 
 - Sign in with an existing worktree account and expected organization.
-- Create and open disposable and managed workspaces.
+- Create and open a managed base workspace with no applications or AI agents.
+- Inspect that base workspace and verify its application and agent selections
+  are empty, no model alias or gateway credential is projected, and no Gateway
+  or Control application relay is created. The desktop ingress relay remains
+  required so the user can open the base desktop.
+- Restart and reconnect to the base workspace through the product route; this
+  is the minimum placement and lifecycle qualification and needs no provider.
+- Separately, when qualifying AI behavior, select an agent, configure its
+  provider route, and create or restart the workspace.
+- Create and open disposable and managed workspaces when both profile types are
+  in the test scope.
 - Test an allowed and denied public destination.
 - Complete a governed model request and verify provider credentials are absent from the sandbox.
 - Complete Hermes Desktop and Hermes CLI turns.
@@ -589,7 +649,7 @@ Cowork, stop its workspaces, run `down`, then run `up --cowork`.
   `lemmacomputer-workspace-electron`, retains `no-new-privileges`, and does not
   add capabilities or host devices for the Electron applications.
 - Open Claude Desktop, verify Cowork virtualization, and complete a Cowork action.
-- Restart and reconnect to the workspace through the product route.
+- Restart and reconnect to the AI-enabled workspace through the product route.
 - Run two workspaces concurrently and verify separate IDs, networks, relays, and home volumes.
 - Stop one workspace and confirm the other remains reachable.
 - Inspect audit events without exposing certificates, tokens, prompts, or provider secrets.

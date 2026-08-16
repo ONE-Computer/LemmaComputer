@@ -18,6 +18,9 @@ import {
   type PlatformSupportElevationRequest,
   type PlatformSupportScope,
 } from "@lemmacomputer/contracts";
+import { tenantKindSchema, type TenantKind } from "./identity-policy.js";
+
+const platformBetterAuthIssuer = "urn:lemmacomputer:platform-better-auth";
 
 export type PlatformOperatorSession = {
   principal: PlatformOperatorPrincipal;
@@ -65,6 +68,7 @@ export type PlatformTenantCleanupJob = {
   subjectId: string;
   accessGeneration: number;
   providerId: string | null;
+  workspaceNodeId: string | null;
   action: "suspend" | "close";
   status: "pending" | "delivering" | "retry" | "completed" | "escalated";
   attemptCount: number;
@@ -82,6 +86,40 @@ export type PlatformTenantCleanupJob = {
 };
 
 export type ClaimedPlatformTenantCleanupJob = PlatformTenantCleanupJob & { leaseToken: string };
+
+export const workspaceNodeIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/).max(64);
+export const workspaceNodeStateSchema = z.enum(["active", "draining", "disabled"]);
+export const workspaceNodeEndpointSchema = z.string().url().max(2048).refine((value) => {
+  const endpoint = new URL(value);
+  return endpoint.protocol === "https:"
+    && endpoint.username === ""
+    && endpoint.password === ""
+    && endpoint.pathname === "/"
+    && endpoint.search === ""
+    && endpoint.hash === "";
+}, "Workspace node endpoints must be credential-free HTTPS origins").transform((value) => new URL(value).origin);
+export const workspaceNodeTlsServerNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,252}[A-Za-z0-9]$/).max(254);
+
+export type WorkspaceNode = {
+  id: string;
+  endpointUrl: string;
+  tlsServerName: string;
+  state: z.infer<typeof workspaceNodeStateSchema>;
+  reason: string;
+  createdByOperatorId: string;
+  updatedByOperatorId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TenantWorkspaceNodeAssignment = {
+  tenantId: string;
+  workspaceNodeId: string;
+  reason: string;
+  updatedByOperatorId: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type PlatformSupportElevationListItem = PlatformSupportElevation & {
   approvedAt: string | null;
@@ -110,6 +148,9 @@ export type PlatformTenantLifecycleState = z.infer<typeof platformTenantLifecycl
 export type PlatformTenantLifecycle = {
   id: string;
   displayName: string;
+  tenantKind: TenantKind;
+  workspaceNodeId: string | null;
+  workspaceNodeState: WorkspaceNode["state"] | null;
   lifecycleState: PlatformTenantLifecycleState;
   reason: string | null;
   updatedByOperatorId: string | null;
@@ -209,6 +250,7 @@ const mapTenantCleanupJob = (row: Record<string, unknown>): PlatformTenantCleanu
   subjectId: String(row.subject_id),
   accessGeneration: Number(row.access_generation),
   providerId: row.provider_id === null ? null : String(row.provider_id),
+  workspaceNodeId: row.workspace_node_id == null ? null : String(row.workspace_node_id),
   action: z.enum(["suspend", "close"]).parse(row.action),
   status: z.enum(["pending", "delivering", "retry", "completed", "escalated"]).parse(row.status),
   attemptCount: Number(row.attempt_count),
@@ -221,6 +263,27 @@ const mapTenantCleanupJob = (row: Record<string, unknown>): PlatformTenantCleanu
   lastError: row.last_error === null ? null : String(row.last_error),
   availableAt: new Date(String(row.available_at)).toISOString(),
   claimedAt: row.claimed_at === null ? null : new Date(String(row.claimed_at)).toISOString(),
+  createdAt: new Date(String(row.created_at)).toISOString(),
+  updatedAt: new Date(String(row.updated_at)).toISOString(),
+});
+
+const mapWorkspaceNode = (row: Record<string, unknown>): WorkspaceNode => ({
+  id: workspaceNodeIdSchema.parse(row.id),
+  endpointUrl: String(row.endpoint_url),
+  tlsServerName: String(row.tls_server_name),
+  state: workspaceNodeStateSchema.parse(row.state),
+  reason: String(row.reason),
+  createdByOperatorId: String(row.created_by_operator_id),
+  updatedByOperatorId: String(row.updated_by_operator_id),
+  createdAt: new Date(String(row.created_at)).toISOString(),
+  updatedAt: new Date(String(row.updated_at)).toISOString(),
+});
+
+const mapTenantWorkspaceNodeAssignment = (row: Record<string, unknown>): TenantWorkspaceNodeAssignment => ({
+  tenantId: String(row.tenant_id),
+  workspaceNodeId: workspaceNodeIdSchema.parse(row.workspace_node_id),
+  reason: String(row.reason),
+  updatedByOperatorId: String(row.updated_by_operator_id),
   createdAt: new Date(String(row.created_at)).toISOString(),
   updatedAt: new Date(String(row.updated_at)).toISOString(),
 });
@@ -504,16 +567,22 @@ export class PostgresPlatformOperatorStore {
   async listTenantLifecycle(session: PlatformOperatorSession): Promise<PlatformTenantLifecycle[]> {
     this.requireRoleAuthority(session, "tenant.lifecycle.read");
     const result = await this.pool.query(
-      `SELECT tenant.id,tenant.display_name,
+      `SELECT tenant.id,tenant.display_name,tenant.kind AS tenant_kind,
+         assignment.workspace_node_id,node.state AS workspace_node_state,
          COALESCE(lifecycle.lifecycle_state,'active') AS lifecycle_state,
          lifecycle.reason,lifecycle.updated_by_operator_id,lifecycle.updated_at
        FROM tenants tenant
        LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=tenant.id
+       LEFT JOIN tenant_workspace_node_assignments assignment ON assignment.tenant_id=tenant.id
+       LEFT JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
        ORDER BY tenant.display_name,tenant.id`,
     );
     return result.rows.map((row) => ({
       id: String(row.id),
       displayName: String(row.display_name),
+      tenantKind: tenantKindSchema.parse(row.tenant_kind),
+      workspaceNodeId: row.workspace_node_id === null ? null : workspaceNodeIdSchema.parse(row.workspace_node_id),
+      workspaceNodeState: row.workspace_node_state === null ? null : workspaceNodeStateSchema.parse(row.workspace_node_state),
       lifecycleState: platformTenantLifecycleStateSchema.parse(row.lifecycle_state),
       reason: row.reason === null ? null : String(row.reason),
       updatedByOperatorId: row.updated_by_operator_id === null ? null : String(row.updated_by_operator_id),
@@ -535,7 +604,15 @@ export class PostgresPlatformOperatorStore {
     try {
       await client.query("BEGIN");
       const principal = (await this.requireCurrentSessionAuthority(client, session, "tenant.lifecycle.manage", now)).principal;
-      const tenant = await client.query("SELECT id,display_name FROM tenants WHERE id=$1 FOR UPDATE", [input.tenantId]);
+      const tenant = await client.query(
+        `SELECT tenant.id,tenant.display_name,tenant.kind AS tenant_kind,
+           assignment.workspace_node_id,node.state AS workspace_node_state
+         FROM tenants tenant
+         LEFT JOIN tenant_workspace_node_assignments assignment ON assignment.tenant_id=tenant.id
+         LEFT JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
+         WHERE tenant.id=$1 FOR UPDATE OF tenant`,
+        [input.tenantId],
+      );
       if (!tenant.rowCount) throw new LemmaComputerError("PLATFORM_TENANT_NOT_FOUND", "Tenant was not found", 404);
       const currentLifecycle = await client.query(
         "SELECT lifecycle_state FROM platform_tenant_lifecycle WHERE tenant_id=$1 FOR UPDATE",
@@ -589,22 +666,23 @@ export class PostgresPlatformOperatorStore {
               `UPDATE workspaces SET state='stopping',failure_code=$2,operation_token=NULL,
                  access_generation=access_generation+1,updated_at=$3
                WHERE tenant_id=$1 AND ($4::boolean OR state<>'stopped' OR provider_id IS NOT NULL)
-               RETURNING id,subject_id,provider_id,access_generation`,
+               RETURNING id,subject_id,provider_id,access_generation,workspace_node_id`,
               [input.tenantId, lifecycleState === "closed" ? "TENANT_CLOSED" : "TENANT_SUSPENDED", now, lifecycleState === "closed"],
             )
             : await client.query(
               `UPDATE workspaces SET state='stopping',failure_code='TENANT_CLOSED',operation_token=NULL,updated_at=$2
-               WHERE tenant_id=$1 RETURNING id,subject_id,provider_id,access_generation`,
+               WHERE tenant_id=$1 RETURNING id,subject_id,provider_id,access_generation,workspace_node_id`,
               [input.tenantId, now],
             );
           for (const workspace of workspaces.rows) {
             await client.query(
               `INSERT INTO platform_tenant_cleanup_jobs (
-                 id,tenant_id,workspace_id,subject_id,access_generation,provider_id,action,
+                 id,tenant_id,workspace_id,subject_id,access_generation,provider_id,workspace_node_id,action,
                  available_at,created_at,updated_at
-               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$8)
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$9)
                ON CONFLICT (workspace_id,access_generation) DO UPDATE SET
                  provider_id=EXCLUDED.provider_id,
+                 workspace_node_id=EXCLUDED.workspace_node_id,
                  action=EXCLUDED.action,
                  status='pending',
                  attempt_count=0,
@@ -616,7 +694,7 @@ export class PostgresPlatformOperatorStore {
                  available_at=EXCLUDED.available_at,
                  updated_at=EXCLUDED.updated_at`,
               [randomUUID(), input.tenantId, workspace.id, workspace.subject_id, workspace.access_generation,
-                workspace.provider_id, lifecycleState === "closed" ? "close" : "suspend", now],
+                workspace.provider_id, workspace.workspace_node_id, lifecycleState === "closed" ? "close" : "suspend", now],
             );
           }
         }
@@ -633,6 +711,13 @@ export class PostgresPlatformOperatorStore {
       return {
         id: String(tenant.rows[0].id),
         displayName: String(tenant.rows[0].display_name),
+        tenantKind: tenantKindSchema.parse(tenant.rows[0].tenant_kind),
+        workspaceNodeId: tenant.rows[0].workspace_node_id === null
+          ? null
+          : workspaceNodeIdSchema.parse(tenant.rows[0].workspace_node_id),
+        workspaceNodeState: tenant.rows[0].workspace_node_state === null
+          ? null
+          : workspaceNodeStateSchema.parse(tenant.rows[0].workspace_node_state),
         lifecycleState: platformTenantLifecycleStateSchema.parse(result.rows[0].lifecycle_state),
         reason: String(result.rows[0].reason),
         updatedByOperatorId: String(result.rows[0].updated_by_operator_id),
@@ -750,6 +835,195 @@ export class PostgresPlatformOperatorStore {
     } finally {
       client.release();
     }
+  }
+
+  async listWorkspaceNodes(session: PlatformOperatorSession): Promise<WorkspaceNode[]> {
+    this.requireRoleAuthority(session, "platform.config.read");
+    const result = await this.pool.query("SELECT * FROM workspace_nodes ORDER BY id");
+    return result.rows.map(mapWorkspaceNode);
+  }
+
+  async registerWorkspaceNode(session: PlatformOperatorSession, input: {
+    id: string;
+    endpointUrl: string;
+    tlsServerName: string;
+    reason: string;
+    correlationId: string;
+    now?: Date;
+  }): Promise<WorkspaceNode> {
+    const id = workspaceNodeIdSchema.parse(input.id);
+    const endpointUrl = workspaceNodeEndpointSchema.parse(input.endpointUrl);
+    const tlsServerName = workspaceNodeTlsServerNameSchema.parse(input.tlsServerName);
+    const reason = z.string().trim().min(12).max(1000).parse(input.reason);
+    const now = input.now ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const principal = (await this.requireCurrentSessionAuthority(client, session, "platform.config.manage", now)).principal;
+      const result = await client.query(
+        `INSERT INTO workspace_nodes (
+           id,endpoint_url,tls_server_name,state,reason,created_by_operator_id,updated_by_operator_id,created_at,updated_at
+         ) VALUES ($1,$2,$3,'active',$4,$5,$5,$6,$6)
+         ON CONFLICT DO NOTHING RETURNING *`,
+        [id, endpointUrl, tlsServerName, reason, principal.operatorId, now],
+      );
+      if (!result.rowCount) {
+        throw new LemmaComputerError("WORKSPACE_NODE_ALREADY_EXISTS", "That workspace node id or endpoint is already registered", 409);
+      }
+      await this.audit(client, {
+        operatorId: principal.operatorId,
+        eventType: "workspace_node.registered",
+        correlationId: input.correlationId,
+        occurredAt: now,
+        details: { workspaceNodeId: id, state: "active" },
+      });
+      await client.query("COMMIT");
+      return mapWorkspaceNode(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateWorkspaceNodeState(session: PlatformOperatorSession, input: {
+    workspaceNodeId: string;
+    state: WorkspaceNode["state"];
+    reason: string;
+    correlationId: string;
+    now?: Date;
+  }): Promise<WorkspaceNode> {
+    const workspaceNodeId = workspaceNodeIdSchema.parse(input.workspaceNodeId);
+    const state = workspaceNodeStateSchema.parse(input.state);
+    const reason = z.string().trim().min(12).max(1000).parse(input.reason);
+    const now = input.now ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const principal = (await this.requireCurrentSessionAuthority(client, session, "platform.config.manage", now)).principal;
+      const result = await client.query(
+        `UPDATE workspace_nodes SET state=$2,reason=$3,updated_by_operator_id=$4,updated_at=$5
+         WHERE id=$1 RETURNING *`,
+        [workspaceNodeId, state, reason, principal.operatorId, now],
+      );
+      if (!result.rowCount) throw new LemmaComputerError("WORKSPACE_NODE_NOT_FOUND", "Workspace node was not found", 404);
+      await this.audit(client, {
+        operatorId: principal.operatorId,
+        eventType: "workspace_node.state_updated",
+        correlationId: input.correlationId,
+        occurredAt: now,
+        details: { workspaceNodeId, state },
+      });
+      await client.query("COMMIT");
+      return mapWorkspaceNode(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listTenantWorkspaceNodeAssignments(session: PlatformOperatorSession): Promise<TenantWorkspaceNodeAssignment[]> {
+    this.requireRoleAuthority(session, "platform.config.read");
+    const result = await this.pool.query("SELECT * FROM tenant_workspace_node_assignments ORDER BY tenant_id");
+    return result.rows.map(mapTenantWorkspaceNodeAssignment);
+  }
+
+  async assignTenantWorkspaceNode(session: PlatformOperatorSession, input: {
+    tenantId: string;
+    workspaceNodeId: string;
+    reason: string;
+    backfillUnplacedWorkspaces?: boolean;
+    correlationId: string;
+    now?: Date;
+  }): Promise<{ assignment: TenantWorkspaceNodeAssignment; backfilledWorkspaces: number }> {
+    const workspaceNodeId = workspaceNodeIdSchema.parse(input.workspaceNodeId);
+    const reason = z.string().trim().min(12).max(1000).parse(input.reason);
+    const now = input.now ?? new Date();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const principal = (await this.requireCurrentSessionAuthority(client, session, "platform.config.manage", now)).principal;
+      const tenant = await client.query("SELECT id FROM tenants WHERE id=$1 FOR SHARE", [input.tenantId]);
+      if (!tenant.rowCount) throw new LemmaComputerError("PLATFORM_TENANT_NOT_FOUND", "Tenant was not found", 404);
+      const node = await client.query("SELECT id,state FROM workspace_nodes WHERE id=$1 FOR SHARE", [workspaceNodeId]);
+      if (!node.rowCount) throw new LemmaComputerError("WORKSPACE_NODE_NOT_FOUND", "Workspace node was not found", 404);
+      if (node.rows[0].state !== "active") {
+        throw new LemmaComputerError("WORKSPACE_NODE_NOT_ACTIVE", "New workspace placement requires an active workspace node", 409);
+      }
+      const result = await client.query(
+        `INSERT INTO tenant_workspace_node_assignments (
+           tenant_id,workspace_node_id,reason,updated_by_operator_id,created_at,updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$5)
+         ON CONFLICT (tenant_id) DO UPDATE SET
+           workspace_node_id=EXCLUDED.workspace_node_id,reason=EXCLUDED.reason,
+           updated_by_operator_id=EXCLUDED.updated_by_operator_id,updated_at=EXCLUDED.updated_at
+         RETURNING *`,
+        [input.tenantId, workspaceNodeId, reason, principal.operatorId, now],
+      );
+      const backfilled = input.backfillUnplacedWorkspaces
+        ? await client.query(
+          `UPDATE workspaces SET workspace_node_id=$2,updated_at=$3
+           WHERE tenant_id=$1 AND workspace_node_id IS NULL`,
+          [input.tenantId, workspaceNodeId, now],
+        )
+        : { rowCount: 0 };
+      await this.audit(client, {
+        operatorId: principal.operatorId,
+        targetOrganizationId: input.tenantId,
+        eventType: "tenant.workspace_node_assigned",
+        correlationId: input.correlationId,
+        occurredAt: now,
+        details: {
+          workspaceNodeId,
+          backfilledWorkspaces: backfilled.rowCount ?? 0,
+          backfillRequested: input.backfillUnplacedWorkspaces === true,
+        },
+      });
+      await client.query("COMMIT");
+      return {
+        assignment: mapTenantWorkspaceNodeAssignment(result.rows[0]),
+        backfilledWorkspaces: backfilled.rowCount ?? 0,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async resolveWorkspaceNode(workspaceId: string, expectedWorkspaceNodeId?: string): Promise<WorkspaceNode> {
+    const expected = expectedWorkspaceNodeId === undefined ? undefined : workspaceNodeIdSchema.parse(expectedWorkspaceNodeId);
+    const result = await this.pool.query(
+      `SELECT workspace.workspace_node_id,node.*
+       FROM workspaces workspace
+       LEFT JOIN workspace_nodes node ON node.id=workspace.workspace_node_id
+       WHERE workspace.id=$1`,
+      [z.uuid().parse(workspaceId)],
+    );
+    if (!result.rowCount || result.rows[0].workspace_node_id === null) {
+      throw new LemmaComputerError(
+        "WORKSPACE_NODE_PLACEMENT_MISSING",
+        "Workspace node placement is not configured",
+        503,
+        true,
+      );
+    }
+    const node = mapWorkspaceNode(result.rows[0]);
+    if (expected !== undefined && node.id !== expected) {
+      throw new LemmaComputerError(
+        "WORKSPACE_NODE_PLACEMENT_MISMATCH",
+        "Workspace cleanup placement does not match the persisted workspace owner",
+        409,
+      );
+    }
+    if (node.state === "disabled") {
+      throw new LemmaComputerError("WORKSPACE_NODE_DISABLED", "The workspace node is disabled", 503, true);
+    }
+    return node;
   }
 
   async listPlatformConfiguration(session: PlatformOperatorSession): Promise<PlatformConfigurationEntry[]> {
@@ -1506,7 +1780,7 @@ export class PostgresPlatformOperatorStore {
         operatorSessionId: sessionId,
         operatorId: operator.id,
         identity: {
-          provider: "workforce-entra",
+          provider: operator.workforce_issuer === platformBetterAuthIssuer ? "better-auth" : "workforce-entra",
           issuer: operator.workforce_issuer,
           subject: operator.workforce_subject,
         },

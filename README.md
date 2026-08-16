@@ -74,9 +74,9 @@ remote-node/Cowork qualifier.
 
 ## Contributor development
 
-Create each task in its own Git worktree. The first initialization intentionally
-creates fresh secrets, databases, and a stable `lemmacomputer-*` Docker
-namespace:
+Create each task in its own Git worktree under the primary checkout's
+`.worktrees/<task-name>` directory. The first initialization intentionally
+creates fresh secrets, databases, and a stable `lemmacomputer-*` Docker namespace:
 
 ```bash
 npm run worktree:init
