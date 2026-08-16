@@ -35,7 +35,9 @@ variables cannot redefine the profile's security properties.
   remote-isolated workspace provider, and permits managed billing, telemetry,
   and hosted workers.
 - `worktree` is development-only. It may exercise either profile's adapters for
-  testing but is never a production edition.
+  testing but is never a production edition. The historical installation-kind
+  value is a development-harness selector; documentation and qualification must
+  not present it as a third production deployment profile.
 
 Workforce Entra in customer-managed and External ID/enterprise Entra in hosted
 are bounded transitional customer adapters. Both production profiles expose the
@@ -50,6 +52,10 @@ evidence, and prove verified purge. A driver-name-to-topology registry lets
 preflight reject local host control-plane authority in `hosted` without making
 remote Kasm the product architecture. Provider qualification remains separate:
 passing the topology gate does not certify an adapter for production.
+Runtime routing likewise follows the explicit workspace-node topology. A
+worktree using `remote` exercises the same placement-aware controller router as
+hosted; a profile-name check must not silently substitute the direct controller
+client.
 
 Profile-sensitive consumers call the typed resolver or an assertion such as
 `assertSignInProviderAllowed`, `assertCustomerAuthenticationMethodAllowed`, `assertOrganizationCountAllowed`,

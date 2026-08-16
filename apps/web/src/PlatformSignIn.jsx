@@ -3,13 +3,13 @@ import { platformPasskeyApi } from "./platform-auth-client.js";
 
 const safeReturnPath = () => {
   const value = new URLSearchParams(window.location.search).get("return");
-  if (!value?.startsWith("/") || value.startsWith("//")) return "/api/v1/platform/ui";
+  if (!value?.startsWith("/") || value.startsWith("//")) return "/platform";
   try {
     const base = new URL(window.location.origin);
     const parsed = new URL(value, base);
-    return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/api/v1/platform/ui";
+    return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/platform";
   } catch {
-    return "/api/v1/platform/ui";
+    return "/platform";
   }
 };
 

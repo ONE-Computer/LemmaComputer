@@ -559,9 +559,17 @@ The command:
 3. creates worktree-scoped transport, application, and desktop-ingress networks;
 4. starts the controller in a separate Compose project with the node-local Docker socket;
 5. stops and removes any already-running colocated controller, disables that
-   service for the split stack, and points Control at the remote mTLS node API;
+   service for the split stack, and selects the same placement-aware router used
+   by hosted remote topology;
 6. adds test-only mTLS application endpoints for Control and LiteLLM; and
 7. retains the existing control stack, databases, users, configuration, and persistent volumes.
+
+The qualifier prints its stable node id. Open `/platform`, register that id with
+endpoint `https://workspace-node:4101` and TLS server name `workspace-node`, then
+assign the test tenant. For a legacy workspace with no persisted owner, request
+the explicit backfill only after confirming that this qualification node owns
+its existing local volume. Missing placement intentionally fails closed; the
+qualifier does not silently rewrite tenant ownership or operator audit history.
 
 Inspect or restore the topology with:
 

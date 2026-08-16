@@ -93,7 +93,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     },
     completeStepUp: async (input: unknown) => {
       calls.push({ method: "completeStepUp", input });
-      return { session: operatorSession, returnPath: "/api/v1/platform/ui", clearStateCookie: "oc_platform_step_up_state=; Max-Age=0" };
+      return { session: operatorSession, returnPath: "/platform", clearStateCookie: "oc_platform_step_up_state=; Max-Age=0" };
     },
     authenticate: async (cookie: string | undefined) => cookie?.includes("oc_platform_session=auditor")
       ? auditorSession
@@ -244,7 +244,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     assert.deepEqual(platformSession.json().roles, ["support-operator"]);
     const stepUp = await hosted.inject({
       method: "GET",
-      url: "/v1/platform/auth/step-up?return=%2Fapi%2Fv1%2Fplatform%2Fui",
+      url: "/v1/platform/auth/step-up?return=%2Fplatform",
       headers: { ...baseHeaders, cookie: "oc_platform_session=valid" },
     });
     assert.equal(stepUp.statusCode, 302);
@@ -256,7 +256,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
       headers: { ...baseHeaders, cookie: "oc_platform_session=valid; oc_platform_step_up_state=opaque" },
     });
     assert.equal(stepUpCallback.statusCode, 303);
-    assert.equal(stepUpCallback.headers.location, "/api/v1/platform/ui");
+    assert.equal(stepUpCallback.headers.location, "/platform");
     assert.equal(calls.some((call) => call.method === "completeStepUp"), true);
     const operatorUi = await hosted.inject({
       method: "GET",

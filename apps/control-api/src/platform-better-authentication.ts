@@ -374,10 +374,10 @@ export class BetterAuthPlatformOperatorAuthenticationService implements Platform
 }
 
 const validReturnPath = (value: string | undefined) => {
-  if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(value)) return "/api/v1/platform/ui";
+  if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(value)) return "/platform";
   const base = new URL("https://return.invalid");
   const parsed = new URL(value, base);
-  return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/api/v1/platform/ui";
+  return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/platform";
 };
 
 export const registerPlatformAuthenticationRoutes = (

@@ -5,6 +5,7 @@ import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { controlRequestTimeout } from "./proxy-timeout.mjs";
+import { platformOperatorEntryRedirect } from "./platform-operator-entry.mjs";
 
 const host = process.env.WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.WEB_PORT ?? 4173);
@@ -186,6 +187,16 @@ const server = http.createServer(async (request, response) => {
       "cache-control": "no-store",
     });
     response.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+  const platformEntry = platformOperatorEntryRedirect(request.method, request.url);
+  if (platformEntry) {
+    response.writeHead(303, {
+      location: platformEntry,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    });
+    response.end();
     return;
   }
   if (requestUrl.pathname === "/api/channel-intake/v1/telegram") {

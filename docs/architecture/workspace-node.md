@@ -42,10 +42,11 @@ The workforce operator UI exposes those registry, admission, and assignment
 operations. It also writes `workspace.defaultSharedNodeId` through the audited
 platform-configuration boundary. When that setting names an active registered
 node, hosted self-service onboarding atomically assigns new personal and
-organization tenants to it. The worktree profile mirrors this placement rule
-against its local node so the same onboarding path is testable before hosted
-qualification. A missing setting leaves explicit operator
-placement available; a configured but invalid or unavailable node fails
+organization tenants to it. The worktree development harness mirrors this
+placement rule in its real database; remote-node qualification then makes the
+persisted assignment authoritative for runtime routing so the same onboarding
+path is testable before hosted qualification. A missing setting leaves explicit
+operator placement available; a configured but invalid or unavailable node fails
 onboarding closed instead of silently choosing another node. Dedicated
 placement is an explicit operator or entitlement decision and is never inferred
 from SSO configuration.
@@ -65,6 +66,14 @@ automatic failover, or live workspace migration. An absent assignment, absent
 workspace owner, node mismatch, disabled node, or purge receipt bearing another
 node id fails closed. These omissions buy a productionizable multi-node shape
 without pretending that rescheduling a stateful Docker volume is safe.
+
+Control selects placement-aware routing from workspace-node topology, not from
+the deployment-profile name. `remote` topology in hosted and in the worktree
+development harness resolves every lifecycle call through the persisted
+workspace owner in the node registry. `colocated` development and
+customer-managed single-node deployments retain the explicitly configured
+direct controller client. This lets local remote qualification exercise the
+same C-minus router used by hosted without pretending that local Compose is AWS.
 
 ## Remote network contract
 

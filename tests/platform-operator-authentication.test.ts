@@ -136,7 +136,7 @@ test("platform workforce OIDC has a separate client, callback, state, audience, 
   assert.equal("roles" in (resolvedIdentity ?? {}), false, "provider claims never assign platform roles");
   assert.equal("groups" in (resolvedIdentity ?? {}), false);
 
-  const stepUpStarted = await auth.beginStepUp(completed.cookie, "/api/v1/platform/ui");
+  const stepUpStarted = await auth.beginStepUp(completed.cookie, "/platform");
   const stepUpLocation = new URL(stepUpStarted.location);
   const stepUpState = stepUpLocation.searchParams.get("state")!;
   assert.equal(stepUpLocation.searchParams.get("redirect_uri"), "https://hosted.example.test/api/v1/platform/auth/step-up/callback");
@@ -152,7 +152,7 @@ test("platform workforce OIDC has a separate client, callback, state, audience, 
   assert.equal(steppedUp.session.principal.recentStepUpAt, "2026-08-09T03:00:00.000Z");
   assert.equal(stepUpMarks[0]?.authenticationContext, "c1", "validated Conditional Access context is persisted as the step-up assurance source");
 
-  const invalidContextStarted = await auth.beginStepUp(completed.cookie, "/api/v1/platform/ui");
+  const invalidContextStarted = await auth.beginStepUp(completed.cookie, "/platform");
   stepUpContextValid = false;
   await assert.rejects(() => auth.completeStepUp({
     state: new URL(invalidContextStarted.location).searchParams.get("state")!,

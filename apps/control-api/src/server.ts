@@ -445,6 +445,7 @@ const envSchema = z.object({
   CONTROL_PORT: z.coerce.number().int().positive().default(4100),
   WEB_PROXY_TOKEN: z.string().min(24),
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
+  WORKSPACE_NODE_TOPOLOGY: z.enum(["colocated", "remote"]).default("colocated"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
   CONTROLLER_TLS_CA_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
@@ -539,6 +540,11 @@ const envSchema = z.object({
   TENANT_DISPLAY_NAME: z.string().min(1).default("Example Organization"),
   BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
+
+export const usesPlacementRoutedController = (input: {
+  installationKind: "customer-managed" | "hosted" | "worktree";
+  workspaceNodeTopology: "colocated" | "remote";
+}) => input.workspaceNodeTopology === "remote" && input.installationKind !== "customer-managed";
 
 const sameSecret = (received: string | undefined, expected: string) => {
   if (!received) return false;
@@ -1083,7 +1089,7 @@ export function createControlServer(
       const operator = await security.platformOperatorAuthentication.authenticate(request.headers.cookie);
       if (!operator) {
         if (requestPath === "/v1/platform/ui") {
-          return reply.code(303).header("location", "/api/v1/platform/auth/login?return=%2Fapi%2Fv1%2Fplatform%2Fui").send();
+          return reply.code(303).header("location", "/api/v1/platform/auth/login?return=%2Fplatform").send();
         }
         return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your platform operator account", correlationId: request.id, retryable: false } });
       }
@@ -5790,17 +5796,24 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
     env.CONTROLLER_TLS_CLIENT_KEY_B64,
   ];
-  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !controllerTlsClientValues.every(Boolean)) {
-    throw new Error("Hosted workspace-node connections require mutual TLS client configuration");
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && env.WORKSPACE_NODE_TOPOLOGY !== "remote") {
+    throw new Error("Hosted deployments require remote workspace-node topology");
   }
+  if (env.WORKSPACE_NODE_TOPOLOGY === "remote" && !controllerTlsClientValues.every(Boolean)) {
+    throw new Error("Remote workspace-node connections require mutual TLS client configuration");
+  }
+  const placementRoutedController = usesPlacementRoutedController({
+    installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+    workspaceNodeTopology: env.WORKSPACE_NODE_TOPOLOGY,
+  });
   if (
-    env.LEMMACOMPUTER_INSTALLATION_KIND !== "hosted"
+    !placementRoutedController
     && env.CONTROLLER_URL.startsWith("https:")
     && ![...controllerTlsClientValues, env.CONTROLLER_TLS_SERVER_NAME].every(Boolean)
   ) {
     throw new Error("HTTPS workspace-node connections require complete mutual TLS client configuration");
   }
-  const controller: ControllerClient = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+  const controller: ControllerClient = placementRoutedController
     ? new RoutedControllerClient(platformOperatorStore!, (node) => new HttpControllerClient(
         node.endpointUrl,
         env.CONTROLLER_INTERNAL_TOKEN,

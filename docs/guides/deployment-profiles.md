@@ -4,6 +4,20 @@ LemmaComputer supports two production deployment profiles from the same product
 codebase and application image. `worktree` is an isolated development mode, not
 a third product edition.
 
+Keep four independent questions separate:
+
+- deployment ownership is `customer-managed` or `hosted`;
+- runtime safety is `development` or `production`;
+- workspace-node topology is `colocated` or `remote`; and
+- a Git worktree is only a checkout and Docker namespace isolation mechanism.
+
+The existing `LEMMACOMPUTER_INSTALLATION_KIND=worktree` value is retained as a
+compatibility selector for development-only fixtures and relaxed loopback
+requirements. It must be described as the **worktree development harness**, not
+as a third production profile. In particular, node routing must follow
+`LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY`; it must not infer topology from the
+installation-kind name.
+
 | Capability | `customer-managed` | `hosted` | `worktree` |
 | --- | --- | --- | --- |
 | Operator | Customer | LemmaComputer | Developer |
@@ -99,13 +113,18 @@ the Better Auth customer-journey gates. The configuration contract recognizes
 `colocated` and `remote` workspace-node topology; recognition is not a claim
 that a particular infrastructure deployment has completed qualification.
 
-`npm run worktree:init` writes the `worktree` selection for isolated local
-development. Its loopback-only platform sign-in provisions one local operator
-into the real platform role store, enrolls a passkey, then deletes the generated
+`npm run worktree:init` writes the legacy `worktree` harness selection for
+isolated local development. Its loopback-only platform sign-in provisions one
+local operator into the real platform role store, enrolls a passkey, then deletes the generated
 bootstrap credential and its sessions. It uses a separate authentication
 database, database roles, signing secret, and cookie prefix from customer
 authentication. A production consumer must call `resolveDeploymentProfile`
 with `allowDevelopment: false` and reject it.
+
+Use `/platform` as the public operator entry. It redirects to the server-rendered
+operator document under `/api/v1/platform/ui` so the workforce session cookie
+can remain narrowly scoped to the platform API boundary. The customer product
+and platform operator sessions are still separate realms.
 
 ## Runtime use
 

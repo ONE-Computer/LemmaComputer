@@ -121,7 +121,7 @@ export function registerPlatformOperatorRoutes(
       } catch (error) {
         const code = error instanceof LemmaComputerError ? error.code : "PLATFORM_STEP_UP_FAILED";
         request.log.warn({ code }, "Platform workforce step-up callback rejected");
-        return reply.code(303).header("location", "/api/v1/platform/ui?error=step-up-not-completed").send();
+        return reply.code(303).header("location", "/platform?error=step-up-not-completed").send();
       }
     },
   );

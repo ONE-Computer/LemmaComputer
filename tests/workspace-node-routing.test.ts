@@ -7,9 +7,17 @@ import {
   type ControllerClient,
   type WorkspaceNodeDirectory,
 } from "../apps/control-api/src/service.js";
+import { usesPlacementRoutedController } from "../apps/control-api/src/server.js";
 
 const workspaceA = "11111111-1111-4111-8111-111111111111";
 const workspaceB = "22222222-2222-4222-8222-222222222222";
+
+test("placement routing follows remote topology instead of the hosted profile name", () => {
+  assert.equal(usesPlacementRoutedController({ installationKind: "hosted", workspaceNodeTopology: "remote" }), true);
+  assert.equal(usesPlacementRoutedController({ installationKind: "worktree", workspaceNodeTopology: "remote" }), true);
+  assert.equal(usesPlacementRoutedController({ installationKind: "worktree", workspaceNodeTopology: "colocated" }), false);
+  assert.equal(usesPlacementRoutedController({ installationKind: "customer-managed", workspaceNodeTopology: "remote" }), false);
+});
 
 const node = (id: string): WorkspaceNode => ({
   id,

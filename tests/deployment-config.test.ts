@@ -249,6 +249,7 @@ test("hosted Cowork projects KVM only with the required remote node topology", (
   const values = validHostedEnvironment();
   const services = projectServiceEnvironment(values);
   assert.equal(services["workspace-controller"].WORKSPACE_NODE_TOPOLOGY, "remote");
+  assert.equal(services["control-api"].WORKSPACE_NODE_TOPOLOGY, "remote");
   assert.equal(services["workspace-controller"].KASM_LOCAL_KVM_ENABLED, "true");
 
   assert.throws(
