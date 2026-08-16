@@ -39,7 +39,7 @@ export interface PlatformOperatorAuthenticationBoundary {
     clearStateCookie: string;
   }>;
   authenticate(cookieHeader: string | undefined): Promise<PlatformOperatorSession | null>;
-  logout(cookieHeader: string | undefined, correlationId: string): Promise<string>;
+  logout(cookieHeader: string | undefined, correlationId: string): Promise<string | string[]>;
 }
 
 export type PlatformOperatorStoreBoundary = Pick<PostgresPlatformOperatorStore,

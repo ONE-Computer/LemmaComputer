@@ -117,6 +117,7 @@ test("platform operator workbench is a separate workforce surface with operation
   await page.locator("#placement-node").selectOption("workspace-sg-02");
   await page.getByLabel("Assignment reason").fill("Move future Northwind workspaces to node two");
   await page.getByRole("button", { name: "Assign workspace node" }).click();
+  await expect(page.getByText("Placement updated. 0 unplaced workspaces were backfilled.")).toBeVisible();
   expect(placementRequest).toMatchObject({ workspaceNodeId: "workspace-sg-02", backfillUnplacedWorkspaces: false });
 
   await page.getByLabel("Active shared node").selectOption("workspace-sg-02");

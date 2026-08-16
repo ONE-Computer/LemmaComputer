@@ -306,6 +306,42 @@ services:
       postgres:
         condition: service_healthy
 
+  platform-auth-db-init:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    command: ["/opt/lemmacomputer/ensure-platform-auth-database.sh"]
+    restart: "no"
+    env_file:
+      - path: .runtime-env/platform-auth-db-init.env
+        format: raw
+    networks:
+      - control-private
+    volumes:
+      - ./infra/postgres/ensure-platform-auth-database.sh:/opt/lemmacomputer/ensure-platform-auth-database.sh:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  platform-auth-db-migrate:
+    <<: [*control-runtime, *hardened]
+    user: node
+    command: ["npm", "run", "auth:db:migrate"]
+    restart: "no"
+    env_file:
+      - path: .runtime-env/platform-auth-db-migrate.env
+        format: raw
+    networks:
+      - control-private
+    depends_on:
+      platform-auth-db-init:
+        condition: service_completed_successfully
+
   control-api:
     <<: [*control-runtime, *hardened]
     container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?set LEMMACOMPUTER_CONTROL_CONTAINER in .env}
@@ -326,6 +362,8 @@ services:
       db-migrate:
         condition: service_completed_successfully
       auth-db-migrate:
+        condition: service_completed_successfully
+      platform-auth-db-migrate:
         condition: service_completed_successfully
       litellm:
         condition: service_healthy

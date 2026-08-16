@@ -45,6 +45,14 @@ test("platform operator sessions and support elevations are isolated, scoped, ap
       displayName: "Other Support Operator",
       roles: ["support-operator"],
     });
+    const localAdministrator = await store.provisionOperator({
+      issuer: "urn:lemmacomputer:platform-better-auth",
+      subject: `local-administrator-${suffix}`,
+      workforceTenantId: "lemmacomputer-platform",
+      email: `local-administrator-${suffix}@worktree.invalid`,
+      displayName: "Local Platform Administrator",
+      roles: ["platform-administrator"],
+    });
     assert.deepEqual(await store.resolveWorkforceOperator({
       issuer: support.issuer,
       subject: support.subject,
@@ -118,6 +126,17 @@ test("platform operator sessions and support elevations are isolated, scoped, ap
       expiresAt: new Date("2026-08-09T15:00:00.000Z"),
       correlationId: `login-other-support-${suffix}`,
     });
+    const localAdministratorSession = await store.createSession({
+      operatorId: localAdministrator.id,
+      tokenHash: tokenHash(`local-administrator-${suffix}`),
+      assurance: { level: "aal2", factors: ["passkey"] },
+      authenticatedAt: new Date("2026-08-09T03:00:00.000Z"),
+      recentStepUpAt: new Date("2026-08-09T03:00:00.000Z"),
+      expiresAt: new Date("2026-08-09T11:00:00.000Z"),
+      correlationId: `login-local-administrator-${suffix}`,
+    });
+    assert.equal(localAdministratorSession.principal.identity.provider, "better-auth");
+    assert.deepEqual(localAdministratorSession.principal.assurance, { level: "aal2", factors: ["passkey"] });
     assert.deepEqual(supportSession.roles, ["support-operator"]);
     assert.equal((await store.getSession(tokenHash(`support-${suffix}`), now))?.principal.realm, "platform-operator");
     assert.equal(await store.getSession(tokenHash(`missing-${suffix}`), now), null);

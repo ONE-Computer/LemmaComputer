@@ -1481,7 +1481,10 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       await this.assignMvpPolicyWithClient(client, organizationId, subjectUserId, subjectUserId);
     };
     const ensureDefaultSharedNodePlacement = async (organizationId: string) => {
-      if (input.installationKind !== "hosted") return null;
+      // Worktree mirrors hosted placement so the real operator and onboarding
+      // flow can be qualified locally. Customer-managed remains explicitly
+      // outside the LemmaComputer platform placement plane.
+      if (input.installationKind === "customer-managed") return null;
       const configured = await client.query(
         `SELECT configuration.value,configuration.updated_by_operator_id
          FROM platform_configuration configuration

@@ -10,6 +10,9 @@ const safeAttribute = (value: string) => value
 
 export function renderPlatformOperatorUi(session: PlatformOperatorSession, options: { baseHref?: string } = {}) {
   const bootstrap = safeJson({ roles: session.roles, operatorId: session.principal.operatorId });
+  const localPlatformRealm = session.principal.identity.provider === "better-auth";
+  const realmLabel = localPlatformRealm ? "Local platform operator realm" : "Workforce operator realm";
+  const controlPlaneLabel = localPlatformRealm ? "Worktree control plane" : "Hosted control plane";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -26,12 +29,12 @@ export function renderPlatformOperatorUi(session: PlatformOperatorSession, optio
   <div class="shell">
     <aside class="rail">
       <div class="brand">LemmaComputer</div>
-      <div class="realm">Workforce operator realm</div>
+      <div class="realm">${realmLabel}</div>
       <nav aria-label="Platform sections"><a href="#overview">Overview</a><a href="#tenants">Organizations</a><a href="#nodes">Workspace nodes</a><a href="#incidents">Incidents</a><a href="#support">Support access</a><a href="#audit">Audit</a></nav>
       <div class="identity"><div>Separate from customer accounts</div><div id="operator-roles"></div></div>
     </aside>
     <main class="main" id="overview">
-      <header class="top"><div><div class="eyebrow">Hosted control plane</div><h1>Platform operations</h1><p class="sub">Operate organizations without becoming a customer member.</p></div><div><a class="button" href="/api/v1/platform/auth/step-up?return=%2Fapi%2Fv1%2Fplatform%2Fui">Verify for sensitive actions</a> <button class="button" id="sign-out" type="button">Sign out</button></div></header>
+      <header class="top"><div><div class="eyebrow">${controlPlaneLabel}</div><h1>Platform operations</h1><p class="sub">Operate organizations without becoming a customer member.</p></div><div><a class="button" href="/api/v1/platform/auth/step-up?return=%2Fapi%2Fv1%2Fplatform%2Fui">Verify for sensitive actions</a> <button class="button" id="sign-out" type="button">Sign out</button></div></header>
       <section class="metrics" aria-label="Platform status">
         <article class="card"><div class="metric-label">Service health</div><div class="metric-value"><span class="status" id="health-status">Loading…</span></div><div class="metric-label" id="health-detail"></div></article>
         <article class="card"><div class="metric-label">Organizations</div><div class="metric-value" id="tenant-count">—</div><div class="metric-label">Visible to your operator role</div></article>
@@ -97,7 +100,7 @@ export function renderPlatformOperatorUi(session: PlatformOperatorSession, optio
             <label>Change reason<textarea id="shared-node-reason" minlength="12" maxlength="1000" required></textarea></label>
             <button class="button primary" type="submit">Set shared default</button><div class="notice" id="shared-node-result" role="status"></div>
           </form></section>
-          <section class="card"><h2>Authority boundary</h2><p class="empty">Tenant access requires a target, reason, bounded scope, recent workforce step-up, expiry, and correlated audit record. Customer sessions grant no operator authority.</p></section>
+          <section class="card"><h2>Authority boundary</h2><p class="empty">Tenant access requires a target, reason, bounded scope, recent platform verification, expiry, and correlated audit record. Customer sessions grant no operator authority.</p></section>
         </aside>
       </div>
     </main>
@@ -117,7 +120,7 @@ export function renderPlatformOperatorUi(session: PlatformOperatorSession, optio
     const loadConfiguration=async()=>{const {configuration}=await api('configuration');const current=configuration.find((entry)=>entry.key==='workspace.defaultSharedNodeId');if(current&&typeof current.value==='string'){document.querySelector('#shared-node-target').value=current.value;document.querySelector('#node-detail').textContent+=' · shared '+current.value}};
     const loadHealth=async()=>{const {health}=await api('service-health');const status=document.querySelector('#health-status');status.textContent=health.status==='degraded'?'Degraded':'Available';status.className='status '+health.status;document.querySelector('#health-detail').textContent=health.activeIncidents+' active incident'+(health.activeIncidents===1?'':'s')};
     const loadIncidents=async()=>{const {incidents}=await api('incidents');document.querySelector('#incident-count').textContent=String(incidents.filter((item)=>item.status!=='resolved').length);const body=document.querySelector('#incident-rows');body.textContent='';for(const incident of incidents){const row=document.createElement('tr');textCell(row,incident.title);const severity=textCell(row,'');const severityPill=document.createElement('span');severityPill.className='pill';severityPill.textContent=incident.severity;severity.append(severityPill);textCell(row,incident.status);textCell(row,incident.updatedAt?new Date(incident.updatedAt).toLocaleString():'—');body.append(row)}if(!incidents.length)body.innerHTML='<tr><td colspan="4" class="empty">No incidents.</td></tr>'};
-    const elevationAction=async(id,action)=>{const result=document.querySelector('#elevation-action-result');result.textContent=(action==='approve'?'Approving ':'Revoking ')+id+'…';try{await api('support/elevations/'+encodeURIComponent(id)+'/'+action,{method:'POST'});result.textContent='Elevation '+id+' '+(action==='approve'?'approved.':'revoked.');await loadElevations()}catch{result.textContent='Elevation action was not completed. Verify your workforce identity and role, then try again.'}};
+    const elevationAction=async(id,action)=>{const result=document.querySelector('#elevation-action-result');result.textContent=(action==='approve'?'Approving ':'Revoking ')+id+'…';try{await api('support/elevations/'+encodeURIComponent(id)+'/'+action,{method:'POST'});result.textContent='Elevation '+id+' '+(action==='approve'?'approved.':'revoked.');await loadElevations()}catch{result.textContent='Elevation action was not completed. Verify your platform identity and role, then try again.'}};
     const loadElevations=async()=>{const {elevations}=await api('support/elevations');const body=document.querySelector('#elevation-rows');body.textContent='';for(const elevation of elevations){const row=document.createElement('tr');textCell(row,elevation.id);textCell(row,elevation.targetOrganizationId);textCell(row,elevation.scopes.join(', '));const status=textCell(row,'');const pill=document.createElement('span');pill.className='pill';pill.textContent=elevation.status;status.append(pill);textCell(row,new Date(elevation.expiresAt).toLocaleString());const actions=textCell(row,'');if(elevation.status==='pending'&&canApproveElevations&&elevation.operatorId!==bootstrap.operatorId){const approve=document.createElement('button');approve.type='button';approve.className='button';approve.textContent='Approve';approve.addEventListener('click',()=>elevationAction(elevation.id,'approve'));actions.append(approve)}if(elevation.status==='pending'||elevation.status==='active'){const revoke=document.createElement('button');revoke.type='button';revoke.className='button';revoke.textContent='Revoke';revoke.addEventListener('click',()=>elevationAction(elevation.id,'revoke'));actions.append(revoke)}body.append(row)}if(!elevations.length)body.innerHTML='<tr><td colspan="6" class="empty">No support elevations.</td></tr>'};
     const loadAudit=async()=>{const {events}=await api('audit');const list=document.querySelector('#audit-list');list.textContent='';for(const event of events.slice(0,8)){const item=document.createElement('div');item.className='audit-item';const title=document.createElement('div');title.textContent=event.eventType.replaceAll('_',' ');const meta=document.createElement('small');meta.textContent=new Date(event.occurredAt).toLocaleString()+' · '+event.correlationId;item.append(title,meta);list.append(item)}if(!events.length)list.innerHTML='<div class="empty">No audit events in this view.</div>'};
     Promise.allSettled([loadTenants(),loadHealth(),loadIncidents(),...(canReadNodes?[loadNodes().then(()=>loadConfiguration())]:[]),...(canAudit?[loadAudit()]:[]),...(canReadElevations?[loadElevations()]:[])]);

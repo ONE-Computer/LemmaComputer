@@ -10,7 +10,7 @@ a third product edition.
 | Organizations | Exactly one | Multiple | Development fixtures |
 | Customer authentication | Embedded Better Auth; installation-local database | Embedded Better Auth; pooled control-plane database | Embedded Better Auth; isolated development database |
 | Customer methods eligible for configuration | Email/password, passkey, Google, Microsoft, SAML, OIDC | Email/password, passkey, Google, Microsoft, SAML, OIDC | Production methods plus development fixtures |
-| Platform-operator realm | Absent | Separate workforce realm | Development fixture |
+| Platform-operator realm | Absent | Separate workforce Entra realm | Separate Better Auth passkey fixture |
 | Transitional customer adapters | Workforce Entra | External ID and enterprise Entra | All transitional test adapters |
 | Identity and secret custody | Customer deployment | LemmaComputer deployment | Local worktree |
 | Workspace provider boundary | Customer-approved local or remote-isolated | Platform-qualified remote-isolated | Development adapters |
@@ -100,8 +100,12 @@ the Better Auth customer-journey gates. The configuration contract recognizes
 that a particular infrastructure deployment has completed qualification.
 
 `npm run worktree:init` writes the `worktree` selection for isolated local
-development. A production consumer must call `resolveDeploymentProfile` with
-`allowDevelopment: false` and reject it.
+development. Its loopback-only platform sign-in provisions one local operator
+into the real platform role store, enrolls a passkey, then deletes the generated
+bootstrap credential and its sessions. It uses a separate authentication
+database, database roles, signing secret, and cookie prefix from customer
+authentication. A production consumer must call `resolveDeploymentProfile`
+with `allowDevelopment: false` and reject it.
 
 ## Runtime use
 

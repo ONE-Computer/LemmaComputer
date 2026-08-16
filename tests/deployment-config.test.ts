@@ -575,7 +575,31 @@ test("service projections preserve credential and TLS key custody", () => {
   assert.ok("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-controller"]);
   assert.ok(!("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-ingress"]));
   assert.ok(!("LEMMACOMPUTER_WEB_PROXY_TOKEN" in services["channel-broker"]));
+  assert.ok(!("PLATFORM_AUTH_DATABASE_URL" in services["control-api"]));
+  assert.ok(!("PLATFORM_BETTER_AUTH_SECRETS" in services["control-api"]));
+  assert.ok(!("PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET" in services["control-api"]));
   assert.match(serializeEnvironment(services["channel-broker"]), /^CHANNEL_CREDENTIAL_SECRET=/m);
+});
+
+test("worktree platform authentication uses isolated credentials projected only to its owners", () => {
+  const values = validCustomerManagedEnvironment();
+  values.LEMMACOMPUTER_INSTALLATION_KIND = "worktree";
+  values.LEMMACOMPUTER_RUNTIME_ENVIRONMENT = "development";
+  const services = projectServiceEnvironment(values);
+
+  assert.match(services["control-api"].PLATFORM_AUTH_DATABASE_URL, /lemmacomputer_platform_auth_runtime/);
+  assert.equal(services["control-api"].PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET, values.LEMMACOMPUTER_PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET);
+  assert.match(services["platform-auth-db-migrate"].AUTH_DATABASE_URL, /lemmacomputer_platform_auth_migrator/);
+  assert.ok(!("PLATFORM_BETTER_AUTH_SECRETS" in services.web));
+  assert.ok(!("PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET" in services.web));
+
+  assert.throws(
+    () => validateDeploymentEnvironment({
+      ...values,
+      LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET: values.LEMMACOMPUTER_BETTER_AUTH_SECRET,
+    }, { profile: "worktree", strict: true }),
+    /authentication secrets.*distinct/i,
+  );
 });
 
 test("the hosted Compose overlay does not select a deployment policy", async () => {

@@ -42,7 +42,9 @@ The workforce operator UI exposes those registry, admission, and assignment
 operations. It also writes `workspace.defaultSharedNodeId` through the audited
 platform-configuration boundary. When that setting names an active registered
 node, hosted self-service onboarding atomically assigns new personal and
-organization tenants to it. A missing setting leaves explicit operator
+organization tenants to it. The worktree profile mirrors this placement rule
+against its local node so the same onboarding path is testable before hosted
+qualification. A missing setting leaves explicit operator
 placement available; a configured but invalid or unavailable node fails
 onboarding closed instead of silently choosing another node. Dedicated
 placement is an explicit operator or entitlement decision and is never inferred

@@ -57,6 +57,13 @@ import {
 import { fromNodeHeaders } from "better-auth/node";
 import { registerPlatformOperatorRoutes, type PlatformOperatorAuthenticationBoundary, type PlatformOperatorStoreBoundary } from "./platform-operator-routes.js";
 import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.js";
+import {
+  BetterAuthPlatformOperatorAuthenticationService,
+  createPlatformAuthentication,
+  platformAuthenticationControlPath,
+  registerPlatformAuthenticationRoutes,
+  type PlatformAuthentication,
+} from "./platform-better-authentication.js";
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
 import { createBetterAuthTenantSsoAuthenticationAdministration, TenantSsoAdministrationService } from "./tenant-sso.js";
@@ -446,6 +453,9 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   AUTH_DATABASE_URL: z.string().min(1),
   BETTER_AUTH_SECRETS: z.string().min(1),
+  PLATFORM_AUTH_DATABASE_URL: optionalEnvString(),
+  PLATFORM_BETTER_AUTH_SECRETS: optionalEnvString(),
+  PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET: optionalEnvString(32),
   BETTER_AUTH_TRUSTED_PROXY_CIDRS: z.string().default(""),
   CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: z.string().default(""),
   AUTH_EMAIL_TRANSPORT: z.enum(["capture", "postmark"]),
@@ -583,6 +593,9 @@ export function createControlServer(
       email?: TransactionalEmailAdapter;
     };
     closeCustomerAuthentication?: () => Promise<void>;
+    platformAuthentication?: PlatformAuthentication;
+    platformBetterAuthService?: BetterAuthPlatformOperatorAuthenticationService;
+    closePlatformAuthentication?: () => Promise<void>;
     platformOperatorAuthentication?: PlatformOperatorAuthenticationBoundary;
     platformOperatorStore?: PlatformOperatorStoreBoundary;
     platformSecurityAlertDispatcher?: { status(): PlatformSecurityAlertDispatcherStatus };
@@ -683,6 +696,13 @@ export function createControlServer(
     security.customerSsoAuthentication,
   );
   if (security.closeCustomerAuthentication) app.addHook("onClose", security.closeCustomerAuthentication);
+  if (security.platformAuthentication && security.platformBetterAuthService) registerPlatformAuthenticationRoutes(
+    app,
+    security.platformAuthentication,
+    security.platformBetterAuthService,
+    connectionOptions.installationKind ?? "customer-managed",
+  );
+  if (security.closePlatformAuthentication) app.addHook("onClose", security.closePlatformAuthentication);
   // The fallback exists only for the explicit in-memory test identity mode. Runtime
   // boot requires AGENT_BRIDGE_SECRET and never derives this key from another trust boundary.
   const agentBridgeSecret = security.agentBridgeSecret ?? (
@@ -1051,6 +1071,7 @@ export function createControlServer(
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Authentication is required", correlationId: request.id, retryable: false } });
     }
     if (security.customerAuthentication && requestPath.startsWith(`${customerAuthenticationControlPath}/`)) return;
+    if (security.platformAuthentication && requestPath.startsWith(`${platformAuthenticationControlPath}/`)) return;
     if (requestPath.startsWith("/v1/platform/")) {
       if (connectionOptions.installationKind === "customer-managed") {
         return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found", correlationId: request.id, retryable: false } });
@@ -1061,7 +1082,10 @@ export function createControlServer(
       }
       const operator = await security.platformOperatorAuthentication.authenticate(request.headers.cookie);
       if (!operator) {
-        return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your workforce account", correlationId: request.id, retryable: false } });
+        if (requestPath === "/v1/platform/ui") {
+          return reply.code(303).header("location", "/api/v1/platform/auth/login?return=%2Fapi%2Fv1%2Fplatform%2Fui").send();
+        }
+        return reply.code(401).send({ error: { code: "PLATFORM_UNAUTHENTICATED", message: "Sign in with your platform operator account", correlationId: request.id, retryable: false } });
       }
       platformOperatorPrincipals.set(request, operator);
       return;
@@ -5500,6 +5524,28 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   }
   const authenticationPool = new postgres.Pool({ connectionString: env.AUTH_DATABASE_URL });
   const publicWebOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  let platformAuthenticationPool: postgres.Pool | undefined;
+  let platformAuthentication: PlatformAuthentication | undefined;
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree") {
+    if (!env.PLATFORM_AUTH_DATABASE_URL || !env.PLATFORM_BETTER_AUTH_SECRETS) {
+      throw new Error("Worktree platform authentication requires its isolated database and Better Auth secrets");
+    }
+    const platformAuthenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.PLATFORM_AUTH_DATABASE_URL);
+    try {
+      await platformAuthenticationSchema.assertSchemaCompatible();
+    } finally {
+      await platformAuthenticationSchema.close();
+    }
+    platformAuthenticationPool = new postgres.Pool({ connectionString: env.PLATFORM_AUTH_DATABASE_URL });
+    platformAuthentication = createPlatformAuthentication({
+      database: platformAuthenticationPool,
+      baseUrl: publicWebOrigin,
+      trustedOrigins: [publicWebOrigin],
+      versionedSecrets: parseVersionedBetterAuthSecrets(env.PLATFORM_BETTER_AUTH_SECRETS),
+      installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
+      passkey: { rpId: new URL(publicWebOrigin).hostname, origin: publicWebOrigin },
+    });
+  }
   const transactionalEmail = createTransactionalEmailAdapter({
     transport: env.AUTH_EMAIL_TRANSPORT,
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
@@ -5706,10 +5752,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !platformOperatorValues.every(Boolean)) {
     throw new Error("Hosted deployments require the separate platform-operator workforce realm");
   }
-  const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+  const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
     ? PostgresPlatformOperatorStore.fromConnectionString(env.DATABASE_URL)
     : undefined;
-  const platformOperatorAuthentication = platformOperatorStore
+  const workforcePlatformOperatorAuthentication = platformOperatorStore
     && env.PLATFORM_OPERATOR_ENTRA_TENANT_ID
     && env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID
     && env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET
@@ -5724,6 +5770,21 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
       })
     : undefined;
+  const platformBetterAuthService = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+    && platformOperatorStore
+    && platformAuthentication
+    && platformAuthenticationPool
+    ? new BetterAuthPlatformOperatorAuthenticationService(
+        platformAuthentication,
+        platformAuthenticationPool,
+        platformOperatorStore,
+        publicWebOrigin,
+        env.LEMMACOMPUTER_INSTALLATION_KIND,
+        env.PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET,
+      )
+    : undefined;
+  await platformBetterAuthService?.initializeDevelopmentOperator();
+  const platformOperatorAuthentication = platformBetterAuthService ?? workforcePlatformOperatorAuthentication;
   const controllerTlsClientValues = [
     env.CONTROLLER_TLS_CA_B64,
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
@@ -5823,6 +5884,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         email: transactionalEmail,
       },
       closeCustomerAuthentication: () => authenticationPool.end(),
+      platformAuthentication,
+      platformBetterAuthService,
+      closePlatformAuthentication: platformAuthenticationPool ? () => platformAuthenticationPool!.end() : undefined,
       platformOperatorAuthentication,
       platformOperatorStore,
       platformSecurityAlertDispatcher,
