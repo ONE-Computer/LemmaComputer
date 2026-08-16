@@ -93,6 +93,7 @@ export const renderControlOverride = () => `services:
     depends_on: !override
       db-migrate: { condition: service_completed_successfully }
       auth-db-migrate: { condition: service_completed_successfully }
+      platform-auth-db-migrate: { condition: service_completed_successfully }
       litellm: { condition: service_healthy }
       litellm-admin-proxy: { condition: service_healthy }
       openvtc-consent: { condition: service_healthy }

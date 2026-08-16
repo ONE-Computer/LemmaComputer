@@ -32,6 +32,7 @@ test("qualification Compose separates Docker authority and uses variable-backed 
   assert.doesNotMatch(control, /docker\.sock/);
   assert.match(control, /CONTROLLER_URL: https:\/\/workspace-node:4101/);
   assert.match(control, /WORKSPACE_NODE_TOPOLOGY: remote/);
+  assert.match(control, /platform-auth-db-migrate: \{ condition: service_completed_successfully \}/);
   assert.match(control, /LITELLM_WORKSPACE_URL: https:\/\/application-tls:4444/);
   assert.match(control, /AGENT_BRIDGE_URL: https:\/\/application-tls:4443/);
   assert.match(control, /WORKSPACE_INGRESS_VERIFY_UPSTREAM_TLS: "true"/);
