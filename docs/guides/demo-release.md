@@ -6,7 +6,8 @@ The demo is a protected operational profile even without GitHub branch protectio
 
 - Reserve Docker context `lemmacomputer-demo` for the demo host/stack.
 - Keep its secrets outside the repository and never copy them into a worktree.
-- Deploy an immutable `demo-*` Git tag and image digest. Do not run the demo from a dirty checkout, issue branch, or moving `main` filesystem.
+- Deploy an immutable Git tag and image digest. `release:tag` generates a `demo-<date>-<sha>`
+  name by default; `--tag=` accepts any other immutable name, such as a `v<semver>` milestone. Do not run the demo from a dirty checkout, issue branch, or moving `main` filesystem.
 - Back up the Control PostgreSQL database, LiteLLM database, workspace volumes, secret versions, and image digests as one restore set.
 
 ## Candidate qualification

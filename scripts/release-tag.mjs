@@ -5,8 +5,8 @@ import { releaseAttestationSchemaVersion, requiredReleaseGates } from "./release
 
 const push = process.argv.includes("--push");
 const requestedTag = process.argv.find((argument) => argument.startsWith("--tag="))?.slice(6);
-if (requestedTag && !/^demo-[0-9A-Za-z._-]+$/.test(requestedTag)) {
-  throw new Error("Custom release tags must start with demo- and contain only letters, numbers, dots, underscores, or hyphens");
+if (requestedTag && (!/^[0-9A-Za-z][0-9A-Za-z._-]*$/.test(requestedTag) || requestedTag.includes(".."))) {
+  throw new Error("Custom release tags must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens");
 }
 
 const capture = (command, args, options = {}) => {
@@ -86,7 +86,7 @@ if (!push) {
   process.exit(0);
 }
 
-capture("git", ["tag", "-a", tag, sha, "-m", `LemmaComputer demo release ${tag}`]);
+capture("git", ["tag", "-a", tag, sha, "-m", `LemmaComputer release ${tag}`]);
 try {
   capture("git", ["push", "origin", `refs/tags/${tag}`]);
 } catch (error) {

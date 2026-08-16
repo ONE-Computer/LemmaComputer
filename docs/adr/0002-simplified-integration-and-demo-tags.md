@@ -16,7 +16,9 @@ Use `main` as the normal integration branch. Develop each task on its own branch
 
 Do not use a blocking pre-push hook. The integration operator runs and reports `verify:quick`; persistence changes additionally require `verify:db`.
 
-Create demo releases from a clean, pushed commit on `main` or a temporary `release/*` stabilization branch. Run `verify:release`, then use `release:tag` to create and push a new immutable `demo-*` tag. Tagging never updates a branch. The deployment consumes the tag and pinned image digests.
+Create demo releases from a clean, pushed commit on `main` or a temporary `release/*` stabilization branch. Run `verify:release`, then use `release:tag` to create and push a new immutable tag. `release:tag` defaults to a
+`demo-<date>-<sha>` name; `--tag=` accepts any other immutable name, such as a `v<semver>`
+milestone. Tagging never updates a branch. The deployment consumes the tag and pinned image digests.
 
 Release branches are optional and temporary. Use one only when demo stabilization and new development must proceed simultaneously. Merge release fixes back into `main`.
 
