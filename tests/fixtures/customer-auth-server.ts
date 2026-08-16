@@ -55,6 +55,7 @@ const productStore: CustomerProductSessionStore = {
   getCustomerProductSession: async () => null,
   selectCustomerProductSession: async () => { throw new Error("The passkey browser fixture has no tenant memberships"); },
   revokeCustomerProductSession: async () => {},
+  clearCustomerProductSession: async () => {},
 };
 const productAuthentication = new CustomerProductAuthenticationService(
   createBetterAuthSessionReader(authentication),

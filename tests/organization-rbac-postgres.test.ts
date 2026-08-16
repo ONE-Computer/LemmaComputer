@@ -194,6 +194,22 @@ test("organization RBAC backfill, identity resolution, membership sessions, and 
       accountUserId: alphaPrincipal.accountUserId,
       now: new Date(),
     }))?.membershipId, alphaInBeta.membershipId);
+    await store.clearCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
+    });
+    assert.equal(await store.getCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
+      now: new Date(),
+    }), null, "clearing the active selection leaves the authenticated account at the organization chooser");
+    assert.equal((await store.selectCustomerProductSession({
+      authenticationSessionId: betterAuthSessionId,
+      accountUserId: alphaPrincipal.accountUserId,
+      membershipId: alphaInBeta.membershipId,
+      expiresAt: new Date(Date.now() + 60_000),
+      now: new Date(),
+    })).membershipId, alphaInBeta.membershipId, "the same authenticated session can select an active organization again");
     await assert.rejects(() => store.selectCustomerProductSession({
       authenticationSessionId: randomUUID(),
       accountUserId: unattachedBetterAuthUserId,

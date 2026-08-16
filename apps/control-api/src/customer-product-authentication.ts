@@ -336,4 +336,13 @@ export class CustomerProductAuthenticationService {
       now: this.now(),
     });
   }
+
+  async clearCurrentOrganizationSelection(headers: Headers) {
+    const authenticated = await this.verifiedSession(headers);
+    if (!authenticated) return;
+    await this.store.clearCustomerProductSession({
+      authenticationSessionId: authenticated.session.id,
+      accountUserId: authenticated.user.id,
+    });
+  }
 }

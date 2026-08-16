@@ -251,7 +251,7 @@ export const authApi = {
   invitationContext: () => request("/api/v1/auth/invitations/context", { cache: "no-store" }),
   acceptInvitation: () => request("/api/v1/auth/invitations/accept", mutation()),
   completeOwnerStepUp: (code: string) => request("/api/v1/auth/owner-step-up", mutation("POST", { code })),
-  revokeProductSession: () => request("/api/v1/auth/product-session", mutation("DELETE")),
+  clearOrganizationSelection: () => request("/api/v1/auth/product-session", mutation("DELETE")),
   signUpWithEmail: (input: unknown) => request("/api/v1/auth/customer/sign-up/email", mutation("POST", input)),
   signInWithEmail: (email: string, password: string) => request("/api/v1/auth/customer/sign-in/email", mutation("POST", { email, password })),
   signInWithCompanySso: (email: string, returnPath = "/") => request("/api/v1/auth/customer-sso", mutation("POST", { email, returnPath })),
@@ -294,7 +294,6 @@ export const authApi = {
   beginExternalIdInvitation: (invitation: unknown, returnPath = "/") => request("/api/v1/auth/external-id/invitation", mutation("POST", { invitation, return: returnPath })),
   logout: async () => {
     await request("/api/v1/auth/logout", mutation()).catch(() => null);
-    await request("/api/v1/auth/product-session", mutation("DELETE")).catch(() => null);
     await request("/api/v1/auth/customer/sign-out", mutation()).catch(() => null);
   },
 };

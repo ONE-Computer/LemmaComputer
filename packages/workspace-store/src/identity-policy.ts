@@ -403,6 +403,10 @@ export interface CustomerProductSessionStore {
     accountUserId: string;
     now: Date;
   }): Promise<void>;
+  clearCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+  }): Promise<void>;
 }
 export type OrganizationCustomRoleSummary = {
   id: string;
@@ -2014,6 +2018,19 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        SELECT organization_id,membership_id,user_id,'authentication.logout','product',$3
        FROM revoked`,
       [input.authenticationSessionId, input.accountUserId, input.now],
+    );
+  }
+
+  async clearCustomerProductSession(input: {
+    authenticationSessionId: string;
+    accountUserId: string;
+  }) {
+    await this.pool.query(
+      `DELETE FROM browser_sessions session
+       USING organization_memberships membership
+       WHERE session.authentication_session_id=$1 AND session.membership_id=membership.id
+         AND membership.account_user_id=$2 AND session.revoked_at IS NULL`,
+      [input.authenticationSessionId, input.accountUserId],
     );
   }
 

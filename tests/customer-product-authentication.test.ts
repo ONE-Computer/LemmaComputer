@@ -65,6 +65,7 @@ const fixture = () => {
   const invitationContexts: Array<Record<string, unknown>> = [];
   const invitationContextReads: Array<Record<string, unknown>> = [];
   const invitationAcceptances: Array<Record<string, unknown>> = [];
+  const clearedSelections: Array<Record<string, unknown>> = [];
   const reader: CustomerAuthenticationSessionReader = {
     getSession: async (received) => received.get("cookie") ? verifiedSession : null,
   };
@@ -140,6 +141,10 @@ const fixture = () => {
       return recentStepUpAt;
     },
     revokeCustomerProductSession: async () => { selected = null; },
+    clearCustomerProductSession: async (input) => {
+      clearedSelections.push(input);
+      selected = null;
+    },
   };
   return {
     service: new CustomerProductAuthenticationService(reader, store, () => new Date("2026-08-09T02:00:00.000Z"), {
@@ -150,6 +155,7 @@ const fixture = () => {
     invitationContexts,
     invitationContextReads,
     invitationAcceptances,
+    clearedSelections,
     store,
   };
 };
@@ -238,7 +244,7 @@ test("verified Better Auth users map by UUID but receive no tenant authority imp
 });
 
 test("an explicit active membership selection creates the server-side product context", async () => {
-  const { service } = fixture();
+  const { service, clearedSelections } = fixture();
 
   const selected = await service.selectMembership(headers, membershipId);
   assert.equal(selected.membershipId, membershipId);
@@ -246,6 +252,16 @@ test("an explicit active membership selection creates the server-side product co
   const resolution = await service.resolve(headers);
   assert.equal(resolution.status, "authorized");
   if (resolution.status === "authorized") assert.equal(resolution.principal.tenantId, "organization-1");
+
+  await service.clearCurrentOrganizationSelection(headers);
+  assert.deepEqual(clearedSelections, [{
+    authenticationSessionId,
+    accountUserId,
+  }]);
+  assert.equal((await service.resolve(headers)).status, "membership-required");
+
+  const reselected = await service.selectMembership(headers, membershipId);
+  assert.equal(reselected.membershipId, membershipId);
 
   await service.revokeCurrentSession(headers);
   assert.equal((await service.resolve(headers)).status, "membership-required");
@@ -419,6 +435,7 @@ test("Control exposes explicit product-session selection and denies tenant route
       recentStepUpAt: new Date("2026-08-09T01:59:00.000Z"),
     }),
     revokeCurrentSession: async () => { active = false; },
+    clearCurrentOrganizationSelection: async () => { active = false; },
   };
   const identityPolicyStore = {
     getEffectivePolicy: async () => null,
@@ -592,8 +609,8 @@ test("Control exposes explicit product-session selection and denies tenant route
       },
     ]);
 
-    const revoked = await app.inject({ method: "DELETE", url: "/v1/auth/product-session", headers: proxyHeaders });
-    assert.equal(revoked.statusCode, 204);
+    const cleared = await app.inject({ method: "DELETE", url: "/v1/auth/product-session", headers: proxyHeaders });
+    assert.equal(cleared.statusCode, 204);
     assert.equal((await app.inject({ method: "GET", url: "/v1/auth/session", headers: proxyHeaders })).statusCode, 403);
   } finally {
     await app.close();

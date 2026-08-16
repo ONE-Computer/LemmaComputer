@@ -79,7 +79,7 @@ type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "comple
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
   "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
-  | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession"
+  | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession" | "clearCurrentOrganizationSelection"
 >;
 type TenantSsoAdministrationBoundary = Pick<
   TenantSsoAdministrationService,
@@ -2484,10 +2484,11 @@ export function createControlServer(
     if (!security.customerProductAuthentication) {
       throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "Customer authentication is unavailable", 404);
     }
-    await security.customerProductAuthentication.revokeCurrentSession(fromNodeHeaders(request.raw.headers));
+    await security.customerProductAuthentication.clearCurrentOrganizationSelection(fromNodeHeaders(request.raw.headers));
     return reply.code(204).send();
   });
   app.post("/v1/auth/logout", async (request, reply) => {
+    await security.customerProductAuthentication?.revokeCurrentSession(fromNodeHeaders(request.raw.headers));
     if (!security.authentication) return reply.code(204).send();
     return reply.code(204).header("set-cookie", await security.authentication.logout(request.headers.cookie)).send();
   });

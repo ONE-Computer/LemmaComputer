@@ -95,6 +95,7 @@ test("a verified hosted consumer receives personal tenant setup without organiza
 });
 
 test("an account with personal and enterprise memberships can switch context or create another organization", async ({ page }) => {
+  let clearedOrganizationSelections = 0;
   await page.unroute("**/api/v1/auth/session");
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     status: 200,
@@ -112,11 +113,26 @@ test("an account with personal and enterprise memberships can switch context or 
       effectivePolicy: null,
     },
   }));
+  await page.unroute("**/api/v1/auth/product-session");
+  await page.route("**/api/v1/auth/product-session", async (route) => {
+    if (route.request().method() !== "DELETE") return route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify(unauthenticated),
+    });
+    clearedOrganizationSelections += 1;
+    await route.fulfill({ status: 204 });
+  });
 
   await page.goto("/");
   await page.getByRole("button", { name: /Alex Morgan/ }).click();
 
   await expect(page.getByRole("button", { name: "Switch organization" })).toBeVisible();
+  await page.getByRole("button", { name: "Switch organization" }).click();
+  await expect.poll(() => clearedOrganizationSelections).toBe(1);
+  await expect(page).toHaveURL(/\/$/);
+
+  await page.getByRole("button", { name: /Alex Morgan/ }).click();
   await page.getByRole("button", { name: "Create organization" }).click();
   await expect(page.getByRole("heading", { name: "Create an organization" })).toBeVisible();
   await expect(page.getByLabel("Organization name")).toBeVisible();

@@ -7223,7 +7223,7 @@ export function App() {
   };
   const switchOrganization = async () => {
     setProfileOpen(false);
-    await authApi.revokeProductSession();
+    await authApi.clearOrganizationSelection();
     window.location.assign("/");
   };
   const createEnterpriseOrganization = async (displayName) => {
