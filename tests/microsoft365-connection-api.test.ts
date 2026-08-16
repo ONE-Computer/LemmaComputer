@@ -4,7 +4,7 @@ import type { IdentityContext } from "@lemmacomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
-import { withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
+import { staticCredentialGroups, withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
@@ -70,7 +70,11 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     proxyToken,
     gateway,
     "api-fixture-approval-secret-at-least-32-characters",
-    { publicWebUrl: "http://localhost:4174", authorizationOrigin: "http://localhost:3001" },
+    {
+      publicWebUrl: "http://localhost:4174",
+      authorizationOrigin: "http://localhost:3001",
+      configuredStaticMcpClients: ["google-workspace", "github"],
+    },
     { testIdentityMode: true },
   );
   try {
@@ -95,7 +99,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.ok(connectorCards.some((connector) => connector.id === "monday"));
     // A withheld catalog entry must never reach a customer, whether or not an
     // earlier release already seeded its row.
-    for (const withheld of withheldConnectors()) {
+    for (const withheld of withheldConnectors(new Set(staticCredentialGroups))) {
       assert.ok(
         !connectorCards.some((connector) => connector.id === withheld.id),
         `withheld connector ${withheld.id} must not be listed`,

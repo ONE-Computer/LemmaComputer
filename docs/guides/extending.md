@@ -134,11 +134,23 @@ succeed:
    deployment origin, not `localhost`, which is frequently allowlisted when a
    production hostname is not.
 
-An entry that fails condition 3, or that fails condition 2 with no credentials
-yet, is marked `withheld` in `apps/control-api/src/connector-catalog.ts`. A
-withheld entry keeps its name, branding, icon, and scopes but is never seeded,
-listed, connectable, or granted egress. Restoring one is a matter of deleting
-its `withheld` line once the blocking condition is resolved.
+An entry is published only when it can actually complete a connection.
+`apps/control-api/src/connector-catalog.ts` expresses that two ways, and either
+one keeps the entry's name, branding, icon, and scopes while making it
+unseeded, unlisted, unconnectable, and ineligible for gateway egress.
+
+`withheld` is unconditional, for an entry no deployment can rescue: the
+provider allowlists registration callbacks, or the connector has no gateway row
+and environment pair yet.
+
+`requiresCredentials` names a credential group and publishes the entry only
+where that group is configured. `scripts/deployment-config.mjs` checks whether
+both halves of the coupled environment pair carry a value and passes the group
+names, never the secrets, to Control as `CONFIGURED_STATIC_MCP_CLIENTS`. A
+deployment that has not registered a Google Workspace OAuth application does
+not see Gmail, Drive, or Calendar at all, rather than seeing cards whose Connect
+fails at the authorize redirect with an empty client id. Registering the
+application and restarting Control publishes them with no code change.
 
 ### Connector checklist
 

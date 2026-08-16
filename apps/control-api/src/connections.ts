@@ -19,7 +19,12 @@ import {
   type ConnectorConnectionStateRecord,
   type ConnectorRegistryStore,
 } from "@lemmacomputer/workspace-store";
-import { connectorActivation, connectorCatalog, type ConnectorDefinition } from "./connector-catalog.js";
+import {
+  connectorActivation,
+  connectorCatalog,
+  type ConnectorDefinition,
+  type StaticCredentialGroup,
+} from "./connector-catalog.js";
 import type { EffectiveConnectorPolicyInput } from "./connector-policy-administration.js";
 
 type PendingConnection = {
@@ -49,6 +54,12 @@ type ConnectionServiceOptions = {
    * gateway-wide internet destination.
    */
   hostedCustomConnectorEgressOrigins?: string[];
+  /**
+   * Credential groups the deployment has registered with the provider. A
+   * catalog entry that depends on one is published only when it is present, so
+   * an unconfigured connector is never offered and then refused at authorize.
+   */
+  configuredStaticMcpClients?: StaticCredentialGroup[];
   /**
    * Test/control-plane DNS resolver used only to reject unsafe custom URLs at
    * admission. The gateway proxy repeats the resolution and enforcement when
@@ -177,6 +188,7 @@ export class McpConnectionService {
   private readonly resolveCustomConnectorHostname?: PublicHttpsTargetResolver;
   private readonly installationKind: "customer-managed" | "hosted" | "worktree";
   private readonly hostedCustomConnectorEgressOrigins: ReadonlySet<string>;
+  private readonly configuredStaticMcpClients: ReadonlySet<StaticCredentialGroup>;
   private readonly projectionCache = new Map<string, { expiresAt: number; policy: RuntimePolicy }>();
   private readonly connectionStatusStates = new Map<string, Promise<OAuthConnectionStatus>>();
   private readonly sessionTtlMs: number;
@@ -200,6 +212,7 @@ export class McpConnectionService {
       throw new Error("Hosted custom MCP egress origins must be exact public HTTPS origins");
     }
     this.hostedCustomConnectorEgressOrigins = new Set(normalizedOrigins.filter((origin): origin is string => Boolean(origin)));
+    this.configuredStaticMcpClients = new Set(options.configuredStaticMcpClients ?? []);
     this.sessionTtlMs = options.sessionTtlMs ?? 10 * 60 * 1000;
     this.now = options.now ?? Date.now;
   }
@@ -680,7 +693,7 @@ export class McpConnectionService {
     if (!destination) return false;
 
     try {
-      const catalogOrigins = connectorCatalog("gateway-egress", this.microsoftAuthorizationOrigin)
+      const catalogOrigins = connectorCatalog("gateway-egress", this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients)
         .flatMap((connector) => [connector.endpointUrl, ...connector.authorizationOrigins])
         .map(canonicalHttpsOrigin)
         .filter((origin): origin is string => Boolean(origin));
@@ -866,7 +879,7 @@ export class McpConnectionService {
   }
 
   private async connectors(tenantId: string) {
-    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
+    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients);
     await this.registry.seedConnectors(tenantId, seeded);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     return (await this.registry.listConnectors(tenantId))
@@ -888,7 +901,7 @@ export class McpConnectionService {
   }
 
   private async connector(tenantId: string, connectorId: string) {
-    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
+    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients);
     await this.registry.seedConnectors(tenantId, seeded);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     const connector = await this.registry.getConnector(tenantId, connectorId);

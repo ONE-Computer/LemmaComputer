@@ -17,6 +17,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { isStaticCredentialGroup, type StaticCredentialGroup } from "./connector-catalog.js";
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
@@ -471,6 +472,9 @@ const envSchema = z.object({
   MCP_EGRESS_PROXY_TOKEN: z.string().min(32),
   HOSTED_MCP_EGRESS_ORIGINS: z.string().default(""),
   LITELLM_PUBLIC_URL: z.string().url().default("http://localhost:4000"),
+  // Comma-separated credential groups the deployment has registered with the
+  // provider. Presence only; the gateway holds the client ids and secrets.
+  CONFIGURED_STATIC_MCP_CLIENTS: z.string().default(""),
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
   AGENT_BRIDGE_URL: z.string().url().default("http://lemmacomputer-control:4100"),
@@ -570,6 +574,7 @@ export function createControlServer(
     agentBridgeUrl?: string;
     installationKind?: "customer-managed" | "hosted" | "worktree";
     hostedCustomConnectorEgressOrigins?: string[];
+    configuredStaticMcpClients?: StaticCredentialGroup[];
   } = {},
   security: {
     authentication?: AuthenticationBoundary;
@@ -881,6 +886,7 @@ export function createControlServer(
     registry: security.connectorRegistryStore,
     installationKind: connectionOptions.installationKind,
     hostedCustomConnectorEgressOrigins: connectionOptions.hostedCustomConnectorEgressOrigins,
+    configuredStaticMcpClients: connectionOptions.configuredStaticMcpClients,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -5745,6 +5751,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       agentBridgeUrl: env.AGENT_BRIDGE_URL,
       installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
       hostedCustomConnectorEgressOrigins: env.HOSTED_MCP_EGRESS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
+      configuredStaticMcpClients: env.CONFIGURED_STATIC_MCP_CLIENTS
+        .split(",").map((group) => group.trim()).filter(isStaticCredentialGroup),
     },
     {
       identityPolicyStore,

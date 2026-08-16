@@ -672,6 +672,17 @@ export function projectServiceEnvironment(input = {}) {
   const consentUrl = `http://${runtimeDefaults.consentHost}:8788`;
   const publicWebOrigin = new URL(v("LEMMACOMPUTER_PUBLIC_WEB_URL")).origin;
   const litellmPublicUrl = `${publicWebOrigin}/oauth/mcp`;
+  // Which provider OAuth applications this deployment has registered. Control
+  // publishes a connector that depends on one only when it is configured, so an
+  // unconfigured entry is never offered and then rejected at the redirect. The
+  // secrets stay with the gateway; Control receives only the group names.
+  const configuredStaticMcpClients = Object.entries({
+    "google-workspace": ["LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID", "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET"],
+    github: ["LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET"],
+  })
+    .filter(([, keys]) => keys.every((key) => hasValue(v(key))))
+    .map(([group]) => group)
+    .join(",");
   const m365AuthorizationOrigin = `${publicWebOrigin}/m365`;
   const gatewayEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("LEMMACOMPUTER_GATEWAY_EGRESS_PROXY_TOKEN"))}@gateway-egress-proxy:3128`;
   const remoteMcpEgressProxyUrl = `http://litellm-gateway:${encodeURIComponent(v("LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN"))}@remote-mcp-egress-proxy:3128`;
@@ -835,6 +846,7 @@ export function projectServiceEnvironment(input = {}) {
       POSTMARK_MESSAGE_STREAM: v("LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM"),
       GOOGLE_AUTH_CLIENT_ID: v("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID"),
       GOOGLE_AUTH_CLIENT_SECRET: v("LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET"),
+      CONFIGURED_STATIC_MCP_CLIENTS: configuredStaticMcpClients,
       MICROSOFT_AUTH_CLIENT_ID: v("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID"),
       MICROSOFT_AUTH_CLIENT_SECRET: v("LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET"),
       MICROSOFT_AUTH_TENANT_ID: v("LEMMACOMPUTER_MICROSOFT_AUTH_TENANT_ID"),
