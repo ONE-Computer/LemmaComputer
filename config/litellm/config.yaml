@@ -100,6 +100,15 @@ mcp_servers:
     description: Official Google Workspace Gmail remote MCP connector
     auth_type: oauth2
     oauth2_flow: authorization_code
+    # Google issues a refresh token only when the authorization request carries
+    # access_type=offline, and only on a first consent unless prompt=consent is
+    # also sent. Neither is a scope, so declaring offline_access the way the
+    # Microsoft 365 server does has no effect here, and LiteLLM sends no such
+    # parameter of its own. Without this the connection holds a one-hour access
+    # token with nothing to renew from, and every person reconnects hourly.
+    # authorize_with_server merges parameters already present on this URL before
+    # adding its own, and token_url and scopes are still discovered.
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent
     client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
     client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
     available_on_public_internet: true
@@ -109,6 +118,8 @@ mcp_servers:
     description: Official Google Workspace Drive remote MCP connector
     auth_type: oauth2
     oauth2_flow: authorization_code
+    # Offline access, as explained on the Gmail server above.
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent
     client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
     client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
     available_on_public_internet: true
@@ -118,6 +129,8 @@ mcp_servers:
     description: Official Google Workspace Calendar remote MCP connector
     auth_type: oauth2
     oauth2_flow: authorization_code
+    # Offline access, as explained on the Gmail server above.
+    authorization_url: https://accounts.google.com/o/oauth2/v2/auth?access_type=offline&prompt=consent
     client_id: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_ID
     client_secret: os.environ/GOOGLE_WORKSPACE_MCP_CLIENT_SECRET
     available_on_public_internet: true
