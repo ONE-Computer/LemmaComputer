@@ -145,6 +145,18 @@ export const chatApi = {
   activityStreamUrl: (workspaceId: string, catalogId: string, sessionId: string, turnId: string, after = -1) => (
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/activity/stream?${new URLSearchParams({ after: String(after) })}`
   ),
+  fork: (workspaceId: string, sessionId: string, fromMessageId: string, agentCatalogId: string, requestedServiceClass: string, reasoningEffort?: string) => request(
+    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/sessions/${encodeURIComponent(sessionId)}/forks`,
+    mutation("POST", {
+      fromMessageId,
+      agentCatalogId,
+      requestedServiceClass,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+    }),
+  ),
+  artifactUrl: (artifactId: string, revisionId: string) => (
+    `/api/v1/chat/artifacts/${encodeURIComponent(artifactId)}/content?${new URLSearchParams({ revision: revisionId })}`
+  ),
 };
 
 export const skillApi = {

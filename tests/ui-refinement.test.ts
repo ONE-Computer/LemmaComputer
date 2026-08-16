@@ -599,10 +599,12 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
     source("apps/web/src/styles.css"),
   ]);
   const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
-  const nonReadyStart = chatScreen.indexOf('if (status !== "ready")');
+  const nonReadyStart = chatScreen.indexOf('if (!workspace || (status !== "ready" && !selectedSessionId))');
   const nonReadyEnd = chatScreen.indexOf("\n  return (\n", nonReadyStart);
   const nonReadyBranch = chatScreen.slice(nonReadyStart, nonReadyEnd);
   assert.match(nonReadyBranch, /chat-runtime-state/);
+  assert.match(app, /chat-history-offline/);
+  assert.match(app, /Saved history and files remain available/);
   assert.doesNotMatch(nonReadyBranch, /page-heading|<h1>Chat<\/h1>|\{contextSelector\}/);
   assert.match(app, /activeNav === "Chat" && <ChatScreen\s+key=\{workspace\?\.id \?\? "no-workspace"\}/);
   assert.match(styles, /\.chat-runtime-state\s*\{[\s\S]*place-items:\s*center/);

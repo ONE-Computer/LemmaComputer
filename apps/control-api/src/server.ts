@@ -6,8 +6,9 @@ import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspac
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
+import { FilesystemArtifactStore, S3ArtifactStore, type ArtifactStore } from "@lemmacomputer/artifact-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
@@ -31,6 +32,7 @@ import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import {
   AgentChatAuthority,
+  AgentMessageAccumulator,
   AgentUiStreamMapper,
   HttpAgentChatClient,
   assignedChatAgentIds,
@@ -38,6 +40,7 @@ import {
   reconcileChatMessages,
   type AgentChatClient,
 } from "./agent-chat.js";
+import { DurableChatService } from "./durable-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
@@ -526,6 +529,13 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
   AGENT_CHAT_SECRET: z.string().min(32),
+  ARTIFACT_STORE_BACKEND: z.enum(["filesystem", "s3"]),
+  ARTIFACT_FILESYSTEM_ROOT: optionalEnvString(),
+  ARTIFACT_S3_BUCKET: optionalEnvString(),
+  ARTIFACT_S3_REGION: optionalEnvString(),
+  ARTIFACT_S3_ENDPOINT: optionalEnvString(),
+  ARTIFACT_S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false"),
+  ARTIFACT_S3_KMS_KEY_ID: optionalEnvString(),
   CHANNEL_BROKER_URL: optionalEnvString(),
   CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
   TELEGRAM_RAW_TOKEN_INPUT_MODE: z.preprocess(
@@ -630,6 +640,10 @@ export function createControlServer(
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
+    chatStore?: ChatStore;
+    artifactStore?: ArtifactStore;
+    requireArtifactNodePlacement?: boolean;
+    requireCanonicalChatPersistence?: boolean;
     agentInstanceStore?: AgentInstanceStore;
     toolAuditStore?: ToolAuditStore;
     channelBrokerClient?: ChannelBrokerManagementClient;
@@ -740,6 +754,33 @@ export function createControlServer(
   const agentBridgeAuthority = new AgentBridgeAuthority(agentBridgeSecret, security.agentBridgeGrantTtlSeconds);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const durableChat = security.chatStore && security.artifactStore
+    ? new DurableChatService(security.chatStore, security.artifactStore, {
+        requireNodePlacement: security.requireArtifactNodePlacement ?? false,
+      })
+    : undefined;
+  if (!durableChat && security.requireCanonicalChatPersistence) {
+    throw new Error("Control requires ChatStore and ArtifactStore canonical persistence");
+  }
+  const requireDurableChat = () => {
+    if (!durableChat || !security.chatStore) {
+      throw new LemmaComputerError("CHAT_STORE_UNAVAILABLE", "Durable Chat is unavailable", 503, true);
+    }
+    return { service: durableChat, store: security.chatStore };
+  };
+  let artifactStagingCleanupTimer: NodeJS.Timeout | undefined;
+  if (durableChat) {
+    app.addHook("onReady", async () => {
+      await durableChat.cleanupExpiredStaging();
+      artifactStagingCleanupTimer = setInterval(() => {
+        void durableChat.cleanupExpiredStaging().catch(() => undefined);
+      }, 60_000);
+      artifactStagingCleanupTimer.unref();
+    });
+    app.addHook("onClose", async () => {
+      if (artifactStagingCleanupTimer) clearInterval(artifactStagingCleanupTimer);
+    });
+  }
   const agentProcesses = new AgentProcessLifecycleService(security.agentInstanceStore);
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
@@ -1610,6 +1651,8 @@ export function createControlServer(
             launchKind: "schedule", sessionId, idempotencyKey: runId,
           });
         },
+        security.chatStore,
+        durableChat,
       )
     : undefined;
   const requireSchedules = () => {
@@ -1749,9 +1792,26 @@ export function createControlServer(
     )) {
       throw new LemmaComputerError("CHANNEL_UPDATE_REPLAYED", "The channel update was already dispatched", 409);
     }
-    const session = input.sessionId
-      ? { id: input.sessionId }
-      : await agentChat.createSession(access, `Telegram ${input.externalSenderId}`);
+    const durable = requireDurableChat();
+    const existingConversation = input.sessionId
+      ? await durable.store.getConversation(input.identity, input.sessionId)
+      : null;
+    if (input.sessionId && (
+      !existingConversation
+      || existingConversation.workspaceId !== input.workspaceId
+      || existingConversation.defaultAgentCatalogId !== input.agentCatalogId
+    )) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
+    const conversation = existingConversation ?? await durable.store.createConversation({
+      identity: input.identity,
+      workspaceId: input.workspaceId,
+      defaultAgentCatalogId: input.agentCatalogId,
+      title: `Telegram ${input.externalSenderId}`,
+      requestedServiceClass: "balanced",
+    });
+    const session = { id: conversation.id };
+    const history = await durable.store.listMessages(input.identity, session.id);
     const message = sendChatTurnSchema.parse({
       message: {
         id: randomUUID(),
@@ -1768,12 +1828,24 @@ export function createControlServer(
         ],
       },
     }).message;
+    const persistedUser = await durable.service.persistUserMessage({
+      identity: input.identity,
+      conversation,
+      access,
+      message,
+    });
+    const vendorSessionId = await durable.store.getVendorSession(
+      input.identity,
+      session.id,
+      input.agentCatalogId,
+    ) ?? undefined;
     const frame = (event: unknown) => `${JSON.stringify(channelTurnStreamEventSchema.parse(event))}\n`;
     const stream = async function*() {
       let text = "";
       const notices: string[] = [];
-      const artifacts: Array<{ artifactId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
+      const artifacts: Array<{ artifactId: string; revisionId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
       let state: "needs_input" | "completed" | "cancelled" | "failed" = "failed";
+      const accumulator = new AgentMessageAccumulator(input.agentCatalogId);
       let lifecycle: Awaited<ReturnType<AgentProcessLifecycleService["begin"]>> | undefined;
       let processStarted = false;
       let processEnded = false;
@@ -1789,35 +1861,66 @@ export function createControlServer(
           `channel:${input.connectionId}:${input.updateId}`, session.id, undefined, "auto", agentInstanceId,
         );
         for await (const event of agentChat.streamTurn(
-          access, session.id, message, undefined, usageTaskBinding, agentInstanceId,
+          access, session.id, persistedUser.runtimeMessage, undefined, usageTaskBinding, agentInstanceId,
+          undefined, history, vendorSessionId,
         )) {
           if (event.type === "turn-start") {
             await lifecycle.markRunning(event.turnId);
+            await durable.store.beginRun({
+              identity: input.identity,
+              conversationId: session.id,
+              turnId: event.turnId,
+              effectiveAgentCatalogId: input.agentCatalogId,
+              requestedServiceClass: conversation.requestedServiceClass,
+              reasoningEffort: conversation.reasoningEffort,
+              policyVersionId: policy.policyVersionId,
+              policyVersion: policy.policyVersion,
+              policyHash: policy.policyHash,
+              workspaceId: input.workspaceId,
+              workspaceNodeId: access.workspaceNodeId,
+              accessGeneration: access.accessGeneration,
+              agentInstanceId,
+            });
             processStarted = true;
           }
-          if (event.type === "progress") {
+          const projected: AgentChatEvent = event.type === "artifact"
+            ? await durable.service.persistGeneratedArtifact({
+                identity: input.identity,
+                conversation,
+                access,
+                client: agentChat,
+                event,
+              })
+            : event;
+          accumulator.apply(projected);
+          const checkpoint = accumulator.snapshot();
+          if (checkpoint) {
+            await durable.store.upsertMessage(input.identity, session.id, checkpoint);
+            await durable.service.bindMessageArtifacts(input.identity, session.id, checkpoint);
+          }
+          if (projected.type === "progress") {
             yield frame({ type: "heartbeat" });
           }
-          if (event.type === "text-delta") {
-            text += event.delta;
+          if (projected.type === "text-delta") {
+            text += projected.delta;
             if (text.length > 16_000) {
               throw new LemmaComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
             }
-            yield frame({ type: "text-delta", delta: event.delta });
+            yield frame({ type: "text-delta", delta: projected.delta });
           }
-          if (event.type === "artifact") {
-            artifacts.push({ artifactId: event.artifactId, mediaType: event.mediaType, filename: event.filename,
-              byteLength: event.byteLength, sha256: event.sha256 });
+          if (projected.type === "artifact") {
+            artifacts.push({ artifactId: projected.artifactId, revisionId: projected.revisionId!, mediaType: projected.mediaType, filename: projected.filename,
+              byteLength: projected.byteLength, sha256: projected.sha256 });
           }
-          if (event.type === "notice" && !notices.includes(event.message)) {
-            notices.push(event.message);
-            yield frame({ type: "notice", notice: event.message });
+          if (projected.type === "notice" && !notices.includes(projected.message)) {
+            notices.push(projected.message);
+            yield frame({ type: "notice", notice: projected.message });
           }
-          if (event.type === "approval") {
-            let summary = event.summary;
+          if (projected.type === "approval") {
+            let summary = projected.summary;
             try {
-              const operation = await operations.get(input.identity, event.operationId);
-              summary = chatApprovalSummary(event.state, operation.safeSummary);
+              const operation = await operations.get(input.identity, projected.operationId);
+              summary = chatApprovalSummary(projected.state, operation.safeSummary);
             } catch (error) {
               if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
             }
@@ -1827,15 +1930,24 @@ export function createControlServer(
               yield frame({ type: "notice", notice });
             }
           }
-          if (event.type === "turn-finish") {
-            state = event.state;
-            await lifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
+          if (projected.type === "turn-finish") {
+            state = projected.state;
+            if (projected.vendorSessionId) {
+              await durable.store.setVendorSession(input.identity, session.id, input.agentCatalogId, projected.vendorSessionId);
+            }
+            await durable.store.finishRun(input.identity, session.id, projected.turnId, {
+              status: projected.state,
+              assistantMessageId: checkpoint?.id,
+              ...(projected.state === "failed" ? { failureCode: "AGENT_TURN_FAILED" } : {}),
+              completedAt: new Date(projected.completedAt),
+            });
+            await lifecycle.end(projected.state === "failed" ? "provider_failed" : "process_exited");
             processEnded = true;
-            if (event.state === "failed" && !text) {
+            if (projected.state === "failed" && !text) {
               yield frame({
                 type: "error",
                 code: "CHANNEL_TURN_FAILED",
-                message: event.message ?? "The agent could not complete the message",
+                message: projected.message ?? "The agent could not complete the message",
                 retryable: true,
               });
               return;
@@ -1866,9 +1978,19 @@ export function createControlServer(
   });
   app.post("/internal/v1/channels/artifacts", { bodyLimit: 32 * 1024 }, async (request, reply) => {
     const input = channelArtifactDownloadRequestSchema.parse(request.body ?? {});
-    const { access } = await verifiedChannelRoute(input, false);
-    const data = await agentChat.downloadArtifact(access, input.artifact.artifactId);
-    if (data.length !== input.artifact.byteLength || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256) {
+    await verifiedChannelRoute(input, false);
+    const saved = await requireDurableChat().service.readArtifact(
+      input.identity,
+      input.artifact.artifactId,
+      input.artifact.revisionId,
+    );
+    const data = saved.bytes;
+    if (
+      saved.artifact.workspaceId !== input.workspaceId
+      || data.length !== input.artifact.byteLength
+      || saved.revision.sha256 !== input.artifact.sha256
+      || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256
+    ) {
       throw new LemmaComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
     }
     if (data.length > channelArtifactMaxBytes) throw new LemmaComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
@@ -5110,13 +5232,20 @@ export function createControlServer(
     }
   });
   app.get<{ Params: { workspaceId: string; catalogId: string }; Querystring: { cursor?: string; limit?: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
-    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
-    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    await requireWorkspacePolicy(request, request.params.workspaceId);
+    const owner = identity(request);
     const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
     const cursor = request.query.cursor ? chatSessionIdSchema.parse(request.query.cursor) : undefined;
-    const page = await agentChat.listSessions(access, { cursor, limit });
-    const sessions = page.sessions.map((session) => ({ ...session, agentCatalogId: catalogId }));
+    const page = await requireDurableChat().store.listConversations(owner, request.params.workspaceId, { cursor, limit });
+    const sessions = page.conversations.map((session) => ({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString(),
+      reasoningEffort: session.reasoningEffort,
+      agentCatalogId: session.defaultAgentCatalogId,
+    }));
     return reply.header("cache-control", "no-store").send({ sessions, nextCursor: page.nextCursor });
   });
   app.post<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
@@ -5126,18 +5255,37 @@ export function createControlServer(
     const owner = identity(request);
     await requireChatServiceClass(owner, input.requestedServiceClass);
     await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
-    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
-    const session = await agentChat.createSession(access, input.title, input.reasoningEffort);
-    return reply.code(201).header("cache-control", "no-store").send({ ...session, agentCatalogId: catalogId });
+    if (!assignedChatAgentIds(policy).includes(catalogId)) {
+      throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+    }
+    const session = await requireDurableChat().store.createConversation({
+      identity: owner,
+      workspaceId: request.params.workspaceId,
+      defaultAgentCatalogId: catalogId,
+      title: input.title,
+      requestedServiceClass: input.requestedServiceClass,
+      reasoningEffort: input.reasoningEffort,
+    });
+    return reply.code(201).header("cache-control", "no-store").send({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString(),
+      reasoningEffort: session.reasoningEffort,
+      agentCatalogId: session.defaultAgentCatalogId,
+    });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
-    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
-    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const conversation = await requireDurableChat().store.getConversation(owner, sessionId);
+    if (!conversation || conversation.workspaceId !== request.params.workspaceId) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
     const messages = await reconcileChatMessages(
-      await agentChat.listMessages(access, sessionId),
+      await requireDurableChat().store.listMessages(owner, sessionId),
       async (operationId) => {
         try {
           const operation = await operations.get(owner, operationId);
@@ -5150,6 +5298,63 @@ export function createControlServer(
     );
     return reply.header("cache-control", "no-store").send({ messages });
   });
+  app.post<{ Params: { workspaceId: string; sessionId: string } }>(
+    "/v1/workspaces/:workspaceId/chat/sessions/:sessionId/forks",
+    async (request, reply) => {
+      const input = z.strictObject({
+        fromMessageId: chatPartIdSchema,
+        agentCatalogId: chatAgentCatalogIdSchema,
+        requestedServiceClass: z.enum(["lite", "balanced", "pro"]),
+        reasoningEffort: z.enum(["auto", "low", "medium", "high"]).optional(),
+      }).parse(request.body ?? {});
+      const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+      if (!assignedChatAgentIds(policy).includes(input.agentCatalogId)) {
+        throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+      }
+      const owner = identity(request);
+      await requireChatServiceClass(owner, input.requestedServiceClass);
+      await requireReasoningEffort(owner, policy, input.agentCatalogId, input.requestedServiceClass, input.reasoningEffort);
+      const source = await requireDurableChat().store.getConversation(owner, request.params.sessionId);
+      if (!source || source.workspaceId !== request.params.workspaceId) {
+        throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+      }
+      const fork = await requireDurableChat().store.forkConversation({
+        identity: owner,
+        conversationId: source.id,
+        fromMessageId: input.fromMessageId,
+        defaultAgentCatalogId: input.agentCatalogId,
+        requestedServiceClass: input.requestedServiceClass,
+        reasoningEffort: input.reasoningEffort,
+      });
+      return reply.code(201).header("cache-control", "no-store").send({
+        id: fork.id,
+        title: fork.title,
+        createdAt: fork.createdAt.toISOString(),
+        updatedAt: fork.updatedAt.toISOString(),
+        reasoningEffort: fork.reasoningEffort,
+        agentCatalogId: fork.defaultAgentCatalogId,
+        parentConversationId: fork.parentConversationId,
+        forkedFromMessageId: fork.forkedFromMessageId,
+      });
+    },
+  );
+  app.get<{ Params: { artifactId: string }; Querystring: { revision?: string } }>(
+    "/v1/chat/artifacts/:artifactId/content",
+    async (request, reply) => {
+      const artifactId = z.string().regex(/^artifact-[a-f0-9]{32}$/).parse(request.params.artifactId);
+      const revisionId = request.query.revision
+        ? z.string().regex(/^revision-[a-f0-9]{32}$/).parse(request.query.revision)
+        : undefined;
+      const saved = await requireDurableChat().service.readArtifact(identity(request), artifactId, revisionId);
+      return reply
+        .header("cache-control", "private, no-store")
+        .header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(saved.artifact.displayName)}`)
+        .header("x-content-type-options", "nosniff")
+        .header("x-lemmacomputer-artifact-sha256", saved.revision.sha256)
+        .type(saved.revision.mediaType)
+        .send(saved.bytes);
+    },
+  );
   const activityScope = async (request: {
     params: { workspaceId: string; catalogId: string; sessionId: string; turnId: string };
   }) => {
@@ -5302,7 +5507,23 @@ export function createControlServer(
         );
       }
     }
+    const durable = requireDurableChat();
+    const conversation = await durable.store.getConversation(owner, sessionId);
+    if (!conversation || conversation.workspaceId !== request.params.workspaceId) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
+    if (conversation.defaultAgentCatalogId !== catalogId) {
+      throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "Continue with another agent by creating an explicit conversation fork", 409);
+    }
+    const history = await durable.store.listMessages(owner, sessionId);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const persistedUser = await durable.service.persistUserMessage({
+      identity: owner,
+      conversation,
+      access,
+      message: input.message,
+    });
+    const vendorSessionId = await durable.store.getVendorSession(owner, sessionId, catalogId) ?? undefined;
     const processLifecycle = await agentProcesses.beginBrowserChat({
       identity: owner,
       workspace,
@@ -5313,6 +5534,7 @@ export function createControlServer(
       idempotencyKey: launchIdempotencyKey,
     });
     const mapper = new AgentUiStreamMapper(catalogId);
+    const accumulator = new AgentMessageAccumulator(catalogId);
     const chunks: ReturnType<AgentUiStreamMapper["chunks"]>[number][] = [];
     const waiters = new Set<() => void>();
     let pumpDone = false;
@@ -5335,14 +5557,37 @@ export function createControlServer(
           input.reasoningEffort, policy.maximumReasoningEffort,
         );
         for await (const event of agentChat.streamTurn(
-          access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
-          input.reasoningEffort,
+          access, sessionId, persistedUser.runtimeMessage, undefined, usageTaskBinding, agentInstanceId,
+          input.reasoningEffort, history, vendorSessionId,
         )) {
           if (event.type === "turn-start") {
             await processLifecycle.markRunning(event.turnId);
+            await durable.store.beginRun({
+              identity: owner,
+              conversationId: sessionId,
+              turnId: event.turnId,
+              effectiveAgentCatalogId: catalogId,
+              requestedServiceClass: input.requestedServiceClass,
+              reasoningEffort: input.reasoningEffort,
+              policyVersionId: policy.policyVersionId,
+              policyVersion: policy.policyVersion,
+              policyHash: policy.policyHash,
+              workspaceId: request.params.workspaceId,
+              workspaceNodeId: access.workspaceNodeId,
+              accessGeneration: access.accessGeneration,
+              agentInstanceId,
+            });
             processStarted = true;
           }
-          let projected = event;
+          let projected: AgentChatEvent = event.type === "artifact"
+            ? await durable.service.persistGeneratedArtifact({
+                identity: owner,
+                conversation,
+                access,
+                client: agentChat,
+                event,
+              })
+            : event;
           if (event.type === "approval") {
             try {
               const operation = await operations.get(owner, event.operationId);
@@ -5364,8 +5609,23 @@ export function createControlServer(
             event: projected,
           });
           lastEvent = projected;
+          accumulator.apply(projected);
+          const checkpoint = accumulator.snapshot();
+          if (checkpoint) {
+            await durable.store.upsertMessage(owner, sessionId, checkpoint);
+            await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
+          }
           chunks.push(...mapper.chunks(projected));
           if (event.type === "turn-finish") {
+            if (event.vendorSessionId) {
+              await durable.store.setVendorSession(owner, sessionId, catalogId, event.vendorSessionId);
+            }
+            await durable.store.finishRun(owner, sessionId, event.turnId, {
+              status: event.state,
+              assistantMessageId: checkpoint?.id,
+              ...(event.state === "failed" ? { failureCode: "AGENT_TURN_FAILED" } : {}),
+              completedAt: new Date(event.completedAt),
+            });
             await processLifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
             processEnded = true;
           }
@@ -5404,6 +5664,24 @@ export function createControlServer(
             displayName: access.displayName,
             event: terminal,
           }).catch(() => undefined);
+          try {
+            accumulator.apply(terminal);
+            const checkpoint = accumulator.snapshot();
+            if (checkpoint) {
+              await durable.store.upsertMessage(owner, sessionId, checkpoint);
+              await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
+            }
+            if (processStarted) {
+              await durable.store.finishRun(owner, sessionId, terminal.turnId, {
+                status: "failed",
+                assistantMessageId: checkpoint?.id,
+                failureCode: error instanceof LemmaComputerError ? error.code : "AGENT_STREAM_FAILED",
+                completedAt: new Date(completedAt),
+              });
+            }
+          } catch (persistenceError) {
+            pumpError = persistenceError;
+          }
         }
       } finally {
         pumpDone = true;
@@ -5577,6 +5855,25 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const env = envSchema.parse(process.env);
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.assertSchemaCompatible();
+  const chatStore = PostgresChatStore.fromConnectionString(env.DATABASE_URL);
+  let artifactStore: ArtifactStore;
+  if (env.ARTIFACT_STORE_BACKEND === "filesystem") {
+    if (!env.ARTIFACT_FILESYSTEM_ROOT) throw new Error("Filesystem artifact storage requires ARTIFACT_FILESYSTEM_ROOT");
+    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted") throw new Error("Hosted deployments require S3 artifact storage");
+    artifactStore = new FilesystemArtifactStore(env.ARTIFACT_FILESYSTEM_ROOT);
+  } else {
+    if (!env.ARTIFACT_S3_BUCKET || !env.ARTIFACT_S3_REGION) throw new Error("S3 artifact storage requires bucket and region");
+    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !env.ARTIFACT_S3_KMS_KEY_ID) {
+      throw new Error("Hosted S3 artifact storage requires an explicit KMS key ID");
+    }
+    artifactStore = new S3ArtifactStore({
+      bucket: env.ARTIFACT_S3_BUCKET,
+      region: env.ARTIFACT_S3_REGION,
+      ...(env.ARTIFACT_S3_ENDPOINT ? { endpoint: env.ARTIFACT_S3_ENDPOINT } : {}),
+      forcePathStyle: env.ARTIFACT_S3_FORCE_PATH_STYLE === "true",
+      ...(env.ARTIFACT_S3_KMS_KEY_ID ? { kmsKeyId: env.ARTIFACT_S3_KMS_KEY_ID } : {}),
+    });
+  }
   const authenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.AUTH_DATABASE_URL);
   try {
     await authenticationSchema.assertSchemaCompatible();
@@ -5984,6 +6281,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       },
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
+      chatStore,
+      artifactStore,
+      requireArtifactNodePlacement: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted",
+      requireCanonicalChatPersistence: true,
       agentInstanceStore,
       toolAuditStore,
       channelBrokerClient,
@@ -6023,6 +6324,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     clearInterval(agentInstanceReconciliationTimer);
     await store.close();
+    await chatStore.close();
     await connectorRegistryStore.close();
     await providerSettingsStore.close();
     await scheduleStore.close();

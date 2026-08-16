@@ -10,12 +10,14 @@ import {
   type IdentityContext,
 } from "@lemmacomputer/contracts";
 import {
+  MemoryChatStore,
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
   type RoutingStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
+import { MemoryArtifactStore } from "@lemmacomputer/artifact-store";
 import type { AgentChatClient } from "../apps/control-api/src/agent-chat.js";
 import type { ChannelBrokerManagementClient } from "../apps/control-api/src/channel-broker.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
@@ -277,11 +279,6 @@ class FakeAgentChat implements AgentChatClient {
   messages: Array<{ parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }> = [];
   approvalSummary: string | undefined;
   async health() {}
-  async listSessions() { return { sessions: [], nextCursor: null }; }
-  async createSession() {
-    return { id: "telegram-session-hermes", title: "Telegram", createdAt: null, updatedAt: null };
-  }
-  async listMessages() { return []; }
   async cancelTurn() {}
   async downloadArtifact(_access: unknown, artifactId: string) {
     if (artifactId !== generatedArtifact.artifactId) throw new Error("missing artifact");
@@ -501,11 +498,17 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
   });
   const chat = new FakeAgentChat();
   chat.approvalSummary = "Approval needed: Send Teams chat message.";
+  const chatStore = new MemoryChatStore((_identity, targetWorkspaceId) => {
+    assert.equal(targetWorkspaceId, workspace.id);
+    return { workspaceNodeId: workspace.workspaceNodeId ?? null, accessGeneration: workspace.accessGeneration };
+  });
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
     testIdentityMode: true,
     identityPolicyStore: policyStore(effectivePolicy()),
     agentChatSecret: "channel-agent-chat-secret-at-least-32-characters",
     agentChatClient: chat,
+    chatStore,
+    artifactStore: new MemoryArtifactStore(),
     channelBrokerInternalToken: channelToken,
   });
   const payload = {
@@ -550,9 +553,8 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
       },
     ]);
     assert.equal(chat.messages[0]?.metadata.source, "telegram");
-    assert.deepEqual(
-      accepted.body.trim().split("\n").map((line) => JSON.parse(line)),
-      [
+    const acceptedFrames = accepted.body.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(acceptedFrames.slice(0, 2), [
         {
           type: "notice",
           notice: "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
@@ -561,23 +563,22 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
           type: "text-delta",
           delta: "Hello from Hermes",
         },
-        {
-          type: "result",
-          response: {
-            sessionId: "telegram-session-hermes",
-            text: "Hello from Hermes",
-            notices: [
-              "Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action.",
-            ],
-            artifacts: [generatedArtifact],
-            state: "completed",
-          },
-        },
-      ],
-    );
+      ]);
+    const response = acceptedFrames[2]?.response;
+    assert.equal(acceptedFrames[2]?.type, "result");
+    assert.match(response.sessionId, /^[0-9a-f-]{36}$/);
+    assert.equal(response.text, "Hello from Hermes");
+    assert.deepEqual(response.notices, ["Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action."]);
+    assert.equal(response.state, "completed");
+    assert.equal(response.artifacts.length, 1);
+    const [canonicalArtifact] = response.artifacts;
+    assert.match(canonicalArtifact.artifactId, /^artifact-[a-f0-9]{32}$/);
+    assert.match(canonicalArtifact.revisionId, /^revision-[a-f0-9]{32}$/);
+    assert.equal(canonicalArtifact.filename, generatedArtifact.filename);
+    assert.equal(canonicalArtifact.sha256, generatedArtifact.sha256);
 
     const artifactRequest = { connectionId, identity: alpha, workspaceId: workspace.id, agentCatalogId: "hermes-claw",
-      externalSenderId: "10001", artifact: generatedArtifact };
+      externalSenderId: "10001", artifact: canonicalArtifact };
     const unauthenticatedArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts", payload: artifactRequest });
     assert.equal(unauthenticatedArtifact.statusCode, 401);
     const deliveredArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts",

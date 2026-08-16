@@ -71,6 +71,15 @@ const sections = [
     variable("LEMMACOMPUTER_SCHEDULER_CLAIM_LEASE_MS", "120000", "Schedule claim lease duration in milliseconds.", { kind: "integer" }),
     variable("LEMMACOMPUTER_POLICY_BUNDLE_TTL_SECONDS", "86400", "Signed policy bundle lifetime in seconds.", { kind: "integer" }),
   ]),
+  section("Durable chat artifact storage", "PostgreSQL owns chat metadata. Artifact bytes use a Control-owned filesystem locally and an encrypted S3-compatible bucket in hosted deployments.", [
+    variable("LEMMACOMPUTER_ARTIFACT_STORE_BACKEND", "filesystem", "Artifact byte-store backend: filesystem or s3.", { kind: "enum", values: ["filesystem", "s3"] }),
+    variable("LEMMACOMPUTER_ARTIFACT_FILESYSTEM_ROOT", "/var/lib/lemmacomputer/artifacts", "Absolute Control-owned artifact root used by the filesystem backend."),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_BUCKET", "", "Dedicated artifact bucket name.", { optional: true, requiredWhen: "The s3 backend is selected." }),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_REGION", "", "Artifact bucket AWS region.", { optional: true, requiredWhen: "The s3 backend is selected." }),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT", "", "Optional S3-compatible endpoint used by local qualification only.", { kind: "url", optional: true }),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_FORCE_PATH_STYLE", "false", "Use path-style S3 addressing for local S3-compatible qualification.", { kind: "boolean" }),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID", "", "KMS key ID used for hosted artifact object encryption.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+  ]),
   section("Generated service, encryption, and internal-authentication secrets", "npm run env:init replaces every generated-by-env-init value with a distinct local secret. Production secrets belong in a secret manager.", [
     variable("LEMMACOMPUTER_WEB_PROXY_TOKEN", generated, "Web-to-Control proxy bearer token.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_CONTROLLER_TOKEN", generated, "Control-to-workspace-controller bearer token.", { secret: true, generated: "random" }),
@@ -467,6 +476,19 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   }
   if (values.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && values.LEMMACOMPUTER_INVITATION_DELIVERY_MODE === "copy-link") {
     errors.push("Hosted organization invitations require transactional email delivery");
+  }
+  if (values.LEMMACOMPUTER_ARTIFACT_STORE_BACKEND === "filesystem" && !hasValue(values.LEMMACOMPUTER_ARTIFACT_FILESYSTEM_ROOT)) {
+    errors.push("LEMMACOMPUTER_ARTIFACT_FILESYSTEM_ROOT is required for filesystem artifact storage");
+  }
+  if (values.LEMMACOMPUTER_ARTIFACT_STORE_BACKEND === "s3") {
+    for (const key of ["LEMMACOMPUTER_ARTIFACT_S3_BUCKET", "LEMMACOMPUTER_ARTIFACT_S3_REGION"]) {
+      if (!hasValue(values[key])) errors.push(`${key} is required for s3 artifact storage`);
+    }
+  }
+  if (values.LEMMACOMPUTER_INSTALLATION_KIND === "hosted") {
+    if (values.LEMMACOMPUTER_ARTIFACT_STORE_BACKEND !== "s3") errors.push("Hosted deployments require s3 artifact storage");
+    if (!hasValue(values.LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID)) errors.push("Hosted artifact storage requires an explicit KMS key ID");
+    if (hasValue(values.LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT)) errors.push("Hosted artifact storage must use the AWS S3 regional endpoint");
   }
   if (values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT === "postmark") {
     for (const key of ["LEMMACOMPUTER_POSTMARK_SERVER_TOKEN", "LEMMACOMPUTER_POSTMARK_FROM"]) {
@@ -939,6 +961,13 @@ export function projectServiceEnvironment(input = {}) {
       WORKSPACE_INGRESS_SESSION_TTL_SECONDS: v("LEMMACOMPUTER_WORKSPACE_INGRESS_SESSION_TTL_SECONDS"),
       EGRESS_GRANT_SECRET: v("LEMMACOMPUTER_EGRESS_GRANT_SECRET"),
       AGENT_CHAT_SECRET: v("LEMMACOMPUTER_HERMES_API_SECRET"),
+      ARTIFACT_STORE_BACKEND: v("LEMMACOMPUTER_ARTIFACT_STORE_BACKEND"),
+      ARTIFACT_FILESYSTEM_ROOT: v("LEMMACOMPUTER_ARTIFACT_FILESYSTEM_ROOT"),
+      ARTIFACT_S3_BUCKET: v("LEMMACOMPUTER_ARTIFACT_S3_BUCKET"),
+      ARTIFACT_S3_REGION: v("LEMMACOMPUTER_ARTIFACT_S3_REGION"),
+      ARTIFACT_S3_ENDPOINT: v("LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT"),
+      ARTIFACT_S3_FORCE_PATH_STYLE: v("LEMMACOMPUTER_ARTIFACT_S3_FORCE_PATH_STYLE"),
+      ARTIFACT_S3_KMS_KEY_ID: v("LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID"),
       AI_USAGE_INTERNAL_TOKEN: v("LEMMACOMPUTER_AI_USAGE_TOKEN"),
       AI_USAGE_TASK_BINDING_SECRET: v("LEMMACOMPUTER_AI_USAGE_TASK_BINDING_SECRET"),
       CHANNEL_BROKER_URL: `http://channel-broker:${runtimeDefaults.channelBrokerPort}`,

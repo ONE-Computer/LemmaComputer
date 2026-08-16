@@ -41,6 +41,13 @@ assignment is copied into each workspace at creation so changing a default
 cannot redirect an existing workspace to another node. Customer sessions and
 organization roles have no read or mutation path to the node registry.
 
+Chat conversations, normalized messages, agent runs, vendor session bindings,
+artifact metadata, and artifact revisions are Control-owned organization data.
+Every lookup derives `tenant_id`, `subject_id`, and `workspace_id` from current
+server authority; an object-store key is an opaque locator, never authorization.
+Hosted artifact ingestion additionally matches the workspace's persisted owning
+node and generation before Control promotes staged bytes to a durable revision.
+
 ## Revocation and replay rules
 
 - Membership suspension, removal, organization closure, product-session revocation, and operator elevation expiry take effect at the next protected operation.

@@ -107,7 +107,7 @@ class FakeControl implements ChannelControlClient {
   textDeltas: string[] = [];
   state: "needs_input" | "completed" | "cancelled" | "failed" = "completed";
   turns: ChannelTurnRequest[] = [];
-  artifacts: Array<{ artifactId: string; mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"; filename: string; byteLength: number; sha256: string }> = [];
+  artifacts: Array<{ artifactId: string; revisionId: string; mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"; filename: string; byteLength: number; sha256: string }> = [];
   artifactData = new Map<string, Buffer>();
 
   async validateRoute(input: { agentCatalogId: string }) {
@@ -222,7 +222,7 @@ test("the channel control client owns a long response timeout instead of inherit
 
 test("the channel control client downloads only hash-bound generated artifacts", async () => {
   const deck = Buffer.from("control-artifact-download");
-  const artifact = { artifactId: "artifact-55555555555555555555555555555555", filename: "Plan.pptx",
+  const artifact = { artifactId: "artifact-55555555555555555555555555555555", revisionId: "revision-55555555555555555555555555555555", filename: "Plan.pptx",
     mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
     byteLength: deck.length, sha256: createHash("sha256").update(deck).digest("hex") };
   const server = createServer((request, response) => {
@@ -874,6 +874,7 @@ test("the broker sends generated PowerPoint artifacts and retries file delivery 
   const deck = Buffer.from("generated-powerpoint-bytes");
   const artifact = {
     artifactId: "artifact-11111111111111111111111111111111",
+    revisionId: "revision-11111111111111111111111111111111",
     mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" as const,
     filename: "Quarterly-Review.pptx",
     byteLength: deck.length,

@@ -350,6 +350,8 @@ services:
     env_file:
       - path: .runtime-env/control-api.env
         format: raw
+    volumes:
+      - artifact-data:/var/lib/lemmacomputer/artifacts
     networks:
       - web-edge
       - control-private
@@ -529,3 +531,4 @@ networks:
 volumes:
   control-data:
   gateway-data:
+  artifact-data:

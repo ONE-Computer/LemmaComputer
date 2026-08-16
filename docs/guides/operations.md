@@ -857,3 +857,24 @@ without the controls above.
 
 For a concrete AWS mapping of these requirements, see [AWS deployment
 architecture](deployment/aws-deployment.md).
+
+## Durable chat artifact storage
+
+Control PostgreSQL is canonical for conversations and artifact metadata. The
+reference worktree and customer-managed stack mounts the separate
+`artifact-data` volume at `/var/lib/lemmacomputer/artifacts`; it is not part of
+a workspace home and must be included in backup and restore operations.
+
+Hosted deployments must set `LEMMACOMPUTER_ARTIFACT_STORE_BACKEND=s3` plus the
+bucket, region, and KMS key settings documented in
+[Durable chat and artifacts](../product/durable-chat-and-artifacts.md). Grant
+bucket access only to Control. Coordinate PostgreSQL and object-store recovery,
+monitor failed/stale staging uploads, and prove restore integrity before
+release. `npm run qualify:artifact-store` is the local adapter check, not hosted
+cloud qualification.
+
+Control records the intended final object locator before promotion. Its staging
+reconciler marks an expired upload abandoned only after both the staging object
+and any promoted final object have been deleted. Alert on staging rows that
+remain in `finalizing` or `failed`: object-store deletion errors deliberately
+leave those rows retryable rather than hiding leaked bytes.

@@ -611,7 +611,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed, verifiedPolicy);
-      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
@@ -679,7 +679,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, accessRecord, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, accessRecord, verifiedPolicy);
-      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+      const chatRuntimes = this.agentChatAuthority?.list(identity, accessRecord, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
@@ -786,7 +786,7 @@ export class WorkspaceService {
     return {
       state: record.state,
       failureCode: record.failureCode,
-      accesses: this.agentChatAuthority.list(identity, record.id, policy),
+      accesses: this.agentChatAuthority.list(identity, record, policy),
     };
   }
 
