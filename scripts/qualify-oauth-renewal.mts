@@ -90,6 +90,7 @@ const policyFor = (agentId: string): RuntimePolicy => ({
   workspaceProfile: "claude-desktop-standard-v1",
   executionMode: "managed",
   egressMode: "restricted",
+  requestedServiceClass: "auto",
   agentId,
   agentProfile: "claude-desktop-managed-v1",
   networkProfile: "controlled-egress-v1",
@@ -213,7 +214,7 @@ const main = async () => {
       arguments: {},
     });
     const value = JSON.parse(result.resultSummary) as { credentialFingerprint?: unknown };
-    assert.equal(typeof value.credentialFingerprint, "string");
+    assert.ok(typeof value.credentialFingerprint === "string", "the fixture must return a string credential fingerprint");
     assert.match(value.credentialFingerprint, /^[a-f0-9]{16}$/);
     return value.credentialFingerprint;
   };
@@ -250,9 +251,12 @@ const main = async () => {
     assert.ok(fixtureReview.tools.every((tool) => tool.reviewRequired && tool.decision === "deny"));
     await connectionService.saveConnectorToolPolicy(
       alpha,
+      alpha.subjectId,
       "oauth-qualification",
       Object.fromEntries(fixtureReview.tools.map((tool) => [tool.name, "allow" as const])),
       fixtureReview.documentHash,
+      fixtureReview.accessPolicyVersion,
+      randomUUID(),
     );
 
     await connectExpired(beta, betaCode);
