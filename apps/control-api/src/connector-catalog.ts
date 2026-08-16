@@ -11,7 +11,11 @@ export type ConnectorActivation = {
   message: string;
 };
 
-type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId">;
+// `withheld` keeps an entry in source without publishing it. A withheld
+// connector is never seeded, listed, connectable, or granted gateway egress,
+// but its name, branding, icon, and scopes survive so restoring it is a
+// one-line change once the blocking condition is resolved.
+type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId"> & { withheld?: string };
 
 const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "createdBy">): CatalogConnector => ({
   ...connector,
@@ -19,6 +23,20 @@ const remote = (connector: Omit<CatalogConnector, "policySupport" | "source" | "
   source: "built-in",
   createdBy: "lemmacomputer",
 });
+
+// A provider that operates an allowlisted registration endpoint accepts only
+// the OAuth clients it has approved by hostname, so no LemmaComputer
+// installation can complete the flow. Withholding these is not a deployment
+// gap; restoring one requires the provider to admit the deployment's callback
+// origin or to issue static client credentials.
+const REGISTRATION_ALLOWLISTED =
+  "The provider restricts dynamic client registration to its own approved callback hosts";
+// A provider that publishes no registration endpoint requires the operator to
+// create an OAuth application in the provider's developer portal and supply
+// static credentials, the way GitHub and Google Workspace already are wired in
+// config/litellm/config.yaml. Withheld until those credentials exist.
+const STATIC_CREDENTIALS_REQUIRED =
+  "The provider publishes no registration endpoint and needs operator-supplied OAuth app credentials";
 
 const readyActivation: ConnectorActivation = { readiness: "ready", action: "connect", message: "This approved service is ready to connect." };
 // Catalog entries are approved remote MCP endpoints. Discovery and any
@@ -131,6 +149,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "asana",
+    withheld: STATIC_CREDENTIALS_REQUIRED,
     serverId: "lemmacomputer_asana",
     serverName: "lemmacomputer_asana",
     name: "Asana",
@@ -145,6 +164,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "figma",
+    withheld: REGISTRATION_ALLOWLISTED,
     serverId: "lemmacomputer_figma",
     serverName: "lemmacomputer_figma",
     name: "Figma",
@@ -181,7 +201,8 @@ const remoteCatalog: CatalogConnector[] = [
     category: "Productivity",
     services: ["Boards", "Items", "Workflows"],
     endpointUrl: "https://mcp.monday.com/mcp",
-    authorizationOrigins: ["https://mcp.monday.com"],
+    // Monday delegates authorization, token, and registration to auth.monday.com.
+    authorizationOrigins: ["https://mcp.monday.com", "https://auth.monday.com"],
     scopes: [],
     brand: "monday",
   }),
@@ -229,6 +250,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "box",
+    withheld: STATIC_CREDENTIALS_REQUIRED,
     serverId: "lemmacomputer_box",
     serverName: "lemmacomputer_box",
     name: "Box",
@@ -271,6 +293,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "vercel",
+    withheld: REGISTRATION_ALLOWLISTED,
     serverId: "lemmacomputer_vercel",
     serverName: "lemmacomputer_vercel",
     name: "Vercel",
@@ -293,7 +316,8 @@ const remoteCatalog: CatalogConnector[] = [
     category: "Developer tools",
     services: ["Projects", "Database", "Functions"],
     endpointUrl: "https://mcp.supabase.com/mcp",
-    authorizationOrigins: ["https://mcp.supabase.com", "https://supabase.com"],
+    // Supabase serves OAuth metadata and all three endpoints from api.supabase.com.
+    authorizationOrigins: ["https://mcp.supabase.com", "https://supabase.com", "https://api.supabase.com"],
     scopes: [],
     brand: "supabase",
   }),
@@ -341,6 +365,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "hubspot",
+    withheld: STATIC_CREDENTIALS_REQUIRED,
     serverId: "lemmacomputer_hubspot",
     serverName: "lemmacomputer_hubspot",
     name: "HubSpot",
@@ -355,6 +380,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "intercom",
+    withheld: REGISTRATION_ALLOWLISTED,
     serverId: "lemmacomputer_intercom",
     serverName: "lemmacomputer_intercom",
     name: "Intercom",
@@ -369,6 +395,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "slack",
+    withheld: STATIC_CREDENTIALS_REQUIRED,
     serverId: "lemmacomputer_slack",
     serverName: "lemmacomputer_slack",
     name: "Slack",
@@ -383,6 +410,7 @@ const remoteCatalog: CatalogConnector[] = [
   }),
   remote({
     id: "alpha-vantage",
+    withheld: REGISTRATION_ALLOWLISTED,
     serverId: "lemmacomputer_alpha_vantage",
     serverName: "lemmacomputer_alpha_vantage",
     name: "Alpha Vantage",
@@ -405,12 +433,14 @@ const remoteCatalog: CatalogConnector[] = [
     category: "Data and analytics",
     services: ["Prices", "Trades and quotes", "Options"],
     endpointUrl: "https://mcp.massive.com/",
-    authorizationOrigins: ["https://mcp.massive.com", "https://massive.com"],
+    // Massive delegates its whole OAuth flow to auth.massive.com.
+    authorizationOrigins: ["https://mcp.massive.com", "https://massive.com", "https://auth.massive.com"],
     scopes: [],
     brand: "massive",
   }),
   remote({
     id: "intrinio",
+    withheld: REGISTRATION_ALLOWLISTED,
     serverId: "lemmacomputer_intrinio",
     serverName: "lemmacomputer_intrinio",
     name: "Intrinio",
@@ -475,7 +505,8 @@ const remoteCatalog: CatalogConnector[] = [
     category: "Business",
     services: ["Payments", "Customers", "Subscriptions"],
     endpointUrl: "https://mcp.stripe.com",
-    authorizationOrigins: ["https://mcp.stripe.com", "https://dashboard.stripe.com"],
+    // Stripe serves OAuth metadata and all three endpoints from access.stripe.com.
+    authorizationOrigins: ["https://mcp.stripe.com", "https://dashboard.stripe.com", "https://access.stripe.com"],
     scopes: [],
     brand: "stripe",
   }),
@@ -528,5 +559,14 @@ export const connectorCatalog = (tenantId: string, microsoftAuthorizationOrigin:
     source: "built-in",
     createdBy: "lemmacomputer",
   },
-  ...remoteCatalog.map((connector) => ({ tenantId, ...connector })),
+  ...remoteCatalog
+    .filter((connector) => !connector.withheld)
+    .map(({ withheld: _withheld, ...connector }) => ({ tenantId, ...connector })),
 ];
+
+// Withheld entries and why, for operator documentation and for the test that
+// keeps every withholding reason deliberate rather than incidental.
+export const withheldConnectors = (): Array<{ id: string; name: string; reason: string }> =>
+  remoteCatalog
+    .filter((connector) => connector.withheld)
+    .map((connector) => ({ id: connector.id, name: connector.name, reason: connector.withheld! }));

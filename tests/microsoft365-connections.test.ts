@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import type { IdentityContext, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
+import type { IdentityContext, LemmaComputerError, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
-import { connectorCatalog } from "../apps/control-api/src/connector-catalog.js";
+import { connectorCatalog, withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
@@ -173,7 +173,7 @@ test("the default catalog covers the required categories and registers a remote 
 
   const catalog = await service.list(alpha);
   const defaultCards = catalog.connections.map((connector) => [connector.id, connector.serverName]);
-  assert.equal(defaultCards.length, 34);
+  assert.equal(defaultCards.length, 25);
   const neon = catalog.connections.find((connector) => connector.id === "neon");
   assert.equal(neon?.serverName, "lemmacomputer_neon");
   assert.equal(neon?.brand, "neon");
@@ -200,7 +200,7 @@ test("the default catalog covers the required categories and registers a remote 
     scopes: ["mcp:tools"],
   });
   const researchedEndpoints = Object.fromEntries(
-    ["gmail", "google-drive", "google-calendar", "canva", "monday", "clickup", "calendly", "fireflies", "alpha-vantage", "massive", "intrinio"]
+    ["gmail", "google-drive", "google-calendar", "canva", "monday", "clickup", "calendly", "fireflies", "massive", "supabase", "stripe"]
       .map((id) => {
         const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001")
           .find((candidate) => candidate.id === id);
@@ -234,7 +234,7 @@ test("the default catalog covers the required categories and registers a remote 
     },
     monday: {
       endpointUrl: "https://mcp.monday.com/mcp",
-      authorizationOrigins: ["https://mcp.monday.com"],
+      authorizationOrigins: ["https://mcp.monday.com", "https://auth.monday.com"],
       scopes: [],
     },
     clickup: {
@@ -252,19 +252,19 @@ test("the default catalog covers the required categories and registers a remote 
       authorizationOrigins: ["https://api.fireflies.ai"],
       scopes: [],
     },
-    "alpha-vantage": {
-      endpointUrl: "https://mcp.alphavantage.co/mcp",
-      authorizationOrigins: ["https://mcp.alphavantage.co"],
-      scopes: [],
-    },
     massive: {
       endpointUrl: "https://mcp.massive.com/",
-      authorizationOrigins: ["https://mcp.massive.com", "https://massive.com"],
+      authorizationOrigins: ["https://mcp.massive.com", "https://massive.com", "https://auth.massive.com"],
       scopes: [],
     },
-    intrinio: {
-      endpointUrl: "https://intrinio-mcp.intrinio.com/mcp",
-      authorizationOrigins: ["https://intrinio-mcp.intrinio.com", "https://intrinio.com"],
+    supabase: {
+      endpointUrl: "https://mcp.supabase.com/mcp",
+      authorizationOrigins: ["https://mcp.supabase.com", "https://supabase.com", "https://api.supabase.com"],
+      scopes: [],
+    },
+    stripe: {
+      endpointUrl: "https://mcp.stripe.com",
+      authorizationOrigins: ["https://mcp.stripe.com", "https://dashboard.stripe.com", "https://access.stripe.com"],
       scopes: [],
     },
   });
@@ -287,7 +287,8 @@ test("the default catalog covers the required categories and registers a remote 
   assert.ok(catalog.connections.every((connector) => !("authorizationOrigins" in connector)));
   assert.ok(catalog.connections.every((connector) => connector.activation.readiness === "ready"));
   assert.ok(catalog.connections.every((connector) => connector.activation.action === "connect"));
-  for (const category of ["Productivity", "Search", "Developer tools", "Business", "Communication", "Data and analytics"]) {
+  // Communication ships no connector while Slack is withheld for credentials.
+  for (const category of ["Productivity", "Search", "Developer tools", "Business", "Data and analytics"]) {
     assert.ok(catalog.connections.some((connector) => connector.category === category), `catalog includes ${category}`);
   }
 });
@@ -298,20 +299,21 @@ test("every approved remote MCP card lazily starts its provider flow only after 
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
-  for (const connectorId of ["exa", "github", "figma", "slack", "asana"]) await service.start(alpha, connectorId);
+  for (const connectorId of ["exa", "github", "notion", "neon", "monday"]) await service.start(alpha, connectorId);
   assert.deepEqual(gateway.started.map((request) => request.serverName), [
     "lemmacomputer_exa",
     "lemmacomputer_github",
-    "lemmacomputer_figma",
-    "lemmacomputer_slack",
-    "lemmacomputer_asana",
+    "lemmacomputer_notion",
+    "lemmacomputer_neon",
+    "lemmacomputer_monday",
   ]);
+  // GitHub is declared in config/litellm/config.yaml, so the gateway owns its
+  // row and connector administration must not try to reconcile it.
   assert.deepEqual(gateway.ensured.map((connectors) => connectors[0]?.serverName), [
     "lemmacomputer_exa",
-    "lemmacomputer_github",
-    "lemmacomputer_figma",
-    "lemmacomputer_slack",
-    "lemmacomputer_asana",
+    "lemmacomputer_notion",
+    "lemmacomputer_neon",
+    "lemmacomputer_monday",
   ]);
 });
 
@@ -1070,4 +1072,76 @@ test("connector projection cache preserves the current workspace agent selection
 
   assert.deepEqual(withHermes.agents?.map((agent) => agent.catalogId), ["claude-desktop", "hermes-claw"]);
   assert.deepEqual(withoutHermes.agents?.map((agent) => agent.catalogId), ["claude-desktop"]);
+});
+
+test("gateway-configured connectors connect without reconciling a LiteLLM row", async () => {
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+  });
+
+  // config/litellm/config.yaml owns these rows and carries their static
+  // provider credentials. LiteLLM derives their server_id from a hash of the
+  // server definition, so reconciling by the catalog's literal serverId used to
+  // miss, hit the server_name guard, and fail Connect with a registration
+  // conflict instead of starting the browser flow.
+  for (const connectorId of ["gmail", "google-drive", "google-calendar", "github"]) {
+    await service.start(alpha, connectorId);
+  }
+  assert.deepEqual(gateway.started.map((request) => request.serverName), [
+    "lemmacomputer_gmail",
+    "lemmacomputer_google_drive",
+    "lemmacomputer_google_calendar",
+    "lemmacomputer_github",
+  ]);
+  assert.deepEqual(gateway.ensured, [], "the gateway owns config-declared MCP servers");
+});
+
+test("a withheld catalog entry stays unreachable even after an earlier release seeded it", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  // An installation that ran a release shipping Slack keeps the row; seeding
+  // only upserts. The catalog is authoritative, so the row must stop being
+  // listed and must not be connectable.
+  await registry.saveConnector({
+    tenantId: alpha.tenantId,
+    id: "slack",
+    serverId: "lemmacomputer_slack",
+    serverName: "lemmacomputer_slack",
+    name: "Slack",
+    shortDescription: "Follow conversations and share updates",
+    description: "Work with the Slack conversations your account can access.",
+    category: "Communication",
+    services: ["Messages", "Channels", "Search"],
+    endpointUrl: "https://mcp.slack.com/mcp",
+    authorizationOrigins: ["https://mcp.slack.com", "https://slack.com"],
+    scopes: [],
+    brand: "slack",
+    policySupport: "automatic",
+    source: "built-in",
+    createdBy: "lemmacomputer",
+  });
+  const gateway = new FakeConnectionGateway();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+  });
+
+  const catalog = await service.list(alpha);
+  assert.ok(!catalog.connections.some((connector) => connector.id === "slack"));
+  for (const withheld of withheldConnectors()) {
+    assert.ok(
+      !catalog.connections.some((connector) => connector.id === withheld.id),
+      `withheld connector ${withheld.id} must not be listed`,
+    );
+  }
+  await assert.rejects(
+    service.start(alpha, "slack"),
+    (error: LemmaComputerError) => error.code === "MCP_CONNECTOR_NOT_FOUND",
+  );
+  assert.deepEqual(gateway.started, []);
+  // A withheld endpoint must also lose its gateway egress grant.
+  assert.equal(await service.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.slack.com", port: 443 }), false);
+  assert.equal(await service.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.notion.com", port: 443 }), true);
 });

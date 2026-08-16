@@ -129,6 +129,20 @@ test("PostgreSQL persists immutable connector policy changes and workspace deliv
     await pool.query("INSERT INTO tenants (id,external_tenant_id,display_name) VALUES ($1,$2,'Connector evidence')", [tenantId, `external-${tenantId}`]);
     await pool.query("INSERT INTO organizations (id,display_name) VALUES ($1,'Connector evidence')", [tenantId]);
     const applied = await exercisePolicyEvidence(store, tenantId);
+    // Built-in origins are authorized from the source catalog. A built-in row
+    // left behind by an earlier release must not readmit its origins here.
+    await store.saveConnector({
+      ...connector(tenantId, "withdrawn-built-in"),
+      endpointUrl: "https://mcp.withdrawn.example/mcp",
+      authorizationOrigins: ["https://auth.withdrawn.example"],
+      source: "built-in",
+      createdBy: "lemmacomputer",
+    });
+    const egressOrigins = await store.listEnabledEgressOrigins();
+    assert.ok(egressOrigins.includes("https://mcp.reports.example"), "custom connector origins stay authorized");
+    assert.ok(egressOrigins.includes("https://auth.reports.example"));
+    assert.ok(!egressOrigins.includes("https://mcp.withdrawn.example"), "a built-in row must not authorize egress");
+    assert.ok(!egressOrigins.includes("https://auth.withdrawn.example"));
     await assert.rejects(
       pool.query("UPDATE connector_policy_change_events SET actor_user_id='tampered' WHERE tenant_id=$1 AND id=$2::uuid", [tenantId, applied.event.id]),
       /immutable/,
