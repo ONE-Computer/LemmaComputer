@@ -3922,6 +3922,36 @@ textarea:focus-visible,
 .connector-appearance-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
 .connector-icon-actions { display: flex; align-items: center; gap: 12px; }
 
+.connector-credentials-card {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.connector-credentials-card h2,
+.connector-credentials-card p { margin: 0; }
+.connector-credentials-card h2 { color: #1d2c40; font-size: 15px; }
+.connector-credentials-card p { max-width: 660px; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.connector-credentials-card code { font-size: 12px; word-break: break-all; }
+.connector-credentials-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
+.connector-credentials-current strong { color: #1d2c40; }
+.connector-credentials-warning { color: #6f2521 !important; }
+.connector-credentials-fields { display: grid; gap: 12px; }
+.connector-credentials-fields label { display: grid; gap: 5px; font-size: 12px; }
+.connector-credentials-fields label span { color: #1d2c40; font-weight: 600; }
+.connector-credentials-fields input {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+}
+.connector-credentials-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+
 .connector-removal-card {
   display: flex;
   align-items: center;

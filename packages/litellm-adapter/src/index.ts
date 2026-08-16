@@ -133,6 +133,12 @@ export interface McpConnectorAdministrationGateway {
   }>;
   ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]): Promise<void>;
   registerOAuthMcpServer(input: McpConnectorRegistrationInput): Promise<void>;
+  replaceOAuthMcpServerCredentials(input: {
+    serverId: string;
+    clientId: string;
+    clientSecret: string;
+    scopes: string[];
+  }): Promise<void>;
   removeMcpServer(serverId: string): Promise<void>;
 }
 
@@ -731,6 +737,32 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         url: input.url,
       });
     }
+  }
+
+  /**
+   * Replaces the OAuth client a server row authenticates with. The gateway
+   * treats the client id, secret, and scopes as token-minting identity, so it
+   * purges every stored per-user token for the row: anyone connected through
+   * the previous application has to authorize again against the new one.
+   */
+  async replaceOAuthMcpServerCredentials(input: {
+    serverId: string;
+    clientId: string;
+    clientSecret: string;
+    scopes: string[];
+  }) {
+    const result = await this.adminCall("/v1/mcp/server", {
+      method: "PUT",
+      body: {
+        server_id: input.serverId,
+        credentials: {
+          client_id: input.clientId,
+          client_secret: input.clientSecret,
+          scopes: input.scopes,
+        },
+      },
+    }, true);
+    if (!result.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", result.status, result.payload);
   }
 
   async removeMcpServer(serverId: string) {

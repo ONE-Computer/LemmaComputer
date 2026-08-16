@@ -1,11 +1,11 @@
-import { connectorCatalog, staticCredentialGroups } from "../../apps/control-api/src/connector-catalog.js";
+import { connectorCatalog } from "../../apps/control-api/src/connector-catalog.js";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const connectedConnectorId = "notion";
 // Review the fully configured catalog so cards gated on provider OAuth
 // applications, such as Gmail and GitHub, stay covered by the icon and layout
 // checks.
-const catalog = connectorCatalog("acme", "http://127.0.0.1:4399", new Set(staticCredentialGroups)).map((connector) => ({
+const catalog = connectorCatalog("acme", "http://127.0.0.1:4399").map((connector) => ({
   ...connector,
   available: true,
   state: connector.id === connectedConnectorId ? "connected" : "disconnected",

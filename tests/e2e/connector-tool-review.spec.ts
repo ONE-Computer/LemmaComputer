@@ -468,3 +468,68 @@ test("the effective view makes a disabled connector and its denied tools explici
   await expect(page.locator(".tool-policy-list label").filter({ hasText: "Search reports" })).toContainText("Blocked");
   await expect(page.getByRole("checkbox", { name: "Connector enabled" })).not.toBeChecked();
 });
+
+test("an administrator sets up a provider application for their own organization", async ({ page }) => {
+  const gmail = {
+    ...exaConnector,
+    id: "gmail",
+    serverName: "lemmacomputer_gmail",
+    name: "Gmail",
+    shortDescription: "Search mail and prepare follow-ups",
+    description: "Use the Gmail messages, drafts, and mailbox context your Google Workspace account authorizes.",
+    services: ["Mail", "Drafts", "Search"],
+    brand: "gmail",
+    canAdministerConnector: true,
+    activation: {
+      readiness: "setup_required",
+      action: "view_setup",
+      message: "This service needs an OAuth application from your organization before anyone can connect it.",
+    },
+    credentials: { required: true, mode: "deployment", deploymentConfigured: false, clientId: null, updatedAt: null },
+  };
+  const configured = {
+    ...gmail,
+    serverName: "lemmacomputer_gmail_2f1c8b7a4d6e4f2b8c0a9d3e5f7b1c2d",
+    activation: { readiness: "ready", action: "connect", message: "This approved service is ready to connect." },
+    credentials: {
+      required: true,
+      mode: "tenant",
+      deploymentConfigured: false,
+      clientId: "acme-client.apps.googleusercontent.com",
+      updatedAt: "2026-08-16T09:00:00.000Z",
+    },
+  };
+  let saved: Record<string, unknown> | null = null;
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [saved ?? gmail] }) });
+  });
+  await page.route("**/api/v1/admin/connectors/gmail/credentials", async (route) => {
+    assert.equal(route.request().method(), "PUT");
+    assert.deepEqual(route.request().postDataJSON(), {
+      clientId: "acme-client.apps.googleusercontent.com",
+      clientSecret: "acme-client-secret",
+    });
+    saved = configured;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connector: configured }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  // Nothing is configured, so the card offers setup rather than a Connect that
+  // could only fail at the provider's authorize endpoint.
+  await page.getByRole("button", { name: "View setup" }).click();
+  await expect(page.getByRole("heading", { name: "Organization setup required" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Gmail" })).toHaveCount(0);
+
+  const application = page.getByRole("region", { name: "Provider application" });
+  await expect(application).toContainText("No application is configured yet");
+  await application.getByLabel("Client ID").fill("acme-client.apps.googleusercontent.com");
+  await application.getByLabel("Client secret").fill("acme-client-secret");
+  await application.getByRole("button", { name: "Save application" }).click();
+
+  await expect(application).toContainText("acme-client.apps.googleusercontent.com");
+  await expect(page.getByRole("heading", { name: "Connect Gmail" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Gmail" })).toBeEnabled();
+  // The secret is write-only: it is never rendered back into the page.
+  await expect(page.locator("body")).not.toContainText("acme-client-secret");
+});

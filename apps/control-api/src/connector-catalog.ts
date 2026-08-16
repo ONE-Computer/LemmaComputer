@@ -11,11 +11,15 @@ export type ConnectorActivation = {
   message: string;
 };
 
-// An entry is published only when it can actually complete a connection.
-// `withheld` withholds it unconditionally; `requiresCredentials` withholds it
-// until the deployment configures that credential group. Either way the entry
-// stays in source, so its name, branding, icon, and scopes survive and nothing
-// has to be rebuilt when the blocking condition clears.
+// `withheld` withholds an entry unconditionally, for a provider no deployment
+// can reach. The entry stays in source, so its name, branding, icon, and
+// scopes survive and nothing has to be rebuilt when the blocking condition
+// clears.
+//
+// `requiresCredentials` is different: it names the provider OAuth application
+// the entry needs, which either the deployment configures for everyone or a
+// tenant administrator supplies for its own organization. Such an entry is
+// published either way and reports `setup_required` until one of those exists.
 type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId"> & {
   withheld?: string;
   requiresCredentials?: StaticCredentialGroup;
@@ -74,9 +78,31 @@ const readyActivation: ConnectorActivation = { readiness: "ready", action: "conn
 // provider-specific OAuth requirements are intentionally attempted only after
 // the user selects Connect. A failed attempt remains disconnected, so no tools
 // are projected into the workspace until authorization succeeds.
-export const connectorActivation = (_connector: Pick<ConnectorDefinition, "id" | "source">): ConnectorActivation => ({
-  ...readyActivation,
-});
+//
+// The exception is a connector whose provider publishes no registration
+// endpoint. Nobody can complete that flow until an OAuth application exists,
+// so the card says so up front rather than sending someone to an authorize
+// redirect that fails on an empty client id. Either the deployment configured
+// the credential group, or this tenant supplied its own application.
+export const connectorActivation = (
+  connector: Pick<ConnectorDefinition, "id" | "source" | "credentialMode">,
+  configuredCredentials: ReadonlySet<StaticCredentialGroup> = new Set(),
+): ConnectorActivation => {
+  if (connector.credentialMode === "tenant") return { ...readyActivation };
+  const required = catalogCredentialRequirement(connector.id);
+  if (!required || configuredCredentials.has(required)) return { ...readyActivation };
+  return {
+    readiness: "setup_required",
+    action: "view_setup",
+    message: "This service needs an OAuth application from your organization before anyone can connect it.",
+  };
+};
+
+// The credential group a catalog entry depends on, if any. Custom connectors
+// carry their credentials from the moment they are added, so they are never
+// listed here.
+export const catalogCredentialRequirement = (connectorId: string): StaticCredentialGroup | undefined =>
+  remoteCatalog.find((connector) => connector.id === connectorId)?.requiresCredentials;
 
 // These are provider-hosted remote MCP endpoints, not a tool allowlist. The
 // Connections screen may display the full catalog without registering every
@@ -575,14 +601,9 @@ const remoteCatalog: CatalogConnector[] = [
   }),
 ];
 
-// `configuredCredentials` is the set of credential groups this deployment has
-// supplied. Control never sees the secrets themselves, only which groups exist,
-// so an unconfigured Google Workspace or GitHub connector is withheld rather
-// than listed and failing at the authorize redirect with an empty client id.
 export const connectorCatalog = (
   tenantId: string,
   microsoftAuthorizationOrigin: string,
-  configuredCredentials: ReadonlySet<StaticCredentialGroup> = new Set(),
 ): SaveConnectorRegistryRecord[] => [
   {
     tenantId,
@@ -603,25 +624,15 @@ export const connectorCatalog = (
     createdBy: "lemmacomputer",
   },
   ...remoteCatalog
-    .filter((connector) => isPublishable(connector, configuredCredentials))
+    .filter((connector) => isPublishable(connector))
     .map(({ withheld: _withheld, requiresCredentials: _requiresCredentials, ...connector }) => ({ tenantId, ...connector })),
 ];
 
-const isPublishable = (connector: CatalogConnector, configuredCredentials: ReadonlySet<StaticCredentialGroup>) => {
-  if (connector.withheld) return false;
-  return !connector.requiresCredentials || configuredCredentials.has(connector.requiresCredentials);
-};
+const isPublishable = (connector: CatalogConnector) => !connector.withheld;
 
 // Entries this deployment does not publish, and why. Drives operator
 // documentation and the tests that keep each exclusion deliberate.
-export const withheldConnectors = (
-  configuredCredentials: ReadonlySet<StaticCredentialGroup> = new Set(),
-): Array<{ id: string; name: string; reason: string }> =>
+export const withheldConnectors = (): Array<{ id: string; name: string; reason: string }> =>
   remoteCatalog
-    .filter((connector) => !isPublishable(connector, configuredCredentials))
-    .map((connector) => ({
-      id: connector.id,
-      name: connector.name,
-      reason: connector.withheld
-        ?? `The deployment has not configured the ${connector.requiresCredentials} OAuth application`,
-    }));
+    .filter((connector) => !isPublishable(connector))
+    .map((connector) => ({ id: connector.id, name: connector.name, reason: connector.withheld! }));

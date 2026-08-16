@@ -4223,6 +4223,29 @@ export function createControlServer(
       workspaceGrants: await refreshTenantWorkspaceConnectionGrants(actor.tenantId, saved.policyChange.id),
     };
   });
+  app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/credentials", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
+    const input = z.strictObject({
+      clientId: z.string().trim().min(1).max(512),
+      clientSecret: z.string().min(1).max(2048),
+    }).parse(request.body ?? {});
+    const connector = await requireConnections().saveConnectorCredentials(
+      actor.identity,
+      actor.userId,
+      request.params.connectorId,
+      input,
+    );
+    // Everyone in the tenant has to authorize against the new application, so
+    // no workspace may keep a grant projected from the previous one.
+    await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
+    return { connector };
+  });
+  app.delete<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/credentials", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
+    const connector = await requireConnections().removeConnectorCredentials(actor.identity, request.params.connectorId);
+    await refreshTenantWorkspaceConnectionGrants(actor.tenantId);
+    return { connector };
+  });
   app.put<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/icon", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
     const input = connectorIconSchema.parse(request.body ?? {});

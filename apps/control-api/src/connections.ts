@@ -20,6 +20,7 @@ import {
   type ConnectorRegistryStore,
 } from "@lemmacomputer/workspace-store";
 import {
+  catalogCredentialRequirement,
   connectorActivation,
   connectorCatalog,
   tenantOwnedServerName,
@@ -41,7 +42,7 @@ type PendingConnection = {
  */
 type ManagedConnectorRegistration = Pick<
   ConnectorDefinition,
-  "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes" | "source"
+  "id" | "serverId" | "serverName" | "name" | "description" | "endpointUrl" | "scopes" | "source" | "credentialMode"
 >;
 
 type PendingConnectorDiscovery = {
@@ -545,6 +546,132 @@ export class McpConnectionService {
     return { deleted: true };
   }
 
+  /**
+   * Points one tenant's catalog connector at an OAuth application that tenant
+   * registered with the provider, rather than at the deployment-wide client
+   * declared in config/litellm/config.yaml.
+   *
+   * Control never persists the secret. It goes straight to the gateway, which
+   * encrypts both halves at rest and refreshes tokens with them, and only the
+   * client id is recorded here so the screen can show what is configured. The
+   * endpoint and authorization origins stay the catalog's, so a tenant cannot
+   * introduce a gateway destination this way.
+   */
+  async saveConnectorCredentials(
+    identity: IdentityContext,
+    updatedBy: string,
+    connectorId: string,
+    input: { clientId: string; clientSecret: string },
+  ) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    this.requireTenantCredentialSupport(connector);
+    const clientId = input.clientId.trim();
+    if (!clientId || !input.clientSecret) {
+      throw new LemmaComputerError("MCP_CONNECTOR_CLIENT_INVALID", "Enter both the client ID and the client secret", 400);
+    }
+    const administrator = this.administratorGateway();
+    const rotating = connector.credentialMode === "tenant";
+    const serverId = rotating ? connector.serverId : randomUUID();
+    const serverName = rotating ? connector.serverName : tenantOwnedServerName(connector.id, serverId);
+    if (rotating) {
+      await administrator.replaceOAuthMcpServerCredentials({
+        serverId,
+        clientId,
+        clientSecret: input.clientSecret,
+        scopes: connector.scopes,
+      });
+    } else {
+      await administrator.registerOAuthMcpServer({
+        serverId,
+        serverName,
+        name: connector.name,
+        description: connector.description,
+        url: connector.endpointUrl,
+        scopes: connector.scopes,
+        clientId,
+        clientSecret: input.clientSecret,
+        egressProfile: "strict_remote",
+      });
+    }
+    let saved;
+    try {
+      saved = await this.registry.saveConnectorCredentials(identity.tenantId, connector.id, {
+        serverId,
+        serverName,
+        oauthClientId: clientId,
+        updatedBy,
+      });
+    } catch (error) {
+      if (!rotating) await administrator.removeMcpServer(serverId).catch(() => undefined);
+      throw error;
+    }
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    await this.retireConnectorConnections(identity, connector.id);
+    return this.publicConnector(saved);
+  }
+
+  /**
+   * Returns the connector to the deployment-wide client and removes the row
+   * that carried this tenant's application, so the tenant's credentials do not
+   * linger in a shared gateway.
+   */
+  async removeConnectorCredentials(identity: IdentityContext, connectorId: string) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    this.requireTenantCredentialSupport(connector);
+    if (connector.credentialMode !== "tenant") {
+      throw new LemmaComputerError("MCP_CONNECTOR_CREDENTIALS_NOT_SET", `${connector.name} is not using an application from your organization`, 409);
+    }
+    const catalogRecord = connectorCatalog(identity.tenantId, this.microsoftAuthorizationOrigin)
+      .find((entry) => entry.id === connector.id);
+    if (!catalogRecord) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
+    await this.administratorGateway().removeMcpServer(connector.serverId);
+    const saved = await this.registry.clearConnectorCredentials(identity.tenantId, connector.id, {
+      serverId: catalogRecord.serverId,
+      serverName: catalogRecord.serverName,
+    });
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    await this.retireConnectorConnections(identity, connector.id);
+    return this.publicConnector(saved);
+  }
+
+  // Only a catalog entry whose provider needs an OAuth application can take
+  // one. Microsoft 365 is a separate container configured by environment, not
+  // a gateway row with credentials, and a custom connector already carries the
+  // credentials it was added with.
+  private requireTenantCredentialSupport(connector: ConnectorDefinition) {
+    if (connector.source !== "built-in" || !catalogCredentialRequirement(connector.id)) {
+      throw new LemmaComputerError(
+        "MCP_CONNECTOR_CREDENTIALS_UNSUPPORTED",
+        `${connector.name} does not take a provider application from your organization`,
+        409,
+      );
+    }
+  }
+
+  /**
+   * Every authorization issued through the previous application is unusable
+   * once the client changes: the gateway purges its own stored tokens when the
+   * OAuth client changes, and a new tenant row never held them. Drop the
+   * durable markers too, so nobody sees a connector reported as connected that
+   * no longer is.
+   */
+  private async retireConnectorConnections(identity: IdentityContext, connectorId: string) {
+    await this.registry.deleteConnectorConnectionStates(identity.tenantId, connectorId);
+    this.invalidateTenantProjection(identity.tenantId);
+  }
+
+  private connectorCredentialSummary(connector: ConnectorDefinition) {
+    const requirement = connector.source === "built-in" ? catalogCredentialRequirement(connector.id) : undefined;
+    if (!requirement) return null;
+    return {
+      required: true as const,
+      mode: connector.credentialMode,
+      deploymentConfigured: this.configuredStaticMcpClients.has(requirement),
+      clientId: connector.oauthClientId,
+      updatedAt: connector.credentialsUpdatedAt?.toISOString() ?? null,
+    };
+  }
+
   async updateConnectorIcon(identity: IdentityContext, connectorId: string, iconDataUrl: string | null) {
     const connector = await this.connector(identity.tenantId, connectorId);
     if (connector.source !== "custom") {
@@ -708,7 +835,7 @@ export class McpConnectionService {
     if (!destination) return false;
 
     try {
-      const catalogOrigins = connectorCatalog("gateway-egress", this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients)
+      const catalogOrigins = connectorCatalog("gateway-egress", this.microsoftAuthorizationOrigin)
         .flatMap((connector) => [connector.endpointUrl, ...connector.authorizationOrigins])
         .map(canonicalHttpsOrigin)
         .filter((origin): origin is string => Boolean(origin));
@@ -916,7 +1043,7 @@ export class McpConnectionService {
   }
 
   private async connectors(tenantId: string) {
-    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients);
+    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     return (await this.registry.listConnectors(tenantId))
@@ -938,7 +1065,7 @@ export class McpConnectionService {
   }
 
   private async connector(tenantId: string, connectorId: string) {
-    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin, this.configuredStaticMcpClients);
+    const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     const connector = await this.registry.getConnector(tenantId, connectorId);
@@ -967,7 +1094,7 @@ export class McpConnectionService {
     await this.gateway.ensureOAuthMcpServers(managed);
   }
 
-  private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source" | "serverName">) {
+  private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source" | "serverName" | "credentialMode">) {
     // Servers declared in config/litellm/config.yaml are owned by the gateway.
     // LiteLLM derives their server_id by hashing name, url, transport,
     // auth_type, and alias, so it never equals the catalog's literal serverId;
@@ -978,6 +1105,15 @@ export class McpConnectionService {
     // custom connector, must reconcile its durable LiteLLM row when a user
     // connects so a failed startup discovery cannot leave the connector
     // permanently unusable.
+    // A row carrying a tenant's own OAuth application is created and
+    // maintained by the credentials path, which is the only caller that holds
+    // the client secret. Reconciliation must never recreate it, because it
+    // would write back a credential-less row and quietly turn a working
+    // connector into a dynamic-registration attempt against a provider that
+    // does not offer one. If the row is genuinely gone, the honest outcome is
+    // an unresolved connection until an administrator re-enters the
+    // application.
+    if (connector.credentialMode === "tenant") return false;
     return !GATEWAY_CONFIGURED_SERVER_NAMES.has(connector.serverName);
   }
 
@@ -994,7 +1130,11 @@ export class McpConnectionService {
       accessPolicyUpdatedBy: _accessPolicyUpdatedBy,
       ...safe
     } = connector;
-    return { ...safe, activation: connectorActivation(connector) };
+    return {
+      ...safe,
+      activation: connectorActivation(connector, this.configuredStaticMcpClients),
+      credentials: this.connectorCredentialSummary(connector),
+    };
   }
 
   private requireConnectionManagement(connector: ConnectorDefinition, isAdministrator: boolean) {
@@ -1006,8 +1146,8 @@ export class McpConnectionService {
     }
   }
 
-  private requireConnectionActivation(connector: Pick<ConnectorDefinition, "id" | "source">) {
-    const activation = connectorActivation(connector);
+  private requireConnectionActivation(connector: Pick<ConnectorDefinition, "id" | "source" | "credentialMode">) {
+    const activation = connectorActivation(connector, this.configuredStaticMcpClients);
     if (activation.action === "connect") return;
     throw new LemmaComputerError(
       activation.readiness === "setup_required" ? "MCP_CONNECTOR_SETUP_REQUIRED" : "MCP_CONNECTOR_REQUEST_REQUIRED",

@@ -16,7 +16,6 @@ const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience:
 // A deployment that has registered both provider OAuth applications. Without
 // them, the connectors depending on those credentials are not published.
 const allCredentials = [...staticCredentialGroups];
-const configured = new Set(staticCredentialGroups);
 const beta: IdentityContext = { tenantId: "acme", subjectId: "beta", audience: "lemmacomputer-control" };
 const connected: OAuthConnectionStatus = {
   state: "connected",
@@ -200,7 +199,7 @@ test("the default catalog covers the required categories and registers a remote 
     category: "Search",
     brand: "exa",
   });
-  const exaDefinition = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
+  const exaDefinition = connectorCatalog(alpha.tenantId, "http://localhost:3001")
     .find((connector) => connector.id === "exa");
   assert.deepEqual(exaDefinition && {
     endpointUrl: exaDefinition.endpointUrl,
@@ -214,7 +213,7 @@ test("the default catalog covers the required categories and registers a remote 
   const researchedEndpoints = Object.fromEntries(
     ["gmail", "google-drive", "google-calendar", "canva", "monday", "clickup", "calendly", "fireflies", "massive", "supabase", "stripe"]
       .map((id) => {
-        const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
+        const connector = connectorCatalog(alpha.tenantId, "http://localhost:3001")
           .find((candidate) => candidate.id === id);
         return [id, connector && {
           endpointUrl: connector.endpointUrl,
@@ -1156,7 +1155,7 @@ test("a withheld catalog entry stays unreachable even after an earlier release s
 
   const catalog = await service.list(alpha);
   assert.ok(!catalog.connections.some((connector) => connector.id === "slack"));
-  for (const withheld of withheldConnectors(configured)) {
+  for (const withheld of withheldConnectors()) {
     assert.ok(
       !catalog.connections.some((connector) => connector.id === withheld.id),
       `withheld connector ${withheld.id} must not be listed`,
@@ -1172,48 +1171,62 @@ test("a withheld catalog entry stays unreachable even after an earlier release s
   assert.equal(await service.isGatewayEgressDestinationAllowed({ protocol: "https", host: "mcp.notion.com", port: 443 }), true);
 });
 
-test("a connector needing operator credentials is unpublished until the deployment configures them", async () => {
+test("a connector needing a provider application is offered as setup, not as a broken Connect", async () => {
   const gateway = new FakeConnectionGateway();
-  // A deployment that has registered no provider OAuth application. Listing
-  // Gmail here would offer a card whose Connect can only fail: LiteLLM resolves
-  // an empty client_id and its authorize endpoint refuses the redirect.
+  // A deployment that has registered no provider OAuth application. Connect
+  // here could only fail: LiteLLM would resolve an empty client_id and the
+  // provider's authorize endpoint would refuse the redirect. The card is still
+  // listed, because an administrator can now supply an application for this
+  // organization without a deployment change.
   const unconfigured = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
   });
 
   const catalog = await unconfigured.list(alpha);
-  const listed = new Set(catalog.connections.map((connector) => connector.id));
+  const cards = new Map(catalog.connections.map((connector) => [connector.id, connector]));
   for (const connectorId of ["gmail", "google-drive", "google-calendar", "github"]) {
-    assert.ok(!listed.has(connectorId), `${connectorId} must not be listed without its credentials`);
+    const card = cards.get(connectorId);
+    assert.ok(card, `${connectorId} is offered so it can be set up`);
+    assert.equal(card.activation.readiness, "setup_required");
+    assert.equal(card.activation.action, "view_setup");
+    assert.deepEqual(card.credentials, {
+      required: true,
+      mode: "deployment",
+      deploymentConfigured: false,
+      clientId: null,
+      updatedAt: null,
+    });
     await assert.rejects(
-      unconfigured.start(alpha, connectorId),
-      (error: LemmaComputerError) => error.code === "MCP_CONNECTOR_NOT_FOUND",
+      unconfigured.start(alpha, connectorId, true),
+      (error: LemmaComputerError) => error.code === "MCP_CONNECTOR_SETUP_REQUIRED",
     );
   }
-  assert.deepEqual(gateway.started, []);
+  assert.deepEqual(gateway.started, [], "no authorize redirect is attempted without an application");
   // Microsoft 365 carries its own deployment-owned authorization origin and is
   // never gated on a provider OAuth application.
-  assert.ok(listed.has("microsoft-365"));
-  assert.ok(listed.has("notion"));
-  // An unconfigured connector also loses its gateway egress grant.
-  assert.equal(
-    await unconfigured.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
-    false,
-  );
+  assert.equal(cards.get("microsoft-365")?.activation.readiness, "ready");
+  assert.equal(cards.get("microsoft-365")?.credentials, null);
+  assert.equal(cards.get("notion")?.activation.readiness, "ready");
+  assert.equal(cards.get("notion")?.credentials, null, "a provider with dynamic registration needs no application");
 
   const configuredService = new McpConnectionService(new FakeConnectionGateway(), {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
     configuredStaticMcpClients: ["google-workspace"],
   });
-  const withGoogle = new Set((await configuredService.list(alpha)).connections.map((connector) => connector.id));
-  assert.ok(withGoogle.has("gmail"), "configuring Google Workspace publishes its connectors");
-  assert.ok(withGoogle.has("google-drive"));
-  assert.ok(withGoogle.has("google-calendar"));
-  assert.ok(!withGoogle.has("github"), "GitHub stays unpublished on its own credential group");
+  const withGoogle = new Map((await configuredService.list(alpha)).connections.map((connector) => [connector.id, connector]));
+  assert.equal(withGoogle.get("gmail")?.activation.readiness, "ready", "the deployment application satisfies the requirement");
+  assert.equal(withGoogle.get("gmail")?.credentials?.deploymentConfigured, true);
+  assert.equal(withGoogle.get("google-drive")?.activation.readiness, "ready");
+  assert.equal(withGoogle.get("google-calendar")?.activation.readiness, "ready");
+  assert.equal(withGoogle.get("github")?.activation.readiness, "setup_required", "GitHub stays on its own credential group");
+  // Catalog endpoints are approved destinations regardless of which
+  // installation or tenant holds an application for them. Egress is decided
+  // per origin and is deliberately not tenant-scoped, so it cannot depend on
+  // whether a particular tenant has finished setup.
   assert.equal(
-    await configuredService.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
+    await unconfigured.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
     true,
   );
 });
@@ -1231,7 +1244,7 @@ test("the Google Workspace servers request offline access so connections can ren
 
   // A pinned authorization URL bypasses discovery, so its origin must still sit
   // inside the connector's egress allowlist or the redirect is refused.
-  const google = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
+  const google = connectorCatalog(alpha.tenantId, "http://localhost:3001")
     .filter((connector) => ["gmail", "google-drive", "google-calendar"].includes(connector.id));
   assert.equal(google.length, 3);
   for (const connector of google) {

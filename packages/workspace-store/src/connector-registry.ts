@@ -50,14 +50,37 @@ export type ConnectorRegistryRecord = {
   iconDataUrl: string | null;
   policySupport: "governed" | "automatic";
   source: "built-in" | "custom";
+  /**
+   * Which provider OAuth application this tenant's connector uses.
+   * `deployment` is the shared gateway row and the deployment-wide client;
+   * `tenant` is a LiteLLM row created for this tenant and carrying its own.
+   */
+  credentialMode: ConnectorCredentialMode;
+  /**
+   * The tenant-supplied OAuth client id, kept only so the screen can show
+   * which application is configured. The matching secret is never stored here;
+   * it goes straight to the gateway, which encrypts it at rest.
+   */
+  oauthClientId: string | null;
+  credentialsUpdatedBy: string | null;
+  credentialsUpdatedAt: Date | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
 };
 
+export type ConnectorCredentialMode = "deployment" | "tenant";
+
+export type SaveConnectorCredentialsInput = {
+  serverId: string;
+  serverName: string;
+  oauthClientId: string;
+  updatedBy: string;
+};
+
 export type SaveConnectorRegistryRecord = Omit<
   ConnectorRegistryRecord,
-  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt"
+  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt"
 > & {
   toolPolicies?: Record<string, McpToolPolicyDecision>;
   toolDefinitionHashes?: Record<string, string>;
@@ -152,6 +175,12 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   getConnectionState(tenantId: string, subjectId: string, connectorId: string): Promise<ConnectorConnectionStateRecord | null>;
   saveConnectionState(record: SaveConnectorConnectionStateRecord): Promise<ConnectorConnectionStateRecord>;
   deleteConnectionState(tenantId: string, subjectId: string, connectorId: string): Promise<boolean>;
+  /**
+   * Drops every person's stored connection for one connector in one tenant.
+   * Used when the OAuth application behind the connector changes, which makes
+   * previously issued authorizations unusable.
+   */
+  deleteConnectorConnectionStates(tenantId: string, connectorId: string): Promise<number>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
   updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, review: ConnectorToolPolicyReview): Promise<ConnectorRegistryRecord | null>;
@@ -176,6 +205,8 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   }): Promise<ConnectorPolicyChangeEvent | null>;
   appendPolicyWorkspaceDeliveryReceipts(receipts: Omit<ConnectorPolicyWorkspaceDeliveryReceipt, "id" | "occurredAt">[]): Promise<ConnectorPolicyWorkspaceDeliveryReceipt[]>;
   latestPolicyDelivery(tenantId: string, connectorId: string): Promise<ConnectorPolicyDeliverySnapshot | null>;
+  saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput): Promise<ConnectorRegistryRecord | null>;
+  clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }): Promise<ConnectorRegistryRecord | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
 }
@@ -273,6 +304,7 @@ const cloneConnectorRecord = (record: ConnectorRegistryRecord): ConnectorRegistr
   toolPolicies: { ...record.toolPolicies },
   toolDefinitionHashes: { ...record.toolDefinitionHashes },
   accessPolicyUpdatedAt: new Date(record.accessPolicyUpdatedAt),
+  credentialsUpdatedAt: record.credentialsUpdatedAt ? new Date(record.credentialsUpdatedAt) : null,
   createdAt: new Date(record.createdAt),
   updatedAt: new Date(record.updatedAt),
 });
@@ -308,6 +340,10 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   iconDataUrl: typeof row.icon_data_url === "string" ? row.icon_data_url : null,
   policySupport: row.policy_support as ConnectorRegistryRecord["policySupport"],
   source: row.source as ConnectorRegistryRecord["source"],
+  credentialMode: row.credential_mode === "tenant" ? "tenant" : "deployment",
+  oauthClientId: typeof row.oauth_client_id === "string" ? row.oauth_client_id : null,
+  credentialsUpdatedBy: typeof row.credentials_updated_by === "string" ? row.credentials_updated_by : null,
+  credentialsUpdatedAt: row.credentials_updated_at ? new Date(String(row.credentials_updated_at)) : null,
   createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
@@ -415,8 +451,11 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
           endpoint_url,authorization_origins,scopes,tool_policies,tool_definition_hashes,brand,icon_data_url,policy_support,source,created_by
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15,$16,$17,$18,$19)
         ON CONFLICT (tenant_id,id) DO UPDATE SET
-          server_id=EXCLUDED.server_id,
-          server_name=EXCLUDED.server_name,
+          -- A tenant that supplied its own OAuth application owns its gateway
+          -- row. Reseeding the catalog refreshes the presentation around it but
+          -- must never point the tenant back at the shared server.
+          server_id=CASE WHEN connector_registry.credential_mode='tenant' THEN connector_registry.server_id ELSE EXCLUDED.server_id END,
+          server_name=CASE WHEN connector_registry.credential_mode='tenant' THEN connector_registry.server_name ELSE EXCLUDED.server_name END,
           name=EXCLUDED.name,
           short_description=EXCLUDED.short_description,
           description=EXCLUDED.description,
@@ -488,6 +527,14 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       [tenantId, subjectId, connectorId],
     );
     return Boolean(result.rowCount);
+  }
+
+  async deleteConnectorConnectionStates(tenantId: string, connectorId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM connector_connection_state WHERE tenant_id=$1 AND connector_id=$2",
+      [tenantId, connectorId],
+    );
+    return result.rowCount ?? 0;
   }
 
   async saveConnector(record: SaveConnectorRegistryRecord) {
@@ -855,6 +902,40 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       .filter((origin): origin is string => Boolean(origin)))].sort();
   }
 
+  async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         server_id=$3,
+         server_name=$4,
+         credential_mode='tenant',
+         oauth_client_id=$5,
+         credentials_updated_by=$6,
+         credentials_updated_at=now(),
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.serverId, input.serverName, input.oauthClientId, input.updatedBy],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         server_id=$3,
+         server_name=$4,
+         credential_mode='deployment',
+         oauth_client_id=NULL,
+         credentials_updated_by=NULL,
+         credentials_updated_at=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.serverId, input.serverName],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
   async updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null) {
     const result = await this.pool.query(
       "UPDATE connector_registry SET icon_data_url=$3,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND source='custom' RETURNING *",
@@ -891,6 +972,11 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
         this.records.set(key, cloneConnectorRecord({
           ...current,
           ...connector,
+          // A tenant that supplied its own OAuth application owns its gateway
+          // row; reseeding must not point it back at the shared server.
+          ...(current.credentialMode === "tenant"
+            ? { serverId: current.serverId, serverName: current.serverName }
+            : {}),
           services: [...connector.services],
           authorizationOrigins: [...connector.authorizationOrigins],
           scopes: [...connector.scopes],
@@ -936,6 +1022,16 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     return this.connectionStates.delete(this.connectionStateKey(tenantId, subjectId, connectorId));
   }
 
+  async deleteConnectorConnectionStates(tenantId: string, connectorId: string) {
+    let removed = 0;
+    for (const [key, state] of this.connectionStates) {
+      if (state.tenantId !== tenantId || state.connectorId !== connectorId) continue;
+      this.connectionStates.delete(key);
+      removed += 1;
+    }
+    return removed;
+  }
+
   async saveConnector(record: SaveConnectorRegistryRecord) {
     const key = this.key(record.tenantId, record.id);
     if (this.records.has(key)) throw new Error("Connector already exists");
@@ -962,6 +1058,10 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       accessPolicyVersion: 1,
       accessPolicyUpdatedBy: null,
       accessPolicyUpdatedAt: now,
+      credentialMode: "deployment",
+      oauthClientId: null,
+      credentialsUpdatedBy: null,
+      credentialsUpdatedAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1203,6 +1303,47 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       for (const origin of permit.origins) origins.add(origin);
     }
     return [...origins].sort();
+  }
+
+  async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    if ([...this.records.values()].some((existing) => (
+      existing.serverName === input.serverName && !(existing.tenantId === tenantId && existing.id === connectorId)
+    ))) {
+      throw new Error("Connector gateway server name already exists");
+    }
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      serverId: input.serverId,
+      serverName: input.serverName,
+      credentialMode: "tenant",
+      oauthClientId: input.oauthClientId,
+      credentialsUpdatedBy: input.updatedBy,
+      credentialsUpdatedAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      serverId: input.serverId,
+      serverName: input.serverName,
+      credentialMode: "deployment",
+      oauthClientId: null,
+      credentialsUpdatedBy: null,
+      credentialsUpdatedAt: null,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
   }
 
   async updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null) {

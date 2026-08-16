@@ -135,22 +135,71 @@ succeed:
    production hostname is not.
 
 An entry is published only when it can actually complete a connection.
-`apps/control-api/src/connector-catalog.ts` expresses that two ways, and either
-one keeps the entry's name, branding, icon, and scopes while making it
-unseeded, unlisted, unconnectable, and ineligible for gateway egress.
+`apps/control-api/src/connector-catalog.ts` expresses that two ways.
 
 `withheld` is unconditional, for an entry no deployment can rescue: the
 provider allowlists registration callbacks, or the connector has no gateway row
-and environment pair yet.
+and no way to supply one. The entry stays in source, so its name, branding,
+icon, and scopes survive and nothing has to be rebuilt when the blocking
+condition clears. It is unseeded, unlisted, unconnectable, and ineligible for
+gateway egress.
 
-`requiresCredentials` names a credential group and publishes the entry only
-where that group is configured. `scripts/deployment-config.mjs` checks whether
-both halves of the coupled environment pair carry a value and passes the group
-names, never the secrets, to Control as `CONFIGURED_STATIC_MCP_CLIENTS`. A
-deployment that has not registered a Google Workspace OAuth application does
-not see Gmail, Drive, or Calendar at all, rather than seeing cards whose Connect
-fails at the authorize redirect with an empty client id. Registering the
-application and restarting Control publishes them with no code change.
+`requiresCredentials` names the provider OAuth application the entry needs. Such
+an entry is always published, and reports `setup_required` until an application
+exists, so nobody is sent to an authorize redirect that fails on an empty client
+id. Two things can satisfy it:
+
+- **The deployment configures the credential group.** `scripts/deployment-config.mjs`
+  checks whether both halves of the coupled environment pair carry a value and
+  passes the group names, never the secrets, to Control as
+  `CONFIGURED_STATIC_MCP_CLIENTS`. This is the shared client declared in
+  `config/litellm/config.yaml`, used by every tenant in the installation.
+- **A tenant administrator supplies its own application.** See below.
+
+### Tenant-supplied provider applications
+
+A catalog connector marked `requiresCredentials` can take an OAuth application
+registered by one organization, for that organization alone. This is what makes
+a connector usable in a multi-tenant installation without the operator holding a
+client on every customer's behalf, and it is what an enterprise customer usually
+wants: their mail never passes through a vendor's OAuth client, and they can
+revoke access unilaterally.
+
+Saving credentials creates a LiteLLM row owned by that tenant, named by
+`tenantOwnedServerName`, carrying that tenant's client. The connector's
+`credential_mode` moves to `tenant`, and catalog reseeding is careful not to
+point the row back at the shared server.
+
+Custody rules that must not regress:
+
+- **Control never persists the client secret.** It goes straight to the
+  gateway, which encrypts both halves under `LITELLM_SALT_KEY` and refreshes
+  tokens with them. Only the client id is stored, and only so the screen can
+  show which application is configured. Rotating `LITELLM_SALT_KEY` re-encrypts
+  every tenant's credentials at once.
+- **The endpoint and authorization origins stay the catalog's.** A tenant
+  supplies a credential, never a destination, so this path cannot introduce a
+  new gateway egress target. Catalog endpoints are approved per origin and
+  deliberately not tenant-scoped, so they are allowed whether or not any
+  particular tenant has finished setup.
+- **Changing the client invalidates existing authorizations.** The gateway
+  purges its stored per-user tokens whenever the OAuth client changes, so
+  Control drops that connector's durable connection markers for the tenant at
+  the same time; otherwise a connector would be reported as connected when it
+  is not.
+- **Removing credentials deletes the tenant's gateway row**, so a tenant's
+  encrypted credentials do not linger in a shared gateway. Deleting a tenant
+  must do the same, or orphaned rows accumulate.
+- **Reconciliation never recreates a tenant-credentialed row.** Only the
+  credentials path holds the client secret, so `ensureManagedConnectorServers`
+  skips these rows; recreating one would write back a credential-less record
+  and quietly turn a working connector into a dynamic-registration attempt
+  against a provider that offers none. A genuinely missing row surfaces as an
+  unresolved connection until an administrator re-enters the application.
+
+Microsoft 365 is deliberately outside this path. It is a separate container
+configured by environment variables, not a gateway row carrying credentials, so
+none of the above applies to it.
 
 ### Gateway server names
 

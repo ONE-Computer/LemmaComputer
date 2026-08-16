@@ -3838,6 +3838,63 @@ function ConnectorIconEditor({ connector, busy, onSave }) {
   );
 }
 
+function ConnectorCredentialsCard({ connector, onSaved }) {
+  const credentials = connector.credentials;
+  const configured = credentials?.mode === "tenant";
+  const [draft, setDraft] = useState({ clientId: "", clientSecret: "" });
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState(!configured);
+  const updatedAt = credentials?.updatedAt
+    ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(credentials.updatedAt))
+    : null;
+  const run = async (work, state) => {
+    setBusy(state);
+    setError("");
+    try {
+      const result = await work();
+      setDraft({ clientId: "", clientSecret: "" });
+      setEditing(false);
+      await onSaved(result.connector);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const save = () => run(() => adminApi.saveConnectorCredentials(connector.id, {
+    clientId: draft.clientId.trim(),
+    clientSecret: draft.clientSecret,
+  }), "saving");
+  const remove = () => run(() => adminApi.removeConnectorCredentials(connector.id), "removing");
+  return (
+    <section className="connector-credentials-card" aria-labelledby="connector-credentials-heading">
+      <div>
+        <h2 id="connector-credentials-heading">Provider application</h2>
+        <p>{connector.name} needs an OAuth application registered with the provider. Create one in the provider’s console for your organization, then enter its client ID and secret here. Only your organization uses it, and the secret is stored encrypted by the AI gateway rather than shown again.</p>
+        {configured
+          ? <p className="connector-credentials-current"><strong>Client ID</strong> <code>{credentials.clientId}</code>{updatedAt ? ` · updated ${updatedAt}` : ""}</p>
+          : credentials?.deploymentConfigured
+            ? <p className="connector-credentials-current">This deployment supplies a shared application. Entering your own replaces it for your organization only.</p>
+            : <p className="connector-credentials-current">No application is configured yet, so nobody in your organization can connect {connector.name}.</p>}
+        {error && <span role="alert">{error}</span>}
+      </div>
+      {editing ? <div className="connector-credentials-fields">
+        <label><span>Client ID</span><input name="connector-credentials-client-id" autoComplete="off" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} disabled={Boolean(busy)} /></label>
+        <label><span>Client secret</span><input name="connector-credentials-client-secret" type="password" autoComplete="new-password" value={draft.clientSecret} onChange={(event) => setDraft({ ...draft, clientSecret: event.target.value })} disabled={Boolean(busy)} /></label>
+        <div className="connector-credentials-actions">
+          {configured && <button className="secondary-button" type="button" onClick={() => { setEditing(false); setError(""); }} disabled={Boolean(busy)}>Cancel</button>}
+          <button className="primary-button" type="button" onClick={save} disabled={Boolean(busy) || !draft.clientId.trim() || !draft.clientSecret}>{busy === "saving" ? "Saving application" : configured ? "Replace application" : "Save application"}</button>
+        </div>
+        {configured && <p className="connector-credentials-warning" role="status">Replacing the application signs everyone out of {connector.name}. They reconnect through the new application.</p>}
+      </div> : <div className="connector-credentials-actions">
+        <button className="secondary-button" type="button" onClick={() => setEditing(true)} disabled={Boolean(busy)}>Replace application</button>
+        <button className="connection-quiet-button" type="button" onClick={remove} disabled={Boolean(busy)}>{busy === "removing" ? "Removing" : "Remove"}</button>
+      </div>}
+    </section>
+  );
+}
+
 function ConnectorRemovalCard({ connector, busy, onRemove }) {
   return (
     <section className="connector-removal-card" aria-labelledby="connector-removal-heading">
@@ -3850,7 +3907,7 @@ function ConnectorRemovalCard({ connector, busy, onRemove }) {
   );
 }
 
-function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, onReviewWorkspacePolicies }) {
+function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onDisconnect, onIconChange, onCredentialsSaved, onAccessPolicySave, onRemove, onBack, canManageConnector, activeTab, onTabChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, onReviewWorkspacePolicies }) {
   const connected = connector?.state === "connected";
   const expired = connector?.state === "expired";
   const activation = activationFor(connector);
@@ -3939,6 +3996,7 @@ function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onD
             ? "Your organization decides which tools each workspace can use."
             : "Once connected, this service and its available tools are added to your workspace agents automatically."}</p>
         </div>
+        {canManageConnector && connector.credentials?.required && <ConnectorCredentialsCard connector={connector} onSaved={onCredentialsSaved} />}
         {canManageConnector && connector.source === "custom" && <ConnectorIconEditor connector={connector} busy={busy} onSave={onIconChange} />}
         {canManageConnector && connector.source === "custom" && <ConnectorRemovalCard connector={connector} busy={busy} onRemove={onRemove} />}
       </div>}
@@ -4204,7 +4262,7 @@ function AddConnectorDialog({ onCreated, onClose }) {
   );
 }
 
-function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, onRetryDelivery, onReviewWorkspacePolicies }) {
+function ConnectionsScreen({ connections, loading, busyConnectorId, error, onConnect, onDisconnect, onIconChange, onCredentialsSaved, onAccessPolicySave, onRemoveConnector, onAddConnector, displayName, canAddConnector, canManagePolicy, view, onViewChange, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, onRetryDelivery, onReviewWorkspacePolicies }) {
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
@@ -4212,7 +4270,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
-      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} error={error} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === selected.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === selected.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
+      return <HostedConnectorDetail connector={selected} loading={loading} busy={busyConnectorId === selected.id} error={error} onConnect={onConnect} onDisconnect={onDisconnect} onIconChange={onIconChange} onCredentialsSaved={onCredentialsSaved} onAccessPolicySave={onAccessPolicySave} onRemove={onRemoveConnector} onBack={() => onViewChange("list")} canManageConnector={Boolean(selected.canAdministerConnector)} activeTab={view.endsWith("-tools") ? "tools" : "overview"} onTabChange={(tab) => onViewChange(tab === "tools" ? `connector-${selected.id}-tools` : `connector-${selected.id}`)} mcpPolicy={mcpPolicy?.connectorId === selected.id ? mcpPolicy : null} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === selected.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === selected.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
     }
   }
   return (
@@ -6295,6 +6353,13 @@ export function App() {
     }
   };
 
+  const connectorCredentialsSaved = async (connector) => {
+    setMcpConnections((current) => current.map((item) => item.id === connector.id ? { ...item, ...connector } : item));
+    setToast(connector.credentials?.mode === "tenant"
+      ? `${connector.name} now uses your organization's provider application.`
+      : `${connector.name} no longer uses an application from your organization.`);
+  };
+
   const saveConnectorIcon = async (connectorId, iconDataUrl) => {
     setConnectionBusy(connectorId);
     setConnectionError("");
@@ -7467,6 +7532,7 @@ export function App() {
             onConnect={connectMcpConnector}
             onDisconnect={disconnectMcpConnector}
             onIconChange={saveConnectorIcon}
+            onCredentialsSaved={connectorCredentialsSaved}
             onAccessPolicySave={saveConnectorAccessPolicy}
             onRemoveConnector={removeMcpConnector}
             onAddConnector={() => setConnectorDialogOpen(true)}
