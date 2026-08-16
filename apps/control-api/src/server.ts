@@ -492,6 +492,12 @@ const envSchema = z.object({
   CONFIGURED_STATIC_MCP_CLIENTS: z.string().default(""),
   PUBLIC_WEB_URL: z.string().url().default("http://localhost:4174"),
   M365_AUTHORIZATION_ORIGIN: z.string().url().default("http://localhost:4311"),
+  // The Entra application id is not a secret; the matching client secret stays
+  // with the ms365-mcp service. Both of these are absent in a deployment that
+  // has not configured Microsoft 365, which leaves consent links unavailable
+  // rather than broken.
+  M365_CLIENT_ID: z.string().default(""),
+  CONNECTOR_CONSENT_SECRET: z.string().default(""),
   AGENT_BRIDGE_URL: z.string().url().default("http://lemmacomputer-control:4100"),
   AGENT_BRIDGE_SECRET: z.string().min(32),
   AGENT_BRIDGE_GRANT_TTL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
@@ -581,6 +587,51 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
   return null;
 };
 
+// The administrator-consent landing page. It is deliberately self-contained and
+// says nothing an unauthenticated reader should not see: no organization name,
+// no connector inventory, no identifiers. Every interpolated value is either a
+// fixed literal chosen here or escaped, because the reader arrives straight
+// from the provider with a query string they may control.
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character] ?? character
+));
+
+const adminConsentPage = (result: { outcome: "granted" | "refused" | "invalid"; connectorName: string | null }) => {
+  const service = result.connectorName ? escapeHtml(result.connectorName) : "This service";
+  const { title, detail } = result.outcome === "granted"
+    ? {
+      title: "Approval recorded",
+      detail: `${service} is approved for your organization. The person who sent you this link can now finish connecting it. You can close this page.`,
+    }
+    : result.outcome === "refused"
+      ? {
+        title: "Approval was not completed",
+        detail: `${service} was not approved. Nothing has changed for your organization. Ask the person who sent you this link to send it again if you want to approve it.`,
+      }
+      : {
+        title: "This approval link is not valid",
+        detail: "The link has expired or was changed in transit. Ask the person who sent it to you to request a new one.",
+      };
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${escapeHtml(title)}</title>
+<style>
+:root { color-scheme: light dark; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; background: Canvas; color: CanvasText; }
+main { max-width: 32rem; }
+h1 { margin: 0 0 12px; font-size: 22px; }
+p { margin: 0; }
+</style>
+</head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${detail}</p></main></body>
+</html>`;
+};
+
 export function createControlServer(
   store: WorkspaceStore & GovernanceStore & ActivityStore & Partial<ChannelStore>,
   controller: ControllerClient,
@@ -595,6 +646,7 @@ export function createControlServer(
     installationKind?: "customer-managed" | "hosted" | "worktree";
     hostedCustomConnectorEgressOrigins?: string[];
     configuredStaticMcpClients?: StaticCredentialGroup[];
+    microsoftAdminConsent?: { clientId: string; consentSecret: string };
   } = {},
   security: {
     authentication?: AuthenticationBoundary;
@@ -918,6 +970,7 @@ export function createControlServer(
     installationKind: connectionOptions.installationKind,
     hostedCustomConnectorEgressOrigins: connectionOptions.hostedCustomConnectorEgressOrigins,
     configuredStaticMcpClients: connectionOptions.configuredStaticMcpClients,
+    microsoftAdminConsent: connectionOptions.microsoftAdminConsent,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -1113,6 +1166,11 @@ export function createControlServer(
     }
     if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
       || requestPath.startsWith("/v1/auth/external-id/")) return;
+    // A customer's directory administrator opens the consent link from their
+    // mail client and has no LemmaComputer session, and usually no account.
+    // The signed state in the query is what binds the response to an
+    // organization; the route reads nothing from the session.
+    if (/^\/v1\/connections\/[^/]+\/admin-consent\/callback$/.test(requestPath)) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
       || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
@@ -4271,7 +4329,7 @@ export function createControlServer(
     if (started.cookies.length) reply.header("set-cookie", started.cookies);
     return reply.code(302).header("location", started.location).send();
   });
-  app.get<{ Params: { connectorId: string }; Querystring: { state?: string; code?: string; error?: string } }>("/v1/connections/:connectorId/callback", async (request, reply) => {
+  app.get<{ Params: { connectorId: string }; Querystring: { state?: string; code?: string; error?: string; error_description?: string } }>("/v1/connections/:connectorId/callback", async (request, reply) => {
     const service = requireConnections();
     try {
       const actor = principal(request);
@@ -4279,6 +4337,7 @@ export function createControlServer(
         state: request.query.state,
         code: request.query.code,
         error: request.query.error,
+        errorDescription: request.query.error_description,
       }, allowsPermission(actor, "provider.manage", { type: "provider", resourceId: request.params.connectorId }));
       await refreshOwnedWorkspaceConnectionGrants(actor);
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "connected")).send();
@@ -4286,6 +4345,32 @@ export function createControlServer(
       const reason = error instanceof LemmaComputerError ? error.code : "MCP_CONNECTION_FAILED";
       return reply.code(303).header("location", service.resultUrl(request.params.connectorId, "error", reason)).send();
     }
+  });
+  app.get<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/admin-consent", async (request) => {
+    // Any member may request the link. The point of Flow B is that the person
+    // who cannot finish the connection themselves can hand their administrator
+    // something actionable, rather than reaching a page they cannot act on.
+    const actor = principal(request);
+    return requireConnections().adminConsentLink(actor.identity, request.params.connectorId, actor.userId);
+  });
+  app.delete<{ Params: { connectorId: string } }>("/v1/connections/:connectorId/admin-consent", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: request.params.connectorId });
+    return { connector: await requireConnections().forgetAdminConsent(actor.identity, request.params.connectorId) };
+  });
+  app.get<{
+    Params: { connectorId: string };
+    Querystring: { state?: string; tenant?: string; admin_consent?: string; error?: string; error_description?: string };
+  }>("/v1/connections/:connectorId/admin-consent/callback", async (request, reply) => {
+    // The administrator arriving here has no LemmaComputer session and often no
+    // account, so the signed state is the only binding to an organization and
+    // the reply has to be a page they can read rather than a redirect into an
+    // application they cannot sign into.
+    const result = await requireConnections().completeAdminConsent(request.params.connectorId, request.query);
+    return reply
+      .code(result.outcome === "granted" ? 200 : 400)
+      .type("text/html; charset=utf-8")
+      .header("cache-control", "no-store")
+      .send(adminConsentPage(result));
   });
   app.delete<{ Params: { connectorId: string } }>("/v1/connections/:connectorId", async (request) => {
     const actor = principal(request);
@@ -5961,6 +6046,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       hostedCustomConnectorEgressOrigins: env.HOSTED_MCP_EGRESS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean),
       configuredStaticMcpClients: env.CONFIGURED_STATIC_MCP_CLIENTS
         .split(",").map((group) => group.trim()).filter(isStaticCredentialGroup),
+      ...(env.M365_CLIENT_ID && env.CONNECTOR_CONSENT_SECRET
+        ? { microsoftAdminConsent: { clientId: env.M365_CLIENT_ID, consentSecret: env.CONNECTOR_CONSENT_SECRET } }
+        : {}),
     },
     {
       identityPolicyStore,

@@ -533,3 +533,58 @@ test("an administrator sets up a provider application for their own organization
   // The secret is write-only: it is never rendered back into the page.
   await expect(page.locator("body")).not.toContainText("acme-client-secret");
 });
+
+test("an employee who cannot approve Microsoft 365 gets a link to send to their administrator", async ({ page }) => {
+  const microsoft = {
+    ...exaConnector,
+    id: "microsoft-365",
+    serverName: "lemmacomputer_ms365",
+    name: "Microsoft 365",
+    shortDescription: "Mail, calendar, files, and Teams",
+    description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway.",
+    services: ["Outlook Mail", "Calendar", "OneDrive", "Teams"],
+    policySupport: "governed",
+    brand: "microsoft",
+    canAdministerConnector: false,
+    credentials: null,
+    adminConsent: { required: true, available: true, grantedAt: null, providerTenantId: null },
+  };
+  const consentUrl = "https://login.microsoftonline.com/organizations/v2.0/adminconsent"
+    + "?client_id=11111111-2222-3333-4444-555555555555"
+    + "&scope=https%3A%2F%2Fgraph.microsoft.com%2F.default"
+    + "&redirect_uri=http%3A%2F%2Flocalhost%3A4174%2Fapi%2Fv1%2Fconnections%2Fmicrosoft-365%2Fadmin-consent%2Fcallback"
+    + "&state=signed-state-value";
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [microsoft] }) });
+  });
+  await page.route("**/api/v1/connections/microsoft-365/admin-consent", async (route) => {
+    assert.equal(route.request().method(), "GET");
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      connectorId: "microsoft-365",
+      connectorName: "Microsoft 365",
+      consentUrl,
+      redirectUri: "http://localhost:4174/api/v1/connections/microsoft-365/admin-consent/callback",
+      expiresAt: "2026-09-15T00:00:00.000Z",
+    }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  // Connect is still offered, because a directory that already approved the
+  // application out of band can use it. What was missing is any route to the
+  // approval for a person in a directory that has not.
+  await expect(page.locator(".connector-catalog-action").getByRole("button", { name: "Connect", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Approval" }).click();
+
+  // The employee is told what is blocking them and why they cannot fix it
+  // themselves, instead of being sent to a Microsoft page they cannot act on.
+  const approval = page.getByRole("region", { name: "Administrator approval" });
+  await expect(approval).toContainText("no individual can approve for themselves");
+  // A single-tenant installation whose operator already consented in the Entra
+  // portal must not be told it is blocked, so the copy covers both directories.
+  await expect(approval).toContainText("already approved it there, you can connect now");
+  await approval.getByRole("button", { name: "Get approval link" }).click();
+  await expect(approval.getByLabel("Approval link")).toHaveValue(consentUrl);
+  // Clearing the record is an administrator action, and this person is not one.
+  await expect(approval.getByRole("button", { name: "Clear approval record" })).toHaveCount(0);
+});

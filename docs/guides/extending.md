@@ -201,6 +201,40 @@ Microsoft 365 is deliberately outside this path. It is a separate container
 configured by environment variables, not a gateway row carrying credentials, so
 none of the above applies to it.
 
+### Connectors that need a directory administrator
+
+Some providers ask for permissions that are tenant-wide by construction, which
+no ordinary user can grant for themselves. Microsoft 365 is the current case:
+`Team.ReadBasic.All`, `Channel.ReadBasic.All`, and `ChannelMessage.Read.All`
+force administrator consent onto every connection, including one from a person
+who only wants their own calendar.
+
+`catalogAdminConsentProvider` names the connectors in that position. For those,
+`publicConnector` reports an `adminConsent` summary, and Connections offers a
+link the member can hand to whoever administers their directory. Three
+properties of that flow are deliberate:
+
+- **The link is signed, not stored against a session.** The administrator who
+  opens it is usually not the person who requested it and often has no
+  LemmaComputer account, so the state in the query is the only thing binding
+  the response to an organization. It is HMAC-signed with
+  `CONNECTOR_CONSENT_SECRET`, carries an expiry, and is bound to one connector.
+- **The landing route is exempt from the session check and nothing else.** It
+  still sits behind the ingress proxy token. It renders a self-contained page
+  rather than redirecting into the application, because the reader cannot sign
+  in, and that page names no organization and echoes nothing from the query.
+- **Connect is not gated on a recorded grant.** An installation whose
+  administrator consented in the Entra portal has no record here and must keep
+  working. The record is what LemmaComputer knows, not what Microsoft enforces,
+  and clearing it revokes nothing: only a directory administrator can revoke
+  consent, in their own portal.
+
+A consent failure returning from the provider is mapped to
+`MCP_ADMIN_CONSENT_REQUIRED` rather than the generic denial. Microsoft reports
+"this needs an administrator" through an AADSTS code inside `error_description`,
+and calling that a refusal tells the person to try again, which can never
+succeed.
+
 ### Gateway server names
 
 `connector_registry.server_name` is the name Control uses to address a

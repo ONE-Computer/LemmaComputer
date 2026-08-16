@@ -3952,6 +3952,32 @@ textarea:focus-visible,
 }
 .connector-credentials-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 
+.connector-consent-card {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.connector-consent-card h2,
+.connector-consent-card p { margin: 0; }
+.connector-consent-card h2 { color: #1d2c40; font-size: 15px; }
+.connector-consent-card p { max-width: 660px; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.connector-consent-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
+.connector-consent-actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.connector-consent-actions label { display: grid; flex: 1 1 320px; gap: 5px; font-size: 12px; }
+.connector-consent-actions label span { color: #1d2c40; font-weight: 600; }
+.connector-consent-actions input {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+}
+
 .connector-removal-card {
   display: flex;
   align-items: center;

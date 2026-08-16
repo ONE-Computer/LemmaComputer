@@ -98,6 +98,17 @@ export const connectorActivation = (
   };
 };
 
+// A provider whose catalog entry asks for tenant-wide permissions that no
+// ordinary user can consent to. Microsoft 365 requests Team.ReadBasic.All,
+// Channel.ReadBasic.All, and ChannelMessage.Read.All, so a directory
+// administrator must approve the application for the whole organization before
+// anyone in it can finish connecting. Without that, an employee reaches a
+// terminal "Need admin approval" page and never returns, and the Connections
+// screen shows nothing but a connector that stayed disconnected.
+export type AdminConsentProvider = "microsoft";
+export const catalogAdminConsentProvider = (connectorId: string): AdminConsentProvider | undefined =>
+  connectorId === "microsoft-365" ? "microsoft" : undefined;
+
 // The credential group a catalog entry depends on, if any. Custom connectors
 // carry their credentials from the moment they are added, so they are never
 // listed here.

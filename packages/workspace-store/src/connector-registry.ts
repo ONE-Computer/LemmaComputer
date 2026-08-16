@@ -64,12 +64,27 @@ export type ConnectorRegistryRecord = {
   oauthClientId: string | null;
   credentialsUpdatedBy: string | null;
   credentialsUpdatedAt: Date | null;
+  /**
+   * When a directory administrator granted this organization's tenant-wide
+   * consent for the connector, and which provider directory granted it. Null
+   * means no grant has been recorded here; it does not prove that none exists,
+   * because a deployment may have been consented out of band.
+   */
+  adminConsentGrantedAt: Date | null;
+  adminConsentProviderTenantId: string | null;
+  adminConsentRequestedBy: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
 };
 
 export type ConnectorCredentialMode = "deployment" | "tenant";
+
+export type RecordConnectorAdminConsentInput = {
+  providerTenantId: string;
+  requestedBy: string | null;
+  grantedAt?: Date;
+};
 
 export type SaveConnectorCredentialsInput = {
   serverId: string;
@@ -80,7 +95,7 @@ export type SaveConnectorCredentialsInput = {
 
 export type SaveConnectorRegistryRecord = Omit<
   ConnectorRegistryRecord,
-  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt"
+  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt" | "adminConsentGrantedAt" | "adminConsentProviderTenantId" | "adminConsentRequestedBy"
 > & {
   toolPolicies?: Record<string, McpToolPolicyDecision>;
   toolDefinitionHashes?: Record<string, string>;
@@ -206,6 +221,8 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   appendPolicyWorkspaceDeliveryReceipts(receipts: Omit<ConnectorPolicyWorkspaceDeliveryReceipt, "id" | "occurredAt">[]): Promise<ConnectorPolicyWorkspaceDeliveryReceipt[]>;
   latestPolicyDelivery(tenantId: string, connectorId: string): Promise<ConnectorPolicyDeliverySnapshot | null>;
   saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput): Promise<ConnectorRegistryRecord | null>;
+  recordConnectorAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput): Promise<ConnectorRegistryRecord | null>;
+  clearConnectorAdminConsent(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
   clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }): Promise<ConnectorRegistryRecord | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
@@ -305,6 +322,7 @@ const cloneConnectorRecord = (record: ConnectorRegistryRecord): ConnectorRegistr
   toolDefinitionHashes: { ...record.toolDefinitionHashes },
   accessPolicyUpdatedAt: new Date(record.accessPolicyUpdatedAt),
   credentialsUpdatedAt: record.credentialsUpdatedAt ? new Date(record.credentialsUpdatedAt) : null,
+  adminConsentGrantedAt: record.adminConsentGrantedAt ? new Date(record.adminConsentGrantedAt) : null,
   createdAt: new Date(record.createdAt),
   updatedAt: new Date(record.updatedAt),
 });
@@ -344,6 +362,9 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   oauthClientId: typeof row.oauth_client_id === "string" ? row.oauth_client_id : null,
   credentialsUpdatedBy: typeof row.credentials_updated_by === "string" ? row.credentials_updated_by : null,
   credentialsUpdatedAt: row.credentials_updated_at ? new Date(String(row.credentials_updated_at)) : null,
+  adminConsentGrantedAt: row.admin_consent_granted_at ? new Date(String(row.admin_consent_granted_at)) : null,
+  adminConsentProviderTenantId: typeof row.admin_consent_provider_tenant_id === "string" ? row.admin_consent_provider_tenant_id : null,
+  adminConsentRequestedBy: typeof row.admin_consent_requested_by === "string" ? row.admin_consent_requested_by : null,
   createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
@@ -902,6 +923,34 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       .filter((origin): origin is string => Boolean(origin)))].sort();
   }
 
+  async recordConnectorAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         admin_consent_granted_at=$3,
+         admin_consent_provider_tenant_id=$4,
+         admin_consent_requested_by=$5,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.grantedAt ?? new Date(), input.providerTenantId, input.requestedBy],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async clearConnectorAdminConsent(tenantId: string, connectorId: string) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         admin_consent_granted_at=NULL,
+         admin_consent_provider_tenant_id=NULL,
+         admin_consent_requested_by=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
   async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {
     const result = await this.pool.query(
       `UPDATE connector_registry SET
@@ -1062,6 +1111,9 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       oauthClientId: null,
       credentialsUpdatedBy: null,
       credentialsUpdatedAt: null,
+      adminConsentGrantedAt: null,
+      adminConsentProviderTenantId: null,
+      adminConsentRequestedBy: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1303,6 +1355,36 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       for (const origin of permit.origins) origins.add(origin);
     }
     return [...origins].sort();
+  }
+
+  async recordConnectorAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      adminConsentGrantedAt: input.grantedAt ?? new Date(),
+      adminConsentProviderTenantId: input.providerTenantId,
+      adminConsentRequestedBy: input.requestedBy,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async clearConnectorAdminConsent(tenantId: string, connectorId: string) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      adminConsentGrantedAt: null,
+      adminConsentProviderTenantId: null,
+      adminConsentRequestedBy: null,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
   }
 
   async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {

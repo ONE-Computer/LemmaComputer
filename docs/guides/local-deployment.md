@@ -121,11 +121,16 @@ Append these paths to the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` in the current
 ```text
 /api/v1/auth/callback
 /oauth/mcp/callback
+/api/v1/connections/microsoft-365/admin-consent/callback
 ```
 
 The first is the LemmaComputer sign-in callback. The second is used by the
-LiteLLM/Microsoft 365 OAuth bridge. Both are server-side Web callbacks; do not
-register them as SPA, mobile, or public-client callbacks.
+LiteLLM/Microsoft 365 OAuth bridge. The third is where Entra returns a
+directory administrator after they approve the connector for their
+organization; without it that administrator lands on a Microsoft error instead
+of a confirmation, and LemmaComputer never records the approval. All three are
+server-side Web callbacks; do not register them as SPA, mobile, or
+public-client callbacks.
 
 For this flow:
 
@@ -201,8 +206,39 @@ rotation from product sign-in:
   `LEMMACOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
   by LemmaComputer.
 - The Microsoft 365 connector app uses
-  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback`, the delegated Graph permissions above, and
-  the `LEMMACOMPUTER_MS365_*` variables.
+  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback` and
+  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/api/v1/connections/microsoft-365/admin-consent/callback`,
+  the delegated Graph permissions above, and the `LEMMACOMPUTER_MS365_*`
+  variables.
+
+### Administrator approval for the Microsoft 365 connector
+
+The connector requests `Team.ReadBasic.All`, `Channel.ReadBasic.All`, and
+`ChannelMessage.Read.All`. These are tenant-wide, so no ordinary user can
+consent to them for themselves. In a single-tenant installation the person who
+registered the application usually grants consent once in the Entra portal
+under **API permissions → Grant admin consent**, and nothing else is needed.
+
+Where the connector is used by a directory the operator does not administer,
+the Connections screen offers an approval link that a member can send to their
+own directory administrator. That link points at Microsoft's
+`/organizations/v2.0/adminconsent` endpoint and returns the administrator to
+the redirect URI above, where LemmaComputer records the grant for that
+organization. It requires:
+
+- `LEMMACOMPUTER_MS365_CLIENT_ID` (or the `LEMMACOMPUTER_ENTRA_CLIENT_ID`
+  fallback) so Control knows which application to name; and
+- the admin-consent redirect URI registered on that application.
+
+The recorded grant is LemmaComputer's own note that approval happened. It does
+not itself grant anything, and clearing it does not revoke anything: only a
+directory administrator can revoke consent, from their own Entra portal.
+
+Before putting this in front of a customer, complete Microsoft
+[publisher verification](https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview)
+for the application. Many directories leave user consent restricted to apps
+from verified publishers, and an unverified application asking an administrator
+to approve mailbox access is a conversation that ends badly.
 
 Both apps should be single-tenant. If one app is used for both roles, leave all
 three `LEMMACOMPUTER_MS365_*` values empty so the canonical service projection reuses

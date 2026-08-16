@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { LemmaComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type {
   McpConnectorAdministrationGateway,
@@ -20,6 +20,7 @@ import {
   type ConnectorRegistryStore,
 } from "@lemmacomputer/workspace-store";
 import {
+  catalogAdminConsentProvider,
   catalogCredentialRequirement,
   connectorActivation,
   connectorCatalog,
@@ -71,6 +72,14 @@ type ConnectionServiceOptions = {
    */
   configuredStaticMcpClients?: StaticCredentialGroup[];
   /**
+   * The Entra application a customer's directory administrator is asked to
+   * approve, and the secret that signs the link they are sent. The application
+   * id is not a secret; the matching client secret stays with the ms365-mcp
+   * service and Control never holds it.
+   */
+  microsoftAdminConsent?: { clientId: string; consentSecret: string };
+  adminConsentTtlMs?: number;
+  /**
    * Test/control-plane DNS resolver used only to reject unsafe custom URLs at
    * admission. The gateway proxy repeats the resolution and enforcement when
    * it opens the real connection, so this never becomes the SSRF boundary.
@@ -104,6 +113,21 @@ const GATEWAY_CONFIGURED_SERVER_NAMES = new Set([
   "lemmacomputer_google_drive",
   "lemmacomputer_google_calendar",
 ]);
+
+// Microsoft signals "this needs an administrator" through the OAuth error and
+// its AADSTS code rather than a distinct error name. AADSTS65001 is an absent
+// consent and AADSTS90094 is a grant that requires administrator permission.
+const requiresAdminConsent = (error: string, description = "") => {
+  const code = error.toLowerCase();
+  if (code === "consent_required" || code === "admin_consent_required" || code === "interaction_required") return true;
+  return /AADSTS(?:65001|90094|900941)/i.test(description);
+};
+
+// Entra returns the consenting directory as a GUID on the admin-consent
+// redirect. Requiring that shape keeps a malformed or hand-written response
+// from being recorded as a grant.
+const isDirectoryTenantId = (value: unknown): value is string =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("base64url");
 const policyProjectionDigest = (policy: RuntimePolicy) => createHash("sha256")
@@ -199,6 +223,8 @@ export class McpConnectionService {
   private readonly installationKind: "customer-managed" | "hosted" | "worktree";
   private readonly hostedCustomConnectorEgressOrigins: ReadonlySet<string>;
   private readonly configuredStaticMcpClients: ReadonlySet<StaticCredentialGroup>;
+  private readonly microsoftAdminConsent?: { clientId: string; consentSecret: string };
+  private readonly adminConsentTtlMs: number;
   private readonly projectionCache = new Map<string, { expiresAt: number; policy: RuntimePolicy }>();
   private readonly connectionStatusStates = new Map<string, Promise<OAuthConnectionStatus>>();
   private readonly sessionTtlMs: number;
@@ -223,6 +249,13 @@ export class McpConnectionService {
     }
     this.hostedCustomConnectorEgressOrigins = new Set(normalizedOrigins.filter((origin): origin is string => Boolean(origin)));
     this.configuredStaticMcpClients = new Set(options.configuredStaticMcpClients ?? []);
+    const microsoftAdminConsent = options.microsoftAdminConsent;
+    this.microsoftAdminConsent = microsoftAdminConsent?.clientId && microsoftAdminConsent.consentSecret
+      ? microsoftAdminConsent
+      : undefined;
+    // An administrator often receives the link by mail and acts on it days
+    // later, so it deliberately outlives an ordinary authorization session.
+    this.adminConsentTtlMs = options.adminConsentTtlMs ?? 30 * 24 * 60 * 60 * 1000;
     this.sessionTtlMs = options.sessionTtlMs ?? 10 * 60 * 1000;
     this.now = options.now ?? Date.now;
   }
@@ -311,7 +344,7 @@ export class McpConnectionService {
   async complete(
     identity: IdentityContext,
     connectorId: string,
-    input: { state?: string; code?: string; error?: string },
+    input: { state?: string; code?: string; error?: string; errorDescription?: string },
     isAdministrator = false,
   ): Promise<OAuthConnectionStatus> {
     const connector = await this.connector(identity.tenantId, connectorId);
@@ -329,7 +362,21 @@ export class McpConnectionService {
     if (pending.connectorId !== connector.id) {
       throw new LemmaComputerError("MCP_OAUTH_CONNECTOR_MISMATCH", "The connection returned to a different connector", 400);
     }
-    if (input.error) throw new LemmaComputerError("MCP_OAUTH_DENIED", `${connector.name} access was not granted`, 400);
+    if (input.error) {
+      // Microsoft answers a request for tenant-wide permissions from someone
+      // who cannot grant them with a consent error rather than a refusal.
+      // Reporting that as "access was not granted" tells the person to try
+      // again, which can never work; naming it sends them to the approval link
+      // instead.
+      if (requiresAdminConsent(input.error, input.errorDescription)) {
+        throw new LemmaComputerError(
+          "MCP_ADMIN_CONSENT_REQUIRED",
+          `${connector.name} needs approval from a directory administrator in your organization`,
+          403,
+        );
+      }
+      throw new LemmaComputerError("MCP_OAUTH_DENIED", `${connector.name} access was not granted`, 400);
+    }
     if (!input.code || input.code.length > 4096) throw new LemmaComputerError("MCP_OAUTH_CODE_INVALID", `${connector.name} returned an invalid authorization response`, 400);
     const result = await this.gateway.completeUserOAuthConnection({
       identity,
@@ -544,6 +591,170 @@ export class McpConnectionService {
     if (!deleted) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
     this.invalidateProjection(identity);
     return { deleted: true };
+  }
+
+  /**
+   * Builds the link a person sends to their directory administrator. Microsoft
+   * asks for tenant-wide permissions no ordinary user can grant, so without
+   * this the employee's only feedback is a terminal "Need admin approval" page
+   * they cannot act on and never return from.
+   *
+   * The link is signed rather than stored against a session, because the
+   * administrator who opens it is usually not the person who requested it and
+   * may have no LemmaComputer account at all.
+   */
+  async adminConsentLink(identity: IdentityContext, connectorId: string, requestedBy: string) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    const provider = catalogAdminConsentProvider(connector.id);
+    if (!provider) {
+      throw new LemmaComputerError(
+        "MCP_ADMIN_CONSENT_UNSUPPORTED",
+        `${connector.name} does not need directory administrator approval`,
+        409,
+      );
+    }
+    if (!this.microsoftAdminConsent) {
+      throw new LemmaComputerError(
+        "MCP_ADMIN_CONSENT_NOT_CONFIGURED",
+        "Administrator approval links are unavailable because this deployment has no Microsoft application configured",
+        503,
+        true,
+      );
+    }
+    const expiresAt = this.now() + this.adminConsentTtlMs;
+    const state = this.signAdminConsentState({
+      tenantId: identity.tenantId,
+      connectorId: connector.id,
+      expiresAt,
+      requestedBy,
+    });
+    // `organizations` lets the administrator sign in with their own directory
+    // rather than pinning the deployment's. `.default` consents to exactly the
+    // permissions the application registration declares, so the request cannot
+    // widen beyond what an administrator can review in the Entra portal.
+    const url = new URL("https://login.microsoftonline.com/organizations/v2.0/adminconsent");
+    url.searchParams.set("client_id", this.microsoftAdminConsent.clientId);
+    url.searchParams.set("scope", "https://graph.microsoft.com/.default");
+    url.searchParams.set("redirect_uri", this.adminConsentRedirectUri(connector.id));
+    url.searchParams.set("state", state);
+    return {
+      connectorId: connector.id,
+      connectorName: connector.name,
+      consentUrl: url.toString(),
+      redirectUri: this.adminConsentRedirectUri(connector.id),
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+  }
+
+  /**
+   * Serves the provider's redirect after an administrator approves or refuses.
+   * The caller is the administrator's browser, which carries no LemmaComputer
+   * session, so the signed state is the only thing binding this response to an
+   * organization.
+   */
+  async completeAdminConsent(connectorId: string, query: {
+    state?: string;
+    tenant?: string;
+    admin_consent?: string;
+    error?: string;
+    error_description?: string;
+  }): Promise<{ outcome: "granted" | "refused" | "invalid"; connectorName: string | null }> {
+    const claims = query.state ? this.verifyAdminConsentState(query.state) : null;
+    if (!claims || claims.connectorId !== connectorId) return { outcome: "invalid", connectorName: null };
+    let connector;
+    try {
+      connector = await this.connector(claims.tenantId, claims.connectorId);
+    } catch {
+      return { outcome: "invalid", connectorName: null };
+    }
+    const granted = String(query.admin_consent ?? "").toLowerCase() === "true"
+      && !query.error
+      && isDirectoryTenantId(query.tenant);
+    if (!granted) return { outcome: "refused", connectorName: connector.name };
+    await this.registry.recordConnectorAdminConsent(claims.tenantId, connector.id, {
+      providerTenantId: query.tenant!,
+      requestedBy: claims.requestedBy,
+    });
+    this.invalidateTenantProjection(claims.tenantId);
+    return { outcome: "granted", connectorName: connector.name };
+  }
+
+  /**
+   * Withdraws the recorded grant. This does not revoke anything at the
+   * provider, which only a directory administrator can do in their own portal;
+   * it clears LemmaComputer's record so the screen stops claiming an approval
+   * that no longer holds.
+   */
+  async forgetAdminConsent(identity: IdentityContext, connectorId: string) {
+    const connector = await this.connector(identity.tenantId, connectorId);
+    if (!catalogAdminConsentProvider(connector.id)) {
+      throw new LemmaComputerError(
+        "MCP_ADMIN_CONSENT_UNSUPPORTED",
+        `${connector.name} does not need directory administrator approval`,
+        409,
+      );
+    }
+    const saved = await this.registry.clearConnectorAdminConsent(identity.tenantId, connector.id);
+    if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    this.invalidateTenantProjection(identity.tenantId);
+    return this.publicConnector(saved);
+  }
+
+  private adminConsentRedirectUri(connectorId: string) {
+    return `${this.publicWebUrl}/api/v1/connections/${connectorId}/admin-consent/callback`;
+  }
+
+  private signAdminConsentState(claims: {
+    tenantId: string;
+    connectorId: string;
+    expiresAt: number;
+    requestedBy: string;
+  }) {
+    const payload = Buffer.from(JSON.stringify({
+      t: claims.tenantId,
+      c: claims.connectorId,
+      e: claims.expiresAt,
+      b: claims.requestedBy,
+      n: randomBytes(9).toString("base64url"),
+    })).toString("base64url");
+    return `${payload}.${this.adminConsentSignature(payload)}`;
+  }
+
+  private verifyAdminConsentState(state: string) {
+    const [payload, signature] = state.split(".");
+    if (!payload || !signature) return null;
+    const expected = this.adminConsentSignature(payload);
+    const provided = Buffer.from(signature);
+    const computed = Buffer.from(expected);
+    if (provided.length !== computed.length || !timingSafeEqual(provided, computed)) return null;
+    let claims: { t?: unknown; c?: unknown; e?: unknown; b?: unknown };
+    try {
+      claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    } catch {
+      return null;
+    }
+    if (typeof claims.t !== "string" || typeof claims.c !== "string" || typeof claims.e !== "number") return null;
+    if (claims.e <= this.now()) return null;
+    return {
+      tenantId: claims.t,
+      connectorId: claims.c,
+      requestedBy: typeof claims.b === "string" ? claims.b : null,
+    };
+  }
+
+  private adminConsentSignature(payload: string) {
+    if (!this.microsoftAdminConsent) return "";
+    return createHmac("sha256", this.microsoftAdminConsent.consentSecret).update(payload).digest("base64url");
+  }
+
+  private connectorAdminConsentSummary(connector: ConnectorDefinition) {
+    if (!catalogAdminConsentProvider(connector.id)) return null;
+    return {
+      required: true as const,
+      available: Boolean(this.microsoftAdminConsent),
+      grantedAt: connector.adminConsentGrantedAt?.toISOString() ?? null,
+      providerTenantId: connector.adminConsentProviderTenantId,
+    };
   }
 
   /**
@@ -1134,6 +1345,7 @@ export class McpConnectionService {
       ...safe,
       activation: connectorActivation(connector, this.configuredStaticMcpClients),
       credentials: this.connectorCredentialSummary(connector),
+      adminConsent: this.connectorAdminConsentSummary(connector),
     };
   }
 

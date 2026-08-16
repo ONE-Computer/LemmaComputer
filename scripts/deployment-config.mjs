@@ -98,6 +98,7 @@ const sections = [
     variable("LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_TOKEN", generated, "LiteLLM credential for the strict remote-MCP egress proxy.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_MCP_EGRESS_PROXY_TOKEN", generated, "Remote MCP proxy credential for its narrow Control authorization callback.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_AGENT_BRIDGE_SECRET", generated, "Dedicated agent bridge signing secret.", { secret: true, generated: "random" }),
+    variable("LEMMACOMPUTER_CONNECTOR_CONSENT_SECRET", generated, "Signing secret for connector administrator-consent links.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_HERMES_API_SECRET", generated, "Agent chat internal authentication secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_CHANNEL_CREDENTIAL_SECRET", generated, "Channel broker credential-vault encryption secret.", { secret: true, generated: "random" }),
     variable("LEMMACOMPUTER_CHANNEL_BROKER_TOKEN", generated, "Control-to-channel-broker bearer token.", { secret: true, generated: "random" }),
@@ -905,6 +906,11 @@ export function projectServiceEnvironment(input = {}) {
       LITELLM_CREDENTIAL_SECRET: v("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"),
       PUBLIC_WEB_URL: v("LEMMACOMPUTER_PUBLIC_WEB_URL"),
       M365_AUTHORIZATION_ORIGIN: m365AuthorizationOrigin,
+      // The Entra application id is not a secret. Control needs it to build the
+      // administrator-consent link a customer's IT administrator opens; the
+      // client secret stays with the ms365-mcp service.
+      M365_CLIENT_ID: ms365Client,
+      CONNECTOR_CONSENT_SECRET: v("LEMMACOMPUTER_CONNECTOR_CONSENT_SECRET"),
       AGENT_BRIDGE_URL: workspaceControlUrl,
       AGENT_BRIDGE_SECRET: v("LEMMACOMPUTER_AGENT_BRIDGE_SECRET"),
       AGENT_BRIDGE_GRANT_TTL_SECONDS: v("LEMMACOMPUTER_AGENT_BRIDGE_GRANT_TTL_SECONDS"),

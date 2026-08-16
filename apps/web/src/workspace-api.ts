@@ -189,6 +189,8 @@ export const connectionApi = {
   status: (connectorId: string, options: RequestInit = {}) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, { cache: "no-store", ...options }),
   authorizeUrl: (connectorId: string) => `/api/v1/connections/${encodeURIComponent(connectorId)}/authorize`,
   disconnect: (connectorId: string) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
+  adminConsentLink: (connectorId: string) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}/admin-consent`, { cache: "no-store" }),
+  forgetAdminConsent: (connectorId: string) => request(`/api/v1/connections/${encodeURIComponent(connectorId)}/admin-consent`, mutation("DELETE")),
   microsoft365: () => request("/api/v1/connections/microsoft-365"),
   microsoft365AuthorizeUrl: "/api/v1/connections/microsoft-365/authorize",
   disconnectMicrosoft365: () => request("/api/v1/connections/microsoft-365", mutation("DELETE")),

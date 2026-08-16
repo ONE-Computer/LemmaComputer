@@ -3742,7 +3742,79 @@ function ConnectorPolicyAdministration({ connector, busy, onAccessPolicySave, mc
   );
 }
 
-function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDisconnect, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, onReviewWorkspacePolicies }) {
+function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
+  const consent = connection?.adminConsent;
+  const [link, setLink] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const grantedAt = consent?.grantedAt
+    ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(consent.grantedAt))
+    : null;
+  const requestLink = async () => {
+    setBusy("link");
+    setError("");
+    try {
+      setLink(await connectionApi.adminConsentLink(connection.id));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link.consentUrl);
+      setCopied(true);
+    } catch {
+      // A browser that refuses clipboard access still shows the full link in
+      // the field below, so there is nothing to recover from here.
+      setError("Copy the link from the box below.");
+    }
+  };
+  const forget = async () => {
+    setBusy("forget");
+    setError("");
+    try {
+      const result = await connectionApi.forgetAdminConsent(connection.id);
+      setLink(null);
+      await onForgotten(result.connector);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <section className="connector-consent-card" aria-labelledby="connector-consent-heading">
+      <div>
+        <h2 id="connector-consent-heading">Administrator approval</h2>
+        {grantedAt
+          ? <p>An administrator for your organization approved {connection.name} on {grantedAt}. Anyone here can connect their own account.</p>
+          : <p>{connection.name} reads Teams channels across your whole organization, which no individual can approve for themselves. If whoever administers your Microsoft directory has already approved it there, you can connect now. If not, send them this link; once they approve it, everyone here can connect their own account.</p>}
+        {error && <span role="alert">{error}</span>}
+      </div>
+      {!grantedAt && <div className="connector-consent-actions">
+        {consent?.available === false
+          ? <p className="connector-consent-unavailable">This deployment has no Microsoft application configured, so there is nothing to approve yet. Ask whoever operates LemmaComputer to set one up.</p>
+          : link
+            ? <>
+              <label>
+                <span>Approval link</span>
+                <input name="admin-consent-url" readOnly value={link.consentUrl} onFocus={(event) => event.target.select()} />
+              </label>
+              <button className="secondary-button" type="button" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+            </>
+            : <button className="primary-button" type="button" onClick={requestLink} disabled={Boolean(busy)}>{busy === "link" ? "Preparing link" : "Get approval link"}</button>}
+      </div>}
+      {grantedAt && canManageConnector && <div className="connector-consent-actions">
+        <button className="connection-quiet-button" type="button" onClick={forget} disabled={Boolean(busy)}>{busy === "forget" ? "Clearing" : "Clear approval record"}</button>
+      </div>}
+    </section>
+  );
+}
+
+function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDisconnect, onAdminConsentChange, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, onReviewWorkspacePolicies }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
   const organizationDisabled = connection?.enabled === false;
@@ -3792,6 +3864,7 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
               )}
             </div>
           </section>
+          {connection?.adminConsent?.required && <AdminConsentCard connection={connection} canManageConnector={canManageConnector} onForgotten={onAdminConsentChange} />}
         </div>
       )}
     </div>
@@ -4266,7 +4339,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} error={error} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === microsoft.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} error={error} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAdminConsentChange={onCredentialsSaved} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === microsoft.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {
@@ -4319,6 +4392,12 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                     </div>
                     <div className="connector-catalog-action">
                       {connector.canAdministerConnector && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
+                      {/* Connect still works wherever a directory administrator
+                          already approved the application out of band, so this
+                          adds a way to reach the approval rather than replacing
+                          the action. Without it the person who cannot finish the
+                          connection has no route to the link they need to send. */}
+                      {connector.adminConsent?.required && !connector.adminConsent.grantedAt && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Approval</button>}
                       {connected ? (
                         <button className="secondary-button" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage</button>
                       ) : canConnect ? (
