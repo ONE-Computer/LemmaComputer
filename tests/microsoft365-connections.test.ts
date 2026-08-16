@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { IdentityContext, LemmaComputerError, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
@@ -1215,4 +1216,28 @@ test("a connector needing operator credentials is unpublished until the deployme
     await configuredService.isGatewayEgressDestinationAllowed({ protocol: "https", host: "gmailmcp.googleapis.com", port: 443 }),
     true,
   );
+});
+
+test("the Google Workspace servers request offline access so connections can renew", async () => {
+  const config = await readFile(new URL("../config/litellm/config.yaml", import.meta.url), "utf8");
+  // LiteLLM's refresher returns None when the stored token has no
+  // refresh_token, and Google issues one only for access_type=offline. That is
+  // a query parameter rather than a scope, so unlike Microsoft 365 and
+  // Atlassian this cannot be expressed through `scopes`.
+  const offlineAuthorizeUrls = config.match(
+    /^\s*authorization_url: https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?access_type=offline&prompt=consent$/gm,
+  );
+  assert.equal(offlineAuthorizeUrls?.length, 3, "Gmail, Drive, and Calendar each pin offline access");
+
+  // A pinned authorization URL bypasses discovery, so its origin must still sit
+  // inside the connector's egress allowlist or the redirect is refused.
+  const google = connectorCatalog(alpha.tenantId, "http://localhost:3001", configured)
+    .filter((connector) => ["gmail", "google-drive", "google-calendar"].includes(connector.id));
+  assert.equal(google.length, 3);
+  for (const connector of google) {
+    assert.ok(
+      connector.authorizationOrigins.includes("https://accounts.google.com"),
+      `${connector.id} must allow the pinned authorization origin`,
+    );
+  }
 });
