@@ -21,7 +21,7 @@ import {
   WorkspaceIngressAuthority,
   workspaceIngressAccessParameter,
 } from "@lemmacomputer/workspace-ingress-auth";
-import type { WorkspaceRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
+import type { WorkspaceNode, WorkspaceRecord, WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { AgentChatAuthority, type AgentChatAccess } from "./agent-chat.js";
 
 export type ControllerLaunch = Launch & {
@@ -53,8 +53,8 @@ export interface ControllerClient {
   }): Promise<void>;
   status(workspaceId: string, providerId: string): Promise<Sandbox>;
   open(workspaceId: string, providerId: string): Promise<ControllerLaunch>;
-  destroyWorkspace(workspaceId: string, providerId: string): Promise<void>;
-  purgeWorkspace(workspaceId: string, accessGeneration: number): Promise<WorkspacePurgeReceipt>;
+  destroyWorkspace(workspaceId: string, providerId: string, expectedWorkspaceNodeId?: string): Promise<void>;
+  purgeWorkspace(workspaceId: string, accessGeneration: number, expectedWorkspaceNodeId?: string): Promise<WorkspacePurgeReceipt>;
 }
 
 export type EgressProxyGrant = {
@@ -170,6 +170,68 @@ export class HttpControllerClient implements ControllerClient {
   }
   async purgeWorkspace(workspaceId: string, accessGeneration: number) {
     return await this.call(`/internal/v2/workspaces/${encodeURIComponent(workspaceId)}/storage?accessGeneration=${encodeURIComponent(String(accessGeneration))}`, { method: "DELETE" }) as WorkspacePurgeReceipt;
+  }
+}
+
+export interface WorkspaceNodeDirectory {
+  resolveWorkspaceNode(workspaceId: string, expectedWorkspaceNodeId?: string): Promise<WorkspaceNode>;
+}
+
+export class RoutedControllerClient implements ControllerClient {
+  private readonly clients = new Map<string, ControllerClient>();
+
+  constructor(
+    private readonly directory: WorkspaceNodeDirectory,
+    private readonly clientForNode: (node: WorkspaceNode) => ControllerClient,
+  ) {}
+
+  private async route(workspaceId: string, expectedWorkspaceNodeId?: string) {
+    const node = await this.directory.resolveWorkspaceNode(workspaceId, expectedWorkspaceNodeId);
+    const cacheKey = `${node.id}\0${node.endpointUrl}\0${node.tlsServerName}`;
+    let client = this.clients.get(cacheKey);
+    if (!client) {
+      client = this.clientForNode(node);
+      this.clients.set(cacheKey, client);
+    }
+    return { node, client };
+  }
+
+  async create(input: Parameters<ControllerClient["create"]>[0]) {
+    const { client } = await this.route(input.workspaceId);
+    return client.create(input);
+  }
+
+  async updateEgressPolicy(providerId: string, input: Parameters<ControllerClient["updateEgressPolicy"]>[1]) {
+    const { client } = await this.route(input.workspaceId);
+    return client.updateEgressPolicy(providerId, input);
+  }
+
+  async status(workspaceId: string, providerId: string) {
+    const { client } = await this.route(workspaceId);
+    return client.status(workspaceId, providerId);
+  }
+
+  async open(workspaceId: string, providerId: string) {
+    const { client } = await this.route(workspaceId);
+    return client.open(workspaceId, providerId);
+  }
+
+  async destroyWorkspace(workspaceId: string, providerId: string, expectedWorkspaceNodeId?: string) {
+    const { client } = await this.route(workspaceId, expectedWorkspaceNodeId);
+    return client.destroyWorkspace(workspaceId, providerId);
+  }
+
+  async purgeWorkspace(workspaceId: string, accessGeneration: number, expectedWorkspaceNodeId?: string) {
+    const { node, client } = await this.route(workspaceId, expectedWorkspaceNodeId);
+    const receipt = await client.purgeWorkspace(workspaceId, accessGeneration);
+    if (receipt.nodeId !== node.id) {
+      throw new LemmaComputerError(
+        "WORKSPACE_NODE_RECEIPT_MISMATCH",
+        "Workspace purge receipt was issued by a different node",
+        502,
+      );
+    }
+    return receipt;
   }
 }
 

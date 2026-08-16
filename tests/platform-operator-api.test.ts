@@ -150,6 +150,20 @@ test("hosted platform routes use only the operator cookie and customer-managed r
       calls.push({ method: "setPlatformConfiguration", input });
       return { key: "support.defaultApprovalRequired", value: true };
     },
+    listWorkspaceNodes: async () => [{ id: "workspace-node-a", state: "active" }],
+    registerWorkspaceNode: async (_session: PlatformOperatorSession, input: unknown) => {
+      calls.push({ method: "registerWorkspaceNode", input });
+      return { id: "workspace-node-b", state: "active" };
+    },
+    updateWorkspaceNodeState: async (_session: PlatformOperatorSession, input: unknown) => {
+      calls.push({ method: "updateWorkspaceNodeState", input });
+      return { id: "workspace-node-a", state: "draining" };
+    },
+    listTenantWorkspaceNodeAssignments: async () => [],
+    assignTenantWorkspaceNode: async (_session: PlatformOperatorSession, input: unknown) => {
+      calls.push({ method: "assignTenantWorkspaceNode", input });
+      return { assignment: { tenantId: elevation.targetOrganizationId, workspaceNodeId: "workspace-node-b" }, backfilledWorkspaces: 0 };
+    },
   };
   const hosted = createControlServer(
     new MemoryWorkspaceStore(),
@@ -324,6 +338,45 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     });
     assert.equal(updatedLifecycle.statusCode, 200);
     assert.equal(calls.some((call) => call.method === "updateTenantLifecycle"), true);
+
+    const deniedNodeList = await hosted.inject({
+      method: "GET",
+      url: "/v1/platform/workspace-nodes",
+      headers: { ...baseHeaders, cookie: "oc_platform_session=valid" },
+    });
+    assert.equal(deniedNodeList.statusCode, 403);
+    const nodeList = await hosted.inject({
+      method: "GET",
+      url: "/v1/platform/workspace-nodes",
+      headers: { ...baseHeaders, cookie: "oc_platform_session=auditor" },
+    });
+    assert.equal(nodeList.statusCode, 200);
+    assert.equal(nodeList.json().nodes[0].id, "workspace-node-a");
+    const registerNode = await hosted.inject({
+      method: "POST",
+      url: "/v1/platform/workspace-nodes",
+      headers: { ...baseHeaders, cookie: "oc_platform_session=administrator", "content-type": "application/json" },
+      payload: {
+        id: "workspace-node-b",
+        endpointUrl: "https://workspace-node-b.nodes.internal:4101",
+        tlsServerName: "workspace-node-b.nodes.internal",
+        reason: "Register a second private workspace node",
+      },
+    });
+    assert.equal(registerNode.statusCode, 201);
+    const assignment = await hosted.inject({
+      method: "PUT",
+      url: `/v1/platform/tenants/${elevation.targetOrganizationId}/workspace-node`,
+      headers: { ...baseHeaders, cookie: "oc_platform_session=administrator", "content-type": "application/json" },
+      payload: {
+        workspaceNodeId: "workspace-node-b",
+        reason: "Place future tenant workspaces on node B",
+        backfillUnplacedWorkspaces: false,
+      },
+    });
+    assert.equal(assignment.statusCode, 200);
+    assert.equal(calls.some((call) => call.method === "registerWorkspaceNode"), true);
+    assert.equal(calls.some((call) => call.method === "assignTenantWorkspaceNode"), true);
 
     const serviceHealth = await hosted.inject({
       method: "GET",

@@ -20,7 +20,7 @@ import { McpConnectionService } from "./connections.js";
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
-import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, WorkspaceService, type ControllerClient } from "./service.js";
+import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, RoutedControllerClient, WorkspaceService, type ControllerClient } from "./service.js";
 import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
@@ -5690,24 +5690,44 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
       })
     : undefined;
-  const controllerTlsValues = [
+  const controllerTlsClientValues = [
     env.CONTROLLER_TLS_CA_B64,
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
     env.CONTROLLER_TLS_CLIENT_KEY_B64,
-    env.CONTROLLER_TLS_SERVER_NAME,
   ];
-  if (env.CONTROLLER_URL.startsWith("https:") && !controllerTlsValues.every(Boolean)) {
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !controllerTlsClientValues.every(Boolean)) {
+    throw new Error("Hosted workspace-node connections require mutual TLS client configuration");
+  }
+  if (
+    env.LEMMACOMPUTER_INSTALLATION_KIND !== "hosted"
+    && env.CONTROLLER_URL.startsWith("https:")
+    && ![...controllerTlsClientValues, env.CONTROLLER_TLS_SERVER_NAME].every(Boolean)
+  ) {
     throw new Error("HTTPS workspace-node connections require complete mutual TLS client configuration");
   }
-  const controllerTransport = env.CONTROLLER_URL.startsWith("https:")
-    ? createMutualTlsFetch({
-        ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
-        clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
-        clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
-        serverName: env.CONTROLLER_TLS_SERVER_NAME!,
-      })
-    : fetch;
-  const controller = new HttpControllerClient(env.CONTROLLER_URL, env.CONTROLLER_INTERNAL_TOKEN, controllerTransport);
+  const controller: ControllerClient = env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
+    ? new RoutedControllerClient(platformOperatorStore!, (node) => new HttpControllerClient(
+        node.endpointUrl,
+        env.CONTROLLER_INTERNAL_TOKEN,
+        createMutualTlsFetch({
+          ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
+          clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
+          clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
+          serverName: node.tlsServerName,
+        }),
+      ))
+    : new HttpControllerClient(
+        env.CONTROLLER_URL,
+        env.CONTROLLER_INTERNAL_TOKEN,
+        env.CONTROLLER_URL.startsWith("https:")
+          ? createMutualTlsFetch({
+              ca: Buffer.from(env.CONTROLLER_TLS_CA_B64!, "base64").toString("utf8"),
+              clientCertificate: Buffer.from(env.CONTROLLER_TLS_CLIENT_CERT_B64!, "base64").toString("utf8"),
+              clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
+              serverName: env.CONTROLLER_TLS_SERVER_NAME!,
+            })
+          : fetch,
+      );
   const platformSecurityAlertDispatcher = platformOperatorStore
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET

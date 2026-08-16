@@ -35,6 +35,12 @@ In the `customer-managed` profile, the installation supports exactly one organiz
 
 Dedicated placement is an infrastructure property, not an authorization shortcut. The same organization predicates and session checks apply to pooled and dedicated placement.
 
+Hosted workspace-node registration is global platform-operator state, while a
+tenant's default node assignment is explicitly organization-scoped. The
+assignment is copied into each workspace at creation so changing a default
+cannot redirect an existing workspace to another node. Customer sessions and
+organization roles have no read or mutation path to the node registry.
+
 ## Revocation and replay rules
 
 - Membership suspension, removal, organization closure, product-session revocation, and operator elevation expiry take effect at the next protected operation.

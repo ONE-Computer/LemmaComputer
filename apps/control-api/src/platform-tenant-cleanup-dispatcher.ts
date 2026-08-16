@@ -17,9 +17,9 @@ export type PlatformTenantCleanupStore = Pick<PostgresPlatformOperatorStore,
 >;
 
 export interface PlatformTenantCleanupAdapter {
-  destroyWorkspace(workspaceId: string, providerId: string | null): Promise<void>;
+  destroyWorkspace(workspaceId: string, providerId: string | null, workspaceNodeId: string | null): Promise<void>;
   revokeGateway(workspaceId: string, accessGeneration: number): Promise<void>;
-  purgeWorkspace(workspaceId: string, accessGeneration: number): Promise<void>;
+  purgeWorkspace(workspaceId: string, accessGeneration: number, workspaceNodeId: string | null): Promise<void>;
 }
 
 export type PlatformTenantCleanupDispatcherStatus = {
@@ -33,10 +33,10 @@ export type PlatformTenantCleanupDispatcherStatus = {
 export class ControlPlaneTenantCleanupAdapter implements PlatformTenantCleanupAdapter {
   constructor(private readonly controller: ControllerClient, private readonly gateway?: GatewayClient) {}
 
-  async destroyWorkspace(workspaceId: string, providerId: string | null) {
+  async destroyWorkspace(workspaceId: string, providerId: string | null, workspaceNodeId: string | null) {
     if (!providerId) return;
     try {
-      await this.controller.destroyWorkspace(workspaceId, providerId);
+      await this.controller.destroyWorkspace(workspaceId, providerId, workspaceNodeId ?? undefined);
     } catch (error) {
       if (error instanceof LemmaComputerError && error.statusCode === 404) return;
       throw error;
@@ -48,8 +48,8 @@ export class ControlPlaneTenantCleanupAdapter implements PlatformTenantCleanupAd
     await this.gateway.revokeWorkspace(workspaceId, accessGeneration);
   }
 
-  async purgeWorkspace(workspaceId: string, accessGeneration: number) {
-    await this.controller.purgeWorkspace(workspaceId, accessGeneration);
+  async purgeWorkspace(workspaceId: string, accessGeneration: number, workspaceNodeId: string | null) {
+    await this.controller.purgeWorkspace(workspaceId, accessGeneration, workspaceNodeId ?? undefined);
   }
 }
 
@@ -111,7 +111,7 @@ export class PlatformTenantCleanupDispatcher {
       let current: PlatformTenantCleanupJob = job;
       if (!current.controllerDestroyedAt) {
         current = await this.store.renewTenantCleanupLease(job.id, job.leaseToken, job.accessGeneration, this.now());
-        await this.adapter.destroyWorkspace(job.workspaceId, job.providerId);
+        await this.adapter.destroyWorkspace(job.workspaceId, job.providerId, job.workspaceNodeId);
         current = await this.store.recordTenantCleanupProgress(job.id, job.leaseToken, "controller", this.now());
       }
       if (!current.gatewayRevokedAt) {
@@ -121,7 +121,7 @@ export class PlatformTenantCleanupDispatcher {
       }
       if (current.action === "close" && !current.storagePurgedAt) {
         current = await this.store.renewTenantCleanupLease(job.id, job.leaseToken, job.accessGeneration, this.now());
-        await this.adapter.purgeWorkspace(job.workspaceId, job.accessGeneration);
+        await this.adapter.purgeWorkspace(job.workspaceId, job.accessGeneration, job.workspaceNodeId);
         await this.store.recordTenantCleanupProgress(job.id, job.leaseToken, "storage", this.now());
       }
       await this.store.completeTenantCleanupJob(job.id, job.leaseToken, this.now());

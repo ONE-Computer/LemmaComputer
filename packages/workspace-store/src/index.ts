@@ -970,7 +970,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
         const id = randomUUID();
         const now = new Date();
         const inserted = await client.query(
-          "INSERT INTO workspaces (id,tenant_id,subject_id,grant_id,state,created_at,updated_at) VALUES ($1,$2,$3,$4,'not_created',$5,$5) RETURNING *",
+          `INSERT INTO workspaces (
+             id,tenant_id,subject_id,grant_id,state,workspace_node_id,created_at,updated_at
+           ) VALUES (
+             $1,$2,$3,$4,'not_created',(
+               SELECT assignment.workspace_node_id
+               FROM tenant_workspace_node_assignments assignment
+               JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
+               WHERE assignment.tenant_id=$2 AND node.state='active'
+             ),$5,$5
+           ) RETURNING *`,
           [id, identity.tenantId, identity.subjectId, grantId, now],
         );
         record = mapRow(inserted.rows[0]);

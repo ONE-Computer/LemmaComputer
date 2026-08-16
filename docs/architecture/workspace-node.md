@@ -16,6 +16,44 @@ gateway/Control routes. The node rechecks the provider's workspace label on
 status, open, egress update, and destroy so a provider ID cannot be substituted
 across workspaces.
 
+## Hosted C-minus placement
+
+Hosted Control uses a durable registry rather than load-balancing lifecycle
+requests across node controllers. The registry stores a stable node id, private
+HTTPS endpoint, expected certificate name, and one of `active`, `draining`, or
+`disabled`. It does not store private keys or bearer credentials. A tenant has
+one default node assignment for new workspaces, and every created workspace
+copies that node id into its own row. Changing the tenant default therefore
+affects only future workspaces; status, open, policy update, restart, stop,
+delete, and tenant-cleanup calls continue to use each workspace's persisted
+owner.
+
+Only a step-up-authenticated platform administrator can mutate placement:
+
+- `POST /v1/platform/workspace-nodes` registers a private node endpoint;
+- `PATCH /v1/platform/workspace-nodes/:workspaceNodeId/state` drains or
+  disables a node;
+- `PUT /v1/platform/tenants/:tenantId/workspace-node` changes the default for
+  new workspaces; and
+- the corresponding GET routes expose nodes and assignments to the workforce
+  operator realm, never the customer realm.
+
+Registration starts a node as `active`. A draining node owns and serves its
+existing workspaces but is not eligible when a new workspace copies its tenant
+assignment. A disabled node is fail-closed for all routed lifecycle calls.
+Before disabling a node, operators must destroy or otherwise disposition its
+persisted workspaces. For a first upgrade from the previous single-node hosted
+shape, the assignment request may explicitly backfill unplaced workspace rows;
+that option is safe only when the operator has confirmed that the registered
+node is their actual legacy owner. Every mutation and backfill count is written
+to the platform audit ledger.
+
+The C-minus scheduler deliberately has no heartbeat, capacity scoring,
+automatic failover, or live workspace migration. An absent assignment, absent
+workspace owner, node mismatch, disabled node, or purge receipt bearing another
+node id fails closed. These omissions buy a productionizable multi-node shape
+without pretending that rescheduling a stateful Docker volume is safe.
+
 ## Remote network contract
 
 Expose only these private paths:
@@ -77,7 +115,8 @@ capability switch, exact enforced profile label, and an unprivileged namespace
 probe are all fail-closed preconditions to workspace readiness.
 
 Set the workspace-node contract through `.env` and run `npm run env:check
--- --profile=hosted`. Remote deployments require the node URL and both private
+-- --profile=hosted`. Remote deployments require the bootstrap/qualification
+node URL and both private
 application URLs to use HTTPS, complete client and server mTLS certificate
 material, a private advertised desktop host, a private bind address, the
 restricted application network, and workspace-ingress upstream TLS
@@ -85,6 +124,11 @@ verification. Certificate private keys remain with their owning workloads:
 the node server key reaches only the node, the Control client key reaches only
 Control, the ingress client key reaches only workspace ingress, and the
 application-gateway client key reaches only the remote node controller.
+Hosted Control uses the registry endpoint and certificate name for each
+lifecycle call; the configured Control client CA/certificate/key and internal
+node token are shared C-minus credentials and should be rotated as a single
+node-fleet trust domain. Per-node credentials are a later hardening step, not a
+prerequisite for sticky routing.
 
 ## Storage and removal
 
