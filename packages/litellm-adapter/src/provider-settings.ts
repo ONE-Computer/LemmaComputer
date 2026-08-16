@@ -549,6 +549,8 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           metadata: {
             lemmacomputer_purpose: "provider-route-test",
             lemmacomputer_non_billable_exemption: "provider-route-test-v1",
+            lemmacomputer_provider: provider,
+            lemmacomputer_deployment_id: accessGroup ?? model,
           },
         },
       });
