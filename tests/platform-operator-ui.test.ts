@@ -8,7 +8,7 @@ const session = {
     realm: "platform-operator",
     operatorSessionId: "22222222-2222-4222-8222-222222222222",
     operatorId: "33333333-3333-4333-8333-333333333333",
-    identity: { provider: "workforce-entra", issuer: "https://issuer.example.test", subject: "operator" },
+    identity: { provider: "better-auth", issuer: "https://issuer.example.test", subject: "operator" },
     assurance: { level: "aal2", factors: ["federated", "totp"] },
     authenticatedAt: "2026-08-09T03:00:00.000Z",
     recentStepUpAt: "2026-08-09T03:05:00.000Z",
@@ -27,7 +27,7 @@ test("operator UI encodes bootstrap JSON and optional base URL as inert data", (
   assert.match(html, /&quot;&gt;&lt;script&gt;/);
 });
 
-test("operator UI identifies the local Better Auth realm without claiming workforce Entra", () => {
+test("operator UI identifies the isolated passkey realm", () => {
   const html = renderPlatformOperatorUi({
     ...session,
     principal: {
@@ -36,7 +36,7 @@ test("operator UI identifies the local Better Auth realm without claiming workfo
       assurance: { level: "aal2", factors: ["passkey"] },
     },
   } as PlatformOperatorSession);
-  assert.match(html, /Local platform operator realm/);
-  assert.match(html, /Worktree control plane/);
+  assert.match(html, /Platform passkey realm/);
+  assert.match(html, /Platform control plane/);
   assert.doesNotMatch(html, /Workforce operator realm/);
 });

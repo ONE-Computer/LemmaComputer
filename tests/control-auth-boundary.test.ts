@@ -21,11 +21,10 @@ const principal: SessionPrincipal = {
   identity: alpha,
 };
 
-const authentication = (authenticated: SessionPrincipal | null) => ({
-  begin: async () => ({ location: "https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("not used"); },
-  authenticate: async (cookie: string | undefined) => cookie === "lemmacomputer_session=valid" ? authenticated : null,
-  logout: async () => "lemmacomputer_session=; Max-Age=0",
+const productAuthentication = (authenticated: SessionPrincipal | null) => ({
+  resolve: async (headers: Headers) => headers.get("cookie") === "lemmacomputer_session=valid" && authenticated
+    ? { status: "authorized" as const, principal: authenticated }
+    : { status: "anonymous" as const },
 });
 
 test("the authenticated MCP policy route accepts bounded upload-sized authorization envelopes", async () => {
@@ -126,7 +125,7 @@ test("runtime identity comes only from the authenticated server session", async 
   const owned = await store.createOrGet(alpha, "personal", "identity-boundary-workspace");
   await store.update(owned.id, { state: "ready" });
   const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
-    authentication: authentication(principal),
+    customerProductAuthentication: productAuthentication(principal),
     agentBridgeSecret: "control-auth-test-agent-bridge-secret-at-least-32-characters",
   });
   try {
@@ -206,95 +205,6 @@ test("runtime identity comes only from the authenticated server session", async 
     assert.equal(employeeInvitations.statusCode, 403);
   } finally {
     await app.close();
-  }
-});
-
-test("External ID routes allow hosted and explicit worktree qualification while preserving one generic public failure", async () => {
-  const calls: Array<{ method: "begin" | "complete"; input?: unknown }> = [];
-  const externalIdAuthentication = {
-    begin: async (returnPath?: string, invitation?: string) => {
-      calls.push({ method: "begin", input: { returnPath, invitation } });
-      if (invitation === "rejected-invitation-token-value") throw new Error("invited@example.test is not eligible");
-      return { location: "https://external-tenant.ciamlogin.com/tenant/oauth2/v2.0/authorize", cookie: "oc_external_id_state=opaque" };
-    },
-    complete: async () => {
-      calls.push({ method: "complete" });
-      throw new Error("wrong issuer for invited@example.test");
-    },
-    authenticate: async () => null,
-    logout: async () => "",
-  };
-  const workforceAuthentication = authentication(null);
-  const hosted = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
-    installationKind: "hosted",
-  }, {
-    authentication: workforceAuthentication,
-    externalIdAuthentication,
-    agentBridgeSecret: "hosted-auth-agent-bridge-secret-at-least-32-characters",
-  });
-  const customerManaged = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
-    installationKind: "customer-managed",
-  }, {
-    authentication: workforceAuthentication,
-    externalIdAuthentication,
-    agentBridgeSecret: "customer-auth-agent-bridge-secret-at-least-32-characters",
-  });
-  const worktree = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {
-    installationKind: "worktree",
-  }, {
-    authentication: workforceAuthentication,
-    externalIdAuthentication,
-    agentBridgeSecret: "worktree-auth-agent-bridge-secret-at-least-32-characters",
-  });
-  const headers = { "x-lemmacomputer-proxy-token": proxyToken };
-  try {
-    const workforceHosted = await hosted.inject({ method: "GET", url: "/v1/auth/login", headers });
-    assert.equal(workforceHosted.statusCode, 302);
-    assert.deepEqual(calls[0], { method: "begin", input: { returnPath: undefined, invitation: undefined } });
-
-    const started = await hosted.inject({
-      method: "POST",
-      url: "/v1/auth/external-id/invitation",
-      headers,
-      payload: { invitation: "accepted-invitation-token-value", return: "/?view=people" },
-    });
-    assert.equal(started.statusCode, 200);
-    assert.equal(started.json().location, "https://external-tenant.ciamlogin.com/tenant/oauth2/v2.0/authorize");
-    assert.deepEqual(calls[1], {
-      method: "begin",
-      input: { returnPath: "/?view=people", invitation: "accepted-invitation-token-value" },
-    });
-
-    for (const payload of [{}, { invitation: "rejected-invitation-token-value" }]) {
-      const rejected = await hosted.inject({ method: "POST", url: "/v1/auth/external-id/invitation", headers, payload });
-      assert.equal(rejected.statusCode, 403);
-      assert.equal(rejected.json().error.code, "EXTERNAL_ID_SIGNIN_FAILED");
-      assert.doesNotMatch(rejected.body, /invited@example\.test|wrong issuer|not eligible/);
-    }
-    const callbackRejected = await hosted.inject({ method: "GET", url: "/v1/auth/external-id/callback?state=opaque&code=wrong-issuer-code", headers });
-    assert.equal(callbackRejected.statusCode, 303);
-    assert.equal(callbackRejected.headers.location, "/?signin=error&reason=EXTERNAL_ID_SIGNIN_FAILED");
-    assert.doesNotMatch(callbackRejected.body, /invited@example\.test|wrong issuer|not eligible/);
-
-    const externalIdCustomerManaged = await customerManaged.inject({
-      method: "POST",
-      url: "/v1/auth/external-id/invitation",
-      headers,
-      payload: { invitation: "accepted-invitation-token-value" },
-    });
-    assert.equal(externalIdCustomerManaged.statusCode, 404);
-    const customerBody = externalIdCustomerManaged.json();
-    assert.equal(customerBody.error.code, "AUTH_PROVIDER_NOT_AVAILABLE");
-    const externalIdWorktree = await worktree.inject({
-      method: "POST",
-      url: "/v1/auth/external-id/invitation",
-      headers,
-      payload: { invitation: "accepted-invitation-token-value", return: "/?view=people" },
-    });
-    assert.equal(externalIdWorktree.statusCode, 200);
-    assert.equal(calls.filter((call) => call.method === "begin").length, 4);
-  } finally {
-    await Promise.all([hosted.close(), customerManaged.close(), worktree.close()]);
   }
 });
 
@@ -682,7 +592,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
   } as unknown as GatewayClient;
   const connectorRegistry = new MemoryConnectorRegistryStore();
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, gateway, undefined, {}, {
-    authentication: authentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
+    customerProductAuthentication: productAuthentication(administrator), identityPolicyStore, connectorRegistryStore: connectorRegistry,
     invitationDelivery: { mode: "copy-link" },
     agentBridgeSecret: "control-auth-policy-agent-bridge-secret-at-least-32-characters",
   });

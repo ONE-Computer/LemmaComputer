@@ -193,7 +193,7 @@ test("a different signed-in account stays on the invitation and can explicitly s
 
   await expect(page.getByRole("heading", { name: "Join Acme Research" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeVisible();
-  expect(signOutRequests).toBe(3);
+  expect(signOutRequests).toBe(2);
 });
 
 test("a new invitee sees a durable verification step that will finish the invitation", async ({ page }) => {

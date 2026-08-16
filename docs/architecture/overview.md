@@ -228,8 +228,8 @@ flows, state custody, budget defense in depth, and failure matrix.
 
 The Web proxy token is not a user identity. It only identifies the trusted Web
 process; the validated authentication session plus active product membership
-establish the employee principal. Workforce Entra and hosted External ID routes
-remain bounded transitional adapters and are not this core flow.
+establish the employee principal. No direct workforce-Entra or hosted External
+ID customer route exists outside this core flow.
 
 ### Workspace provisioning
 
@@ -340,7 +340,7 @@ are excluded from the user-controlled operation fingerprint.
 | `lemmacomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
 | `consent-private` | Control, OpenVTC | No |
 | `gateway-private` | Control, LiteLLM, gateway database, M365 MCP, model egress proxy | No |
-| `identity-egress` | Control | Yes, for Entra discovery and token exchange |
+| `identity-egress` | Control | Yes, for configured social OAuth and company SSO discovery/token exchange |
 | `model-egress` | model egress proxy, remote-MCP egress proxy | Yes, restricted by separate model and remote-MCP policies |
 | `microsoft-egress` | M365 MCP | Yes, for Microsoft identity and Graph |
 | `channel-egress` | channel broker | Yes, for configured channel providers |

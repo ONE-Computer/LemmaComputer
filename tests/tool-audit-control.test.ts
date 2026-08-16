@@ -149,11 +149,10 @@ test("the HTTP audit view is organization-scoped and requires audit.read", async
     undefined,
     {},
     {
-      authentication: {
-        begin: async () => ({ location: "https://login.example.test", cookie: "state=1" }),
-        complete: async () => { throw new Error("not used"); },
-        authenticate: async (cookie) => cookie === "session=valid" ? { ...actor, roles: currentRoles } : null,
-        logout: async () => "",
+      customerProductAuthentication: {
+        resolve: async (headers: Headers) => headers.get("cookie") === "session=valid"
+          ? { status: "authorized" as const, principal: { ...actor, roles: currentRoles } }
+          : { status: "anonymous" as const },
       },
       toolAuditStore: store,
       agentBridgeSecret: "tool-audit-agent-bridge-secret-at-least-32-characters",

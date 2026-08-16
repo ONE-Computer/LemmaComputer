@@ -7,18 +7,18 @@ const session = {
     operatorSessionId: "22222222-2222-4222-8222-222222222222",
     operatorId: "33333333-3333-4333-8333-333333333333",
     identity: {
-      provider: "workforce-entra" as const,
-      issuer: "https://login.microsoftonline.com/workforce/v2.0",
+      provider: "better-auth" as const,
+      issuer: "urn:lemmacomputer:platform-authentication",
       subject: "operator-object-id",
     },
-    assurance: { level: "aal2" as const, factors: ["federated" as const, "totp" as const] },
+    assurance: { level: "aal2" as const, factors: ["passkey" as const] },
     authenticatedAt: "2026-08-09T03:00:00.000Z",
     recentStepUpAt: "2026-08-09T03:05:00.000Z",
   },
   roles: ["platform-administrator" as const],
 };
 
-test("platform operator workbench is a separate workforce surface with operational and elevation controls", async ({ page }, testInfo) => {
+test("platform operator workbench is a separate passkey surface with operational and elevation controls", async ({ page }, testInfo) => {
   let requestedElevation: Record<string, unknown> | undefined;
   let registeredNode: Record<string, unknown> | undefined;
   let placementRequest: Record<string, unknown> | undefined;
@@ -75,7 +75,7 @@ test("platform operator workbench is a separate workforce surface with operation
 
   await page.setContent(renderPlatformOperatorUi(session, { baseHref: "http://platform.test/" }));
   await expect(page.getByRole("heading", { name: "Platform operations" })).toBeVisible();
-  await expect(page.getByText("Workforce operator realm")).toBeVisible();
+  await expect(page.getByText("Platform passkey realm")).toBeVisible();
   await expect(page.getByRole("cell", { name: "Northwind" })).toBeVisible();
   await expect(page.getByText("Identity callbacks degraded")).toBeVisible();
   await expect(page.getByText("Degraded", { exact: true })).toBeVisible();
@@ -142,21 +142,21 @@ test("security auditor workbench hides mutation controls", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Assign organization placement" })).toBeHidden();
 });
 
-test("Lax operator session reaches a cross-site step-up GET callback but not a cross-site POST", async ({ context, page }) => {
+test("Strict platform sessions are withheld from cross-site GET and POST requests", async ({ context, page }) => {
   await context.addCookies([{
-    name: "oc_platform_session",
+    name: "lemmacomputer-platform.session_token",
     value: "opaque-session",
     domain: "platform.test",
     path: "/api/v1/platform",
     httpOnly: true,
     secure: false,
-    sameSite: "Lax",
+    sameSite: "Strict",
   }]);
   let callbackCookie = "";
   let mutationCookie = "not-observed";
   await page.route("http://source.test/**", (route) => route.fulfill({
     contentType: "text/html",
-    body: `<a id="callback" href="http://platform.test/api/v1/platform/auth/step-up/callback?state=x&code=y">Continue</a>
+    body: `<a id="step-up" href="http://platform.test/api/v1/platform/auth/step-up?return=%2Fplatform">Continue</a>
       <form id="mutation" method="post" action="http://platform.test/api/v1/platform/support/elevations"><button>Submit</button></form>`,
   }));
   await page.route("http://platform.test/api/v1/platform/**", (route) => {
@@ -166,8 +166,8 @@ test("Lax operator session reaches a cross-site step-up GET callback but not a c
     return route.fulfill({ status: 204 });
   });
   await page.goto("http://source.test/");
-  await page.locator("#callback").click();
-  await expect.poll(() => callbackCookie).toContain("oc_platform_session=opaque-session");
+  await page.locator("#step-up").click();
+  await expect.poll(() => callbackCookie).toBe("");
   await page.goto("http://source.test/");
   await page.locator("#mutation button").click();
   await expect.poll(() => mutationCookie).toBe("");

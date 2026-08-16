@@ -86,7 +86,7 @@ test("environment initialization creates separate Telegram grant and envelope ke
   assert.equal(publicKey("LEMMACOMPUTER_TELEGRAM_INTAKE_ENCRYPTION_PUBLIC_KEY_B64").asymmetricKeyType, "rsa");
 });
 
-test("an initialized worktree-profile environment starts without a Microsoft Entra tenant", async () => {
+test("initialized environments do not require a Microsoft identity application", async () => {
   const template = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   const initialized = initializeEnvironment(template, "Etc/UTC");
   const environmentOf = (contents: string) => Object.fromEntries(parseEnvironment(contents).values);
@@ -95,12 +95,7 @@ test("an initialized worktree-profile environment starts without a Microsoft Ent
   assert.equal(evaluation.LEMMACOMPUTER_INSTALLATION_KIND, "worktree");
   assert.doesNotThrow(() => validateDeploymentEnvironment(evaluation, { strict: true }));
 
-  // The canonical default is unchanged and still requires real Entra values
-  // before Compose renders, so evaluation cannot silently weaken a deployment.
-  assert.throws(
-    () => validateDeploymentEnvironment(environmentOf(initialized), { strict: true }),
-    /ENTRA_TENANT_ID/,
-  );
+  assert.doesNotThrow(() => validateDeploymentEnvironment(environmentOf(initialized), { strict: true }));
 });
 
 test("compose shutdown refuses to bypass managed workspace lifecycle", () => {

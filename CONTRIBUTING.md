@@ -68,7 +68,6 @@ applicable suites below:
 | MCP destination isolation | `npm run qualify:mcp-egress` |
 | Reasoning/model adapter behavior | `npm run qualify:reasoning-adapter` |
 | Workspace startup/readiness | `npm run qualify:workspace-startup` |
-| External identity contract | `npm run qualify:external-id` |
 | Better Auth compatibility | `npm run qualify:better-auth` |
 | Governed routing integrations | `npm run qualify:auto-routing` and/or `npm run qualify:governed-routing` |
 | Office document regressions | `npm run fixtures:office-regression` and `npm run qualify:office-roundtrip` |

@@ -10,9 +10,8 @@ const safeAttribute = (value: string) => value
 
 export function renderPlatformOperatorUi(session: PlatformOperatorSession, options: { baseHref?: string } = {}) {
   const bootstrap = safeJson({ roles: session.roles, operatorId: session.principal.operatorId });
-  const localPlatformRealm = session.principal.identity.provider === "better-auth";
-  const realmLabel = localPlatformRealm ? "Local platform operator realm" : "Workforce operator realm";
-  const controlPlaneLabel = localPlatformRealm ? "Worktree control plane" : "Hosted control plane";
+  const realmLabel = "Platform passkey realm";
+  const controlPlaneLabel = "Platform control plane";
   return `<!doctype html>
 <html lang="en">
 <head>

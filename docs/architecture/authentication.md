@@ -49,11 +49,11 @@ identity-silo deployment.
 
 ## Context
 
-The Control API previously implemented Microsoft Entra OIDC directly in
-`apps/control-api/src/auth.ts`. The embedded Better Auth runtime now owns the
-primary customer authentication paths under `/api/v1/auth/customer/*`, while
-transitional Microsoft adapters remain behind the provider-neutral boundary.
-After any configured method authenticates a person, Control maps the stable
+The Control API previously implemented Microsoft Entra OIDC directly. That
+adapter and the hosted External ID adapter have been removed. The embedded
+Better Auth runtime owns customer authentication under
+`/api/v1/auth/customer/*` in every deployment profile. After any configured
+method authenticates a person, Control maps the stable
 authentication account into the existing product domain:
 
 - `account_users` is the stable product account;
@@ -432,16 +432,14 @@ idempotent; delivery and activation attempts are durably rate limited.
 
 ## Platform-operator realm
 
-Platform operators remain outside the customer Better Auth realm. They have a
-separate identity store, signing keys, host-only cookie namespace, session
-audience, and role model. The hosted adapter currently uses a dedicated
-workforce Entra application. The worktree profile uses a separate Better Auth
-passkey realm so the real authorization, placement, and audit flow can be
-tested locally without an external identity provider.
+Platform operators remain outside the customer Better Auth realm. Hosted and
+worktree deployments use a separate Better Auth passkey realm with its own
+database, signing keys, host-only cookie namespace, session audience, and role
+model. Customer-managed deployments do not expose the platform realm.
 
 ```text
 Platform operator
-    -> hosted: workforce Entra; worktree: platform Better Auth passkey
+    -> isolated platform Better Auth passkey
     -> separate platform session
     -> platform role
     -> time-bound audited support elevation
@@ -457,14 +455,16 @@ Never add a permanent customer-account `is_global_admin` bypass. Platform
 support access requires target tenant, reason, scope, expiry, recent step-up,
 audit, and configured approval.
 
-The worktree enrollment fixture is deliberately narrower than a production
-login provider. The reference stack binds it to loopback. A generated secret
-creates one fixed local platform administrator through an internal-only
-credential route; the browser can only call the passkey surface. After the
-first verified passkey is registered, Control deletes the credential account
-and all bootstrap sessions. Subsequent access is passkey-only with required
-resident credentials and user verification. Customer sessions, customer
-cookies, and organization SSO never authenticate this realm.
+Enrollment is deliberately narrower than a general login provider. A one-time
+secret creates the configured first platform administrator through an
+internal-only credential route; the browser can otherwise call only the
+passkey surface. Hosted requires an explicit operator email and HTTPS. After
+the first verified passkey is registered, Control deletes the credential
+account and all bootstrap sessions, and the deployment secret may be removed.
+Subsequent access is passkey-only with required resident credentials and user
+verification. Customer sessions, customer cookies, and organization SSO never
+authenticate this realm. Worktree uses the same flow with a generated local
+identity and loopback origin.
 
 ## Security baseline
 
@@ -517,19 +517,19 @@ and apply the following deployment controls:
   provider-token, MFA-secret, and session compromise, with forced revocation and
   recovery.
 
-## Implementation status and remaining contraction
+## Implementation status
 
-Phases 1 through 5 below are implemented in the current product core. Phase 6
-is a deliberate compatibility contraction and must not be inferred merely from
-the availability of Better Auth. Transitional routes are retired only through a
-separately reviewed change with recovery and rollback evidence.
+The provider-neutral boundary, Better Auth foundation, universal customer
+login, invitations, tenant-configured enterprise SSO, and Microsoft adapter
+contraction are implemented. There are no direct workforce-Entra or External
+ID customer authentication routes or deployment inputs.
 
 ### Phase 1: provider-neutral boundary
 
 - Record this decision in issue #51 and its threat model.
 - Introduce a provider-neutral `AuthenticatedPrincipal` and authentication
   capability contract.
-- Keep existing Entra and External ID adapters operational behind the boundary.
+- Remove provider-specific product authority from the authentication boundary.
 
 ### Phase 2: Better Auth foundation
 
@@ -558,21 +558,20 @@ separately reviewed change with recovery and rollback evidence.
 - Add domain verification, test-before-enforcement, recovery, audit, and secret
   or certificate rotation.
 
-### Phase 6: Microsoft customer-adapter contraction
+### Phase 6: Microsoft customer-adapter contraction (complete)
 
 - Stop creating new External ID-only customer identities.
 - Link existing Microsoft identities only after authenticated proof.
 - Never attempt to migrate Microsoft passwords or MFA secrets.
-- Retire External ID routes and configuration only after Better Auth recovery,
-  rollback, and release qualification pass.
-- Keep hosted workforce Entra for the separate platform-operator realm unless
-  a later ADR replaces it; keep the worktree passkey fixture development-only.
+- External ID and workforce-Entra routes, configuration, and runtime adapters
+  are removed.
+- Hosted and worktree platform operators use the isolated passkey realm.
 
 ## Alternatives considered
 
 | Alternative | Decision |
 | --- | --- |
-| Microsoft Entra External ID | Retain only as a transitional customer adapter; reject as the mandatory universal customer identity plane |
+| Microsoft Entra External ID | Rejected and removed as a product authentication dependency; Microsoft remains an optional Better Auth social provider or tenant SSO provider |
 | Amazon Cognito | Reject as the default because hosted and customer-managed profiles would not share the same complete authentication implementation and operational contract |
 | Auth0 or WorkOS | Do not select as the default because managed convenience increases vendor and pricing dependency; they remain future adapters if justified |
 | Custom password, MFA, SAML, or OIDC implementation | Reject because the cryptographic and protocol risk is unacceptable |

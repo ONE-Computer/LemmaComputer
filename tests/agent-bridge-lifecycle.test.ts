@@ -153,11 +153,8 @@ test("agent bridge server rejects endpoint scopes and refuses shared signing sec
   );
   assert.throws(
     () => createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
-      authentication: {
-        begin: async () => ({ location: "https://example.test/login", cookie: "state=opaque" }),
-        complete: async () => { throw new Error("not used"); },
-        authenticate: async () => null,
-        logout: async () => "",
+      customerProductAuthentication: {
+        resolve: async () => ({ status: "anonymous" as const }),
       },
     }),
     /AGENT_BRIDGE_SECRET is required/,

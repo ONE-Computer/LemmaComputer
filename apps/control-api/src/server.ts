@@ -22,7 +22,6 @@ import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, RoutedControllerClient, WorkspaceService, type ControllerClient } from "./service.js";
-import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
@@ -57,13 +56,14 @@ import {
 } from "./customer-product-authentication.js";
 import { fromNodeHeaders } from "better-auth/node";
 import { registerPlatformOperatorRoutes, type PlatformOperatorAuthenticationBoundary, type PlatformOperatorStoreBoundary } from "./platform-operator-routes.js";
-import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.js";
 import {
   BetterAuthPlatformOperatorAuthenticationService,
   createPlatformAuthentication,
   platformAuthenticationControlPath,
   registerPlatformAuthenticationRoutes,
+  worktreePlatformOperatorBootstrap,
   type PlatformAuthentication,
+  type PlatformOperatorBootstrap,
 } from "./platform-better-authentication.js";
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
@@ -75,7 +75,6 @@ import {
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-usage.js";
-type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
   "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
@@ -86,6 +85,25 @@ type TenantSsoAdministrationBoundary = Pick<
   "list" | "register" | "requestDomainVerification" | "verifyDomain" | "startTest" | "completeTest" | "startEnforcedSignIn" | "startInvitationSignIn" | "transition"
   | "rotateCredentials" | "refreshMetadata" | "disconnect"
 > & Partial<Pick<TenantSsoAdministrationService, "isInvitationSignInAvailable">>;
+
+const testPrincipalFromHeaders = (headers: Record<string, unknown>): SessionPrincipal => {
+  const tenantId = String(headers["x-lemmacomputer-test-tenant-id"] ?? "test-tenant");
+  const userId = String(headers["x-lemmacomputer-test-user-id"] ?? "test-user");
+  return {
+    userId,
+    tenantId,
+    organizationId: tenantId,
+    membershipId: `test-membership:${tenantId}:${userId}`,
+    membershipStatus: "active",
+    role: "owner",
+    email: `${userId}@example.test`,
+    displayName: userId,
+    tenantDisplayName: tenantId,
+    tenantKind: "organization",
+    roles: ["owner", "administrator"],
+    identity: { tenantId, subjectId: userId, audience: "lemmacomputer-control" },
+  };
+};
 
 const invitationContextCookieName = "lemmacomputer_invitation_context";
 const invitationContextFromCookie = (header: string | undefined) => {
@@ -461,7 +479,9 @@ const envSchema = z.object({
   BETTER_AUTH_SECRETS: z.string().min(1),
   PLATFORM_AUTH_DATABASE_URL: optionalEnvString(),
   PLATFORM_BETTER_AUTH_SECRETS: optionalEnvString(),
-  PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET: optionalEnvString(32),
+  PLATFORM_AUTH_BOOTSTRAP_EMAIL: optionalEnvString(),
+  PLATFORM_AUTH_BOOTSTRAP_DISPLAY_NAME: z.string().min(1).default("Platform administrator"),
+  PLATFORM_AUTH_BOOTSTRAP_SECRET: optionalEnvString(32),
   BETTER_AUTH_TRUSTED_PROXY_CIDRS: z.string().default(""),
   CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: z.string().default(""),
   AUTH_EMAIL_TRANSPORT: z.enum(["capture", "postmark"]),
@@ -502,22 +522,9 @@ const envSchema = z.object({
   WEB_PUSH_VAPID_PUBLIC_KEY: optionalEnvString(),
   WEB_PUSH_VAPID_PRIVATE_KEY: optionalEnvString(),
   WEB_PUSH_SUBSCRIPTION_SECRET: optionalEnvString(32),
-  ENTRA_TENANT_ID: z.string().min(1),
-  ENTRA_CLIENT_ID: z.string().min(1),
-  ENTRA_CLIENT_SECRET: z.string().min(1),
-  EXTERNAL_ID_TENANT_ID: optionalEnvString(),
-  EXTERNAL_ID_TENANT_SUBDOMAIN: optionalEnvString(),
-  EXTERNAL_ID_CLIENT_ID: optionalEnvString(),
-  EXTERNAL_ID_CLIENT_SECRET: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_TENANT_ID: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_CLIENT_ID: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: optionalEnvString(),
-  PLATFORM_OPERATOR_SESSION_SECRET: optionalEnvString(32),
-  PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: optionalEnvString(),
   PLATFORM_SECURITY_ALERT_WEBHOOK_URL: optionalEnvString(),
   PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: optionalEnvString(32),
   PLATFORM_SUPPORT_APPROVAL_REQUIRED: z.enum(["true", "false"]).default("true"),
-  SESSION_SECRET: z.string().min(32),
   AI_USAGE_INTERNAL_TOKEN: z.string().min(32),
   AI_USAGE_TASK_BINDING_SECRET: z.string().min(32),
   WORKSPACE_INGRESS_PUBLIC_URL: optionalEnvString(),
@@ -544,9 +551,6 @@ const envSchema = z.object({
   POLICY_BUNDLE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
-  BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
-  TENANT_DISPLAY_NAME: z.string().min(1).default("Example Organization"),
-  BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
 
 export const usesPlacementRoutedController = (input: {
@@ -597,8 +601,6 @@ export function createControlServer(
     configuredStaticMcpClients?: StaticCredentialGroup[];
   } = {},
   security: {
-    authentication?: AuthenticationBoundary;
-    externalIdAuthentication?: AuthenticationBoundary;
     customerAuthentication?: CustomerAuthentication;
     customerSsoAuthentication?: CustomerAuthentication;
     customerProductAuthentication?: CustomerProductAuthenticationBoundary;
@@ -695,8 +697,8 @@ export function createControlServer(
     bodyLimit: 32 * 1024,
     routerOptions: { maxParamLength: 2048 },
   });
-  if (!security.authentication && !security.customerProductAuthentication && !security.testIdentityMode) {
-    throw new Error("Control requires a customer or compatibility authentication boundary; test identity mode must be enabled explicitly in tests");
+  if (!security.customerProductAuthentication && !security.testIdentityMode) {
+    throw new Error("Control requires the customer Better Auth product boundary; test identity mode must be enabled explicitly in tests");
   }
   const invitationDelivery = security.invitationDelivery
     ?? (security.testIdentityMode ? { mode: "copy-link" as const } : undefined);
@@ -1097,7 +1099,7 @@ export function createControlServer(
       if (connectionOptions.installationKind === "customer-managed") {
         return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found", correlationId: request.id, retryable: false } });
       }
-      if (requestPath === "/v1/platform/auth/login" || requestPath === "/v1/platform/auth/callback") return;
+      if (requestPath === "/v1/platform/auth/login") return;
       if (!security.platformOperatorAuthentication) {
         return reply.code(503).send({ error: { code: "PLATFORM_AUTH_NOT_CONFIGURED", message: "Platform authentication is unavailable", correlationId: request.id, retryable: true } });
       }
@@ -1111,8 +1113,6 @@ export function createControlServer(
       platformOperatorPrincipals.set(request, operator);
       return;
     }
-    if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
-      || requestPath.startsWith("/v1/auth/external-id/")) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
       || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
@@ -1137,9 +1137,7 @@ export function createControlServer(
       ? testPrincipalFromHeaders(request.headers)
       : customerResolution?.status === "authorized"
         ? customerResolution.principal
-        : security.authentication
-          ? await security.authentication.authenticate(request.headers.cookie)
-          : null;
+        : null;
     if (!principal) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
     }
@@ -2165,59 +2163,6 @@ export function createControlServer(
       request.id,
     );
   });
-  app.get<{ Querystring: { return?: string } }>("/v1/auth/login", async (request, reply) => {
-    if (connectionOptions.installationKind === "hosted") {
-      if (!security.externalIdAuthentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Hosted sign-in is not configured", 503);
-      const started = await security.externalIdAuthentication.begin(request.query.return);
-      return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
-    }
-    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
-    const started = await security.authentication.begin(request.query.return);
-    return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
-  });
-  app.post<{ Body: { invitation?: string; return?: string } }>("/v1/auth/external-id/invitation", async (request, reply) => {
-    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
-      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
-    }
-    try {
-      const input = z.strictObject({ invitation: z.string().min(20).max(512), return: z.string().optional() }).parse(request.body ?? {});
-      const started = await security.externalIdAuthentication.begin(input.return, input.invitation);
-      return reply.header("set-cookie", started.cookie).send({ location: started.location });
-    } catch {
-      throw new LemmaComputerError("EXTERNAL_ID_SIGNIN_FAILED", "This sign-in could not be started", 403);
-    }
-  });
-  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/external-id/callback", async (request, reply) => {
-    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
-      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
-    }
-    try {
-      const completed = await security.externalIdAuthentication.complete({ ...request.query, cookie: request.headers.cookie });
-      reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
-      return reply.code(303).header("location", completed.returnPath).send();
-    } catch (error) {
-      request.log.warn({ code: error instanceof LemmaComputerError ? error.code : "EXTERNAL_ID_FAILED" }, "External ID callback rejected");
-      return reply.code(303).header("location", "/?signin=error&reason=EXTERNAL_ID_SIGNIN_FAILED").send();
-    }
-  });
-  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/callback", async (request, reply) => {
-    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
-    try {
-      const completed = await security.authentication.complete({ ...request.query, cookie: request.headers.cookie });
-      reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
-      return reply.code(303).header("location", completed.returnPath).send();
-    } catch (error) {
-      const reason = error instanceof LemmaComputerError ? error.code : "OIDC_FAILED";
-      request.log.warn({
-        err: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          code: reason,
-          message: error instanceof Error ? error.message : "Unknown OIDC callback error",
-        },
-      }, "OIDC callback rejected");
-      return reply.code(303).header("location", `/?signin=error&reason=${encodeURIComponent(reason)}`).send();
-    }
-  });
   app.get("/v1/auth/session", async (request) => {
     const current = principal(request);
     const effectivePolicy = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(current.userId) : null;
@@ -2489,8 +2434,7 @@ export function createControlServer(
   });
   app.post("/v1/auth/logout", async (request, reply) => {
     await security.customerProductAuthentication?.revokeCurrentSession(fromNodeHeaders(request.raw.headers));
-    if (!security.authentication) return reply.code(204).send();
-    return reply.code(204).header("set-cookie", await security.authentication.logout(request.headers.cookie)).send();
+    return reply.code(204).send();
   });
   app.get("/v1/teams/default", async (request, reply) => {
     const actor = principal(request);
@@ -5188,7 +5132,6 @@ export function createControlServer(
       const expected = principal(request);
       const customerHeaders = fromNodeHeaders(request.raw.headers);
       const customerProductAuthentication = security.customerProductAuthentication;
-      const legacyAuthentication = security.authentication;
       const authorize = security.testIdentityMode
         ? undefined
         : async () => {
@@ -5196,9 +5139,7 @@ export function createControlServer(
               ? await customerProductAuthentication.resolve(customerHeaders).then((resolution) => (
                   resolution.status === "authorized" ? resolution.principal : null
                 ))
-              : legacyAuthentication
-                ? await legacyAuthentication.authenticate(request.headers.cookie)
-                : null;
+              : null;
             if (!current
               || current.userId !== expected.userId
               || current.tenantId !== expected.tenantId
@@ -5593,11 +5534,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   }
   const authenticationPool = new postgres.Pool({ connectionString: env.AUTH_DATABASE_URL });
   const publicWebOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  const customerAuthenticationSecrets = parseVersionedBetterAuthSecrets(env.BETTER_AUTH_SECRETS);
   let platformAuthenticationPool: postgres.Pool | undefined;
   let platformAuthentication: PlatformAuthentication | undefined;
-  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree") {
+  let platformOperatorBootstrap: PlatformOperatorBootstrap | undefined;
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed") {
     if (!env.PLATFORM_AUTH_DATABASE_URL || !env.PLATFORM_BETTER_AUTH_SECRETS) {
-      throw new Error("Worktree platform authentication requires its isolated database and Better Auth secrets");
+      throw new Error("Platform authentication requires its isolated database and Better Auth secrets");
+    }
+    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !env.PLATFORM_AUTH_BOOTSTRAP_EMAIL) {
+      throw new Error("Hosted platform authentication requires an explicit bootstrap operator email");
     }
     const platformAuthenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.PLATFORM_AUTH_DATABASE_URL);
     try {
@@ -5614,6 +5560,14 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
       passkey: { rpId: new URL(publicWebOrigin).hostname, origin: publicWebOrigin },
     });
+    platformOperatorBootstrap = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+      ? worktreePlatformOperatorBootstrap(env.PLATFORM_AUTH_BOOTSTRAP_SECRET!)
+      : {
+          mode: "hosted",
+          email: env.PLATFORM_AUTH_BOOTSTRAP_EMAIL!,
+          displayName: env.PLATFORM_AUTH_BOOTSTRAP_DISPLAY_NAME,
+          secret: env.PLATFORM_AUTH_BOOTSTRAP_SECRET,
+        };
   }
   const transactionalEmail = createTransactionalEmailAdapter({
     transport: env.AUTH_EMAIL_TRANSPORT,
@@ -5628,7 +5582,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     baseUrl: publicWebOrigin,
     trustedOrigins: [publicWebOrigin],
     ssoTrustedOrigins: env.CUSTOMER_SSO_TRUSTED_IDP_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean),
-    versionedSecrets: parseVersionedBetterAuthSecrets(env.BETTER_AUTH_SECRETS),
+    versionedSecrets: customerAuthenticationSecrets,
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     trustedProxyCidrs: env.BETTER_AUTH_TRUSTED_PROXY_CIDRS.split(",").map((value) => value.trim()).filter(Boolean),
     email: transactionalEmail,
@@ -5679,7 +5633,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     adminUrl: env.LITELLM_ADMIN_URL,
     credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
-    sessionSecret: env.SESSION_SECRET,
+    sessionSecret: customerAuthenticationSecrets[0]!.value,
     workspaceIngressSecret: env.WORKSPACE_INGRESS_SECRET,
     caBase64: env.LITELLM_ADMIN_TLS_CA_B64,
     clientCertificateBase64: env.LITELLM_ADMIN_TLS_CLIENT_CERT_B64,
@@ -5779,81 +5733,23 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         ),
       }
     : undefined;
-  const workforceAuthentication = new EntraAuthenticationService(identityPolicyStore, {
-    tenantId: env.ENTRA_TENANT_ID,
-    clientId: env.ENTRA_CLIENT_ID,
-    clientSecret: env.ENTRA_CLIENT_SECRET,
-    publicWebUrl: env.PUBLIC_WEB_URL,
-    sessionSecret: env.SESSION_SECRET,
-    bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
-    bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
-    tenantDisplayName: env.TENANT_DISPLAY_NAME,
-    bootstrapOwnerObjectIds: env.BOOTSTRAP_OWNER_OBJECT_IDS.split(",").map((item) => item.trim()).filter(Boolean),
-    membershipAdmissionMode: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
-      ? "existing-membership-only"
-      : "directory-jit",
-  });
-  const externalIdAuthentication = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
-    && env.EXTERNAL_ID_TENANT_ID && env.EXTERNAL_ID_TENANT_SUBDOMAIN
-    && env.EXTERNAL_ID_CLIENT_ID && env.EXTERNAL_ID_CLIENT_SECRET
-    ? new ExternalIdAuthenticationService(identityPolicyStore, {
-        tenantId: env.EXTERNAL_ID_TENANT_ID,
-        tenantSubdomain: env.EXTERNAL_ID_TENANT_SUBDOMAIN,
-        clientId: env.EXTERNAL_ID_CLIENT_ID,
-        clientSecret: env.EXTERNAL_ID_CLIENT_SECRET,
-        publicWebUrl: env.PUBLIC_WEB_URL,
-        sessionSecret: env.SESSION_SECRET,
-        bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
-        bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
-        tenantDisplayName: env.TENANT_DISPLAY_NAME,
-        bootstrapOwnerObjectIds: [],
-      })
-    : undefined;
-  const platformOperatorValues = [
-    env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
-    env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
-    env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
-    env.PLATFORM_OPERATOR_SESSION_SECRET,
-    env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
-    env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL,
-    env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET,
-  ];
-  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !platformOperatorValues.every(Boolean)) {
-    throw new Error("Hosted deployments require the separate platform-operator workforce realm");
-  }
   const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
     ? PostgresPlatformOperatorStore.fromConnectionString(env.DATABASE_URL)
     : undefined;
-  const workforcePlatformOperatorAuthentication = platformOperatorStore
-    && env.PLATFORM_OPERATOR_ENTRA_TENANT_ID
-    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID
-    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET
-    && env.PLATFORM_OPERATOR_SESSION_SECRET
-    && env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT
-    ? new PlatformOperatorAuthenticationService(platformOperatorStore, {
-        tenantId: env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
-        clientId: env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
-        clientSecret: env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
-        publicWebUrl: env.PUBLIC_WEB_URL,
-        sessionSecret: env.PLATFORM_OPERATOR_SESSION_SECRET,
-        stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
-      })
-    : undefined;
-  const platformBetterAuthService = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
-    && platformOperatorStore
+  const platformBetterAuthService = platformOperatorStore
     && platformAuthentication
     && platformAuthenticationPool
+    && platformOperatorBootstrap
     ? new BetterAuthPlatformOperatorAuthenticationService(
         platformAuthentication,
         platformAuthenticationPool,
         platformOperatorStore,
         publicWebOrigin,
-        env.LEMMACOMPUTER_INSTALLATION_KIND,
-        env.PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET,
+        platformOperatorBootstrap,
       )
     : undefined;
-  await platformBetterAuthService?.initializeDevelopmentOperator();
-  const platformOperatorAuthentication = platformBetterAuthService ?? workforcePlatformOperatorAuthentication;
+  await platformBetterAuthService?.initializeBootstrapOperator();
+  const platformOperatorAuthentication = platformBetterAuthService;
   const controllerTlsClientValues = [
     env.CONTROLLER_TLS_CA_B64,
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
@@ -5949,10 +5845,6 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       mcpEgressProxyToken: env.MCP_EGRESS_PROXY_TOKEN,
       agentBridgeSecret: env.AGENT_BRIDGE_SECRET,
       agentBridgeGrantTtlSeconds: env.AGENT_BRIDGE_GRANT_TTL_SECONDS,
-      authentication: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && externalIdAuthentication
-        ? externalIdAuthentication
-        : workforceAuthentication,
-      externalIdAuthentication,
       customerAuthentication,
       customerSsoAuthentication,
       customerProductAuthentication,

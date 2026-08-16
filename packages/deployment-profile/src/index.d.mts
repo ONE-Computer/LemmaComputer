@@ -1,7 +1,6 @@
 export type ProductionDeploymentProfileId = "customer-managed" | "hosted";
 export type DeploymentProfileId = ProductionDeploymentProfileId | "worktree";
-export type SignInProviderId = "development-fixture" | "better-auth-customer" | "workforce-entra" | "external-id" | "enterprise-entra";
-export type TransitionalCustomerAdapterId = "workforce-entra" | "external-id" | "enterprise-entra";
+export type SignInProviderId = "better-auth-customer";
 export type CustomerAuthenticationMethod = "email-password" | "passkey" | "google-oauth" | "microsoft-oauth" | "saml" | "oidc";
 export type WorkspaceNodeTopologyId = "colocated" | "remote";
 export type WorkspaceExecutionBoundary = "local-operator-controlled" | "remote-isolated";
@@ -34,9 +33,8 @@ export interface DeploymentProfileCapabilities {
   readonly organizationCardinality: "exactly-one" | "multiple" | "development";
   readonly maximumOrganizations: number | null;
   readonly allowedSignInProviders: readonly SignInProviderId[];
-  readonly transitionalCustomerAdapters: readonly TransitionalCustomerAdapterId[];
   readonly customerAuthentication: CustomerAuthenticationPolicy;
-  readonly platformOperatorRealm: "absent" | "separate-workforce" | "development-fixture";
+  readonly platformOperatorRealm: "absent" | "separate-passkey";
   readonly identityConfigurationCustody: "customer" | "lemmacomputer" | "developer";
   readonly secretCustody: "customer" | "lemmacomputer" | "developer";
   readonly workspaceProviderPolicy: WorkspaceProviderPolicy;
@@ -53,7 +51,7 @@ export const deploymentProfileIds: readonly DeploymentProfileId[];
 export const customerAuthenticationMethods: readonly CustomerAuthenticationMethod[];
 export const workspaceNodeTopologies: Readonly<Record<WorkspaceNodeTopologyId, WorkspaceNodeTopology>>;
 export const deploymentProfileCapabilityMatrix: Readonly<{
-  schemaVersion: 3;
+  schemaVersion: 4;
   profiles: Readonly<Record<DeploymentProfileId, DeploymentProfileCapabilities>>;
 }>;
 

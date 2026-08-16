@@ -94,10 +94,7 @@ const identityPolicies = () => ({
 }) as unknown as IdentityPolicyStore;
 
 const authentication = (principal: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("not used"); },
-  authenticate: async () => principal,
-  logout: async () => "lemmacomputer_session=; Max-Age=0",
+  resolve: async () => ({ status: "authorized" as const, principal }),
 });
 
 class FakeProviderAdministration implements ProviderAdministrationGateway {
@@ -770,7 +767,7 @@ test("provider settings do not expose an administrator endpoint to an employee s
     undefined,
     {},
     {
-      authentication: authentication(employee),
+      customerProductAuthentication: authentication(employee),
       agentBridgeSecret: "provider-settings-agent-bridge-secret-at-least-32-characters",
       providerSettingsStore: new MemoryProviderSettingsStore(),
       providerAdministration: new FakeProviderAdministration(),

@@ -477,7 +477,6 @@ export interface IdentityPolicyStore {
   createSession(input: { tokenHash: string; userId: string; membershipId?: string; expiresAt: Date }): Promise<void>;
   getSession(tokenHash: string, now: Date): Promise<SessionPrincipal | null>;
   revokeSession(tokenHash: string): Promise<void>;
-  revokeSessionWithAccessAudit?(tokenHash: string, provider: "entra" | "entra-external-id", occurredAt: Date): Promise<void>;
   getPrincipal(userId: string): Promise<SessionPrincipal | null>;
   getEffectivePolicy(userId: string): Promise<EffectivePolicy | null>;
   listUsers(tenantId: string): Promise<AdminUserSummary[]>;
@@ -496,16 +495,8 @@ export interface IdentityPolicyStore {
     invitationId?: string;
     actorUserId?: string;
     eventType: "authentication.login_succeeded" | "authentication.login_failed" | "authentication.logout" | "invitation.link_failed" | "session.revoked";
-    provider: "entra" | "entra-external-id" | "product";
+    provider: "product";
     reasonCode?: string;
-    occurredAt: Date;
-  }): Promise<void>;
-  recordInvitationLinkFailure?(tokenHash: string, provider: "entra" | "entra-external-id", reasonCode: string, occurredAt: Date): Promise<void>;
-  recordExternalIdentityAuthenticationFailure?(input: {
-    provider: "entra" | "entra-external-id";
-    issuer: string;
-    subject: string;
-    reasonCode: string;
     occurredAt: Date;
   }): Promise<void>;
   createOrganizationInvitation?(input: {
@@ -2083,24 +2074,6 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     await this.pool.query("UPDATE browser_sessions SET revoked_at=now() WHERE token_hash=$1", [tokenHash]);
   }
 
-  async revokeSessionWithAccessAudit(tokenHash: string, provider: "entra" | "entra-external-id", occurredAt: Date) {
-    await this.pool.query(
-      `WITH revoked AS (
-         UPDATE browser_sessions SET revoked_at=$3
-         WHERE token_hash=$1 AND revoked_at IS NULL
-         RETURNING user_id,membership_id
-       )
-       INSERT INTO organization_access_audit_events (
-         organization_id,membership_id,actor_user_id,event_type,provider,occurred_at
-       )
-       SELECT membership.organization_id,revoked.membership_id,revoked.user_id,
-         'authentication.logout',$2,$3
-       FROM revoked
-       JOIN organization_memberships membership ON membership.id=revoked.membership_id`,
-      [tokenHash, provider, occurredAt],
-    );
-  }
-
   async getPrincipal(userId: string) {
     const result = await this.pool.query(
       `${homePrincipalSelect} WHERE u.id=$1 AND u.status='active' AND m.status='active'
@@ -3013,7 +2986,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     invitationId?: string;
     actorUserId?: string;
     eventType: "authentication.login_succeeded" | "authentication.login_failed" | "authentication.logout" | "invitation.link_failed" | "session.revoked";
-    provider: "entra" | "entra-external-id" | "product";
+    provider: "product";
     reasonCode?: string;
     occurredAt: Date;
   }) {
@@ -3023,40 +2996,6 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [input.organizationId, input.membershipId ?? null, input.invitationId ?? null, input.actorUserId ?? null,
         input.eventType, input.provider, input.reasonCode ?? null, input.occurredAt],
-    );
-  }
-
-  async recordInvitationLinkFailure(tokenHash: string, provider: "entra" | "entra-external-id", reasonCode: string, occurredAt: Date) {
-    await this.pool.query(
-      `INSERT INTO organization_access_audit_events (
-         organization_id,invitation_id,event_type,provider,reason_code,occurred_at
-       )
-       SELECT organization_id,id,'invitation.link_failed',$2,$3,$4
-       FROM organization_invitations WHERE token_hash=$1`,
-      [tokenHash, provider, reasonCode, occurredAt],
-    );
-  }
-
-  async recordExternalIdentityAuthenticationFailure(input: {
-    provider: "entra" | "entra-external-id";
-    issuer: string;
-    subject: string;
-    reasonCode: string;
-    occurredAt: Date;
-  }) {
-    await this.pool.query(
-      `INSERT INTO organization_access_audit_events (
-         organization_id,membership_id,actor_user_id,event_type,provider,reason_code,occurred_at
-       )
-       SELECT user_record.tenant_id,membership.id,user_record.id,
-         'authentication.login_failed',$4,$5,$6
-       FROM external_identities identity
-       JOIN users user_record ON user_record.id=identity.user_id
-       JOIN organization_memberships membership
-         ON membership.organization_id=user_record.tenant_id
-        AND membership.subject_user_id=user_record.id
-       WHERE identity.provider=$1 AND identity.issuer=$2 AND identity.external_subject=$3`,
-      [input.provider, input.issuer, input.subject, input.provider, input.reasonCode, input.occurredAt],
     );
   }
 

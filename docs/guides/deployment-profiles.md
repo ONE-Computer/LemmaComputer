@@ -24,8 +24,7 @@ installation-kind name.
 | Organizations | Exactly one | Multiple | Development fixtures |
 | Customer authentication | Embedded Better Auth; installation-local database | Embedded Better Auth; pooled control-plane database | Embedded Better Auth; isolated development database |
 | Customer methods eligible for configuration | Email/password, passkey, Google, Microsoft, SAML, OIDC | Email/password, passkey, Google, Microsoft, SAML, OIDC | Production methods plus development fixtures |
-| Platform-operator realm | Absent | Separate workforce Entra realm | Separate Better Auth passkey fixture |
-| Transitional customer adapters | Workforce Entra | External ID and enterprise Entra | All transitional test adapters |
+| Platform-operator realm | Absent | Separate Better Auth passkey realm | Separate Better Auth passkey realm with local bootstrap |
 | Identity and secret custody | Customer deployment | LemmaComputer deployment | Local worktree |
 | Workspace provider boundary | Customer-approved local or remote-isolated | Platform-qualified remote-isolated | Development adapters |
 | Connector administration | Customer operator | Organization administrator | Developer |
@@ -38,8 +37,8 @@ installation-kind name.
 does not grant product authority. Both production profiles use the same Better
 Auth customer contract. Better Auth proves authentication; server-resolved
 LemmaComputer account, membership, active organization, permission, and resource
-scope decide product access. The transitional adapters remain only during the
-bounded replacement sequence in [ADR 0004](../adr/0004-better-auth-adoption-and-qualification.md).
+scope decide product access. Direct workforce-Entra and External ID adapters
+are not part of any supported profile.
 
 The workspace row separates runtime from placement. `hosted` forbids Docker
 authority on an application/control host and requires the Lemma-owned
@@ -73,15 +72,10 @@ npm run env:check -- --profile=hosted
 npm run env:render -- --profile=hosted
 ```
 
-The embedded Better Auth runtime is the primary customer-authentication path in
+The embedded Better Auth runtime is the only customer-authentication path in
 both production profiles. A customer-managed installation keeps its
-authentication database, session secret, email delivery, and enabled providers
-inside the installation. The current strict preflight still requires
-`LEMMACOMPUTER_ENTRA_TENANT_ID` and its application values for the bounded
-workforce-Entra compatibility adapter; this is transitional deployment debt,
-not the universal customer-login or authorization contract. Customer-managed
-deployments must leave `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` and all
-`LEMMACOMPUTER_EXTERNAL_ID_*` values empty.
+authentication database, signing secrets, email delivery, and enabled
+providers inside the installation.
 
 Tenant-configured company SSO is registered through the authenticated
 organization administration flow and cannot assign product roles from provider
@@ -103,17 +97,15 @@ with the same application image tag and compare their service topology.
 
 Hosted deployments require HTTPS public and LiteLLM administration endpoints,
 mutual-TLS material, a platform-qualified remote-isolated workspace provider,
-distinct credential and session secrets, and broker-only Telegram credential
-intake. The current hosted preflight still requires the complete Microsoft
-External ID tenant/client group for its transitional adapter even though Better
-Auth is the primary customer identity plane. Run
-`npm run qualify:external-id -- --file=/absolute/path/to/hosted.env` before its
-manual invitation and MFA smoke. That adapter qualification does not replace
-the Better Auth customer-journey gates. The configuration contract recognizes
+distinct credential and authentication secrets, and broker-only Telegram
+credential intake. Hosted platform enrollment additionally requires an
+explicit operator email and a one-time bootstrap secret on first deployment.
+After passkey enrollment, remove the bootstrap secret from secret custody; the
+runtime continues with the passkey credential. The configuration contract recognizes
 `colocated` and `remote` workspace-node topology; recognition is not a claim
 that a particular infrastructure deployment has completed qualification.
 
-`npm run worktree:init` writes the legacy `worktree` harness selection for
+`npm run worktree:init` writes the `worktree` harness selection for
 isolated local development. Its loopback-only platform sign-in provisions one
 local operator into the real platform role store, enrolls a passkey, then deletes the generated
 bootstrap credential and its sessions. It uses a separate authentication
@@ -122,7 +114,7 @@ authentication. A production consumer must call `resolveDeploymentProfile`
 with `allowDevelopment: false` and reject it.
 
 Use `/platform` as the public operator entry. It redirects to the server-rendered
-operator document under `/api/v1/platform/ui` so the workforce session cookie
+operator document under `/api/v1/platform/ui` so the platform session cookie
 can remain narrowly scoped to the platform API boundary. The customer product
 and platform operator sessions are still separate realms.
 

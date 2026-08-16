@@ -34,10 +34,9 @@ const principal = (role: "administrator" | "employee"): SessionPrincipal => ({
   identity: identity(role),
 });
 const authentication = (authenticated: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.invalid", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("not used"); },
-  authenticate: async (cookie: string | undefined) => cookie === "lemmacomputer_session=valid" ? authenticated : null,
-  logout: async () => "",
+  resolve: async (headers: Headers) => headers.get("cookie") === "lemmacomputer_session=valid"
+    ? { status: "authorized" as const, principal: authenticated }
+    : { status: "anonymous" as const },
 });
 const organizationVersion: OrganizationWorkspacePolicyVersionRecord = {
   tenantId,
@@ -110,7 +109,7 @@ const appFor = (
     undefined,
     {},
     {
-      authentication: authentication(actor),
+      customerProductAuthentication: authentication(actor),
       protectedWorkspacePolicy,
       ...(identityPolicyStore ? { identityPolicyStore } : {}),
       agentBridgeSecret: "protected-policy-api-agent-bridge-secret-at-least-32-characters",

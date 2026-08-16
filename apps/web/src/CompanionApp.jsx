@@ -61,7 +61,7 @@ const companionTabFromLocation = () => (
 
 const companionLoginUrl = () => {
   const returnTo = `${window.location.pathname}${window.location.search}`;
-  return `/api/v1/auth/login?return=${encodeURIComponent(returnTo)}`;
+  return `/?return=${encodeURIComponent(returnTo)}`;
 };
 
 const formatTime = (value) => value
