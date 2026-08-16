@@ -832,12 +832,16 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     return Boolean(result.rowCount);
   }
 
+  // Built-in connectors are authorized from the source catalog, not from this
+  // table, so a built-in row withdrawn from the catalog cannot keep its egress
+  // grant in an installation that already seeded it. Only tenant-owned custom
+  // connectors and unexpired discovery permits contribute here.
   async listEnabledEgressOrigins(now = new Date()) {
     const result = await this.pool.query<{ origin: string }>(
       `WITH connector_origins AS (
-         SELECT endpoint_url AS origin FROM connector_registry WHERE enabled
+         SELECT endpoint_url AS origin FROM connector_registry WHERE enabled AND source='custom'
          UNION
-         SELECT jsonb_array_elements_text(authorization_origins) AS origin FROM connector_registry WHERE enabled
+         SELECT jsonb_array_elements_text(authorization_origins) AS origin FROM connector_registry WHERE enabled AND source='custom'
        ), active_discovery_permit_origins AS (
          SELECT origin FROM connector_discovery_egress_permits WHERE expires_at>$1
        )
@@ -1170,10 +1174,14 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     return this.discoveryEgressPermits.delete(this.discoveryPermitKey(tenantId, permitId));
   }
 
+  // Built-in connectors are authorized from the source catalog, not from this
+  // table, so a built-in row withdrawn from the catalog cannot keep its egress
+  // grant in an installation that already seeded it. Only tenant-owned custom
+  // connectors and unexpired discovery permits contribute here.
   async listEnabledEgressOrigins(now = new Date()) {
     const origins = new Set<string>();
     for (const connector of this.records.values()) {
-      if (!connector.enabled) continue;
+      if (!connector.enabled || connector.source !== "custom") continue;
       const endpointOrigin = normalizeEgressOrigin(connector.endpointUrl);
       if (endpointOrigin) origins.add(endpointOrigin);
       for (const authorizationOrigin of connector.authorizationOrigins) {

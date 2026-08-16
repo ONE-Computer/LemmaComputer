@@ -104,6 +104,42 @@ An MCP connector crosses identity, OAuth, tool-schema, and side-effect
 boundaries. Merely adding `mcp_servers` configuration would bypass
 LemmaComputer's governance model.
 
+### What a remote connector needs before it can work
+
+A catalog entry is not enough. Every remote connector reaches its provider
+through the strict remote-MCP egress proxy and completes an OAuth
+authorization-code flow, so three conditions must hold before Connect can
+succeed:
+
+1. **Every OAuth host is in the entry's allowlist.** Control authorizes gateway
+   egress from `endpointUrl` plus `authorizationOrigins` and nothing else. Read
+   the provider's `/.well-known/oauth-protected-resource` and then its
+   authorization-server metadata, and confirm that the metadata, authorization,
+   token, *and* registration endpoints all resolve to hosts in that list. Several
+   providers delegate to a separate host, such as Stripe to `access.stripe.com`
+   and Supabase to `api.supabase.com`.
+2. **The provider offers a registration endpoint, or the operator supplies
+   static credentials.** With a `registration_endpoint`, LemmaComputer registers
+   itself when the first person connects and no deployment setup is required.
+   Without one, the deployment needs an OAuth application created in the
+   provider's developer portal, declared in `config/litellm/config.yaml` and
+   wired to environment variables, the way GitHub and Google Workspace are.
+   Servers declared there are owned by the gateway; keep them listed in
+   `GATEWAY_CONFIGURED_SERVER_NAMES` so connector administration does not try to
+   reconcile a row LiteLLM already owns under a hashed server id.
+3. **The registration endpoint accepts this deployment's callback.** Some
+   providers run dynamic registration behind a hostname allowlist covering only
+   well-known MCP clients. They reject every self-hosted callback, so no
+   LemmaComputer installation can complete the flow. Verify against the real
+   deployment origin, not `localhost`, which is frequently allowlisted when a
+   production hostname is not.
+
+An entry that fails condition 3, or that fails condition 2 with no credentials
+yet, is marked `withheld` in `apps/control-api/src/connector-catalog.ts`. A
+withheld entry keeps its name, branding, icon, and scopes but is never seeded,
+listed, connectable, or granted egress. Restoring one is a matter of deleting
+its `withheld` line once the blocking condition is resolved.
+
 ### Connector checklist
 
 1. Pin the connector artifact and dependency lock. Review its authentication,

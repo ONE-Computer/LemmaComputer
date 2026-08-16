@@ -162,6 +162,7 @@ try {
     "tests/provider-settings-postgres.test.ts",
     "tests/spend-cost-coverage-postgres.test.ts",
     "tests/workspace-settings-postgres.test.ts",
+    "tests/connector-policy-evidence.test.ts",
     "tests/workspace-administration-postgres.test.ts",
     "tests/protected-workspace-policy-postgres.test.ts",
     "tests/organization-rbac-postgres.test.ts",
@@ -232,7 +233,7 @@ try {
   if (!migrate("postgres", false).includes("historical migrations are immutable")) throw new Error("checksum drift did not fail closed");
   sql("authentication", "UPDATE lemmacomputer_auth_schema_migrations SET checksum_sha256=repeat('0',64) WHERE id='001'");
   if (!migrateAuth("authentication", false).includes("historical migrations are immutable")) throw new Error("authentication checksum drift did not fail closed");
-  process.stdout.write("Database gate passed: product and authentication fresh, no-op, concurrent, mismatch, checksum, backup/restore, and dependency-rollback cases; product legacy baseline, organization RBAC, platform operator authority, agent instances, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, and Telegram intake replay cases.\n");
+  process.stdout.write("Database gate passed: product and authentication fresh, no-op, concurrent, mismatch, checksum, backup/restore, and dependency-rollback cases; product legacy baseline, organization RBAC, platform operator authority, agent instances, Activity, Teams, provider settings, usage ledger, spend cost coverage, schedule, Companion push, connector policy evidence, and Telegram intake replay cases.\n");
 } finally {
   exec("docker", ["rm", "-f", container]);
 }

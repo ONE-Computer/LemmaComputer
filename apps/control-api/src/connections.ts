@@ -73,6 +73,17 @@ export type CreateConnectorInput = {
   discoveryToken?: string;
 };
 
+// Keep this in step with the `mcp_servers` keys in config/litellm/config.yaml.
+// Those rows exist before Control starts and are reconciled by the gateway, not
+// by connector administration.
+const GATEWAY_CONFIGURED_SERVER_NAMES = new Set([
+  "lemmacomputer_ms365",
+  "lemmacomputer_github",
+  "lemmacomputer_gmail",
+  "lemmacomputer_google_drive",
+  "lemmacomputer_google_calendar",
+]);
+
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("base64url");
 const policyProjectionDigest = (policy: RuntimePolicy) => createHash("sha256")
   .update(JSON.stringify(policy))
@@ -683,6 +694,9 @@ export class McpConnectionService {
       if (this.installationKind === "hosted") {
         return this.hostedCustomConnectorEgressOrigins.has(destination);
       }
+      // Custom connectors and unexpired discovery permits only. Built-in
+      // origins were already decided by the catalog check above, so a withheld
+      // entry cannot be readmitted here by a row an earlier release seeded.
       return (await this.registry.listEnabledEgressOrigins()).includes(destination);
     } catch {
       // A control/database outage must never become an egress allow.
@@ -855,18 +869,32 @@ export class McpConnectionService {
     const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
     const order = new Map(seeded.map((connector, index) => [connector.id, index]));
-    return (await this.registry.listConnectors(tenantId)).sort((left, right) => (
-      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
-      || left.category.localeCompare(right.category)
-      || left.name.localeCompare(right.name)
-    ));
+    return (await this.registry.listConnectors(tenantId))
+      .filter((connector) => this.isPublishedConnector(order, connector))
+      .sort((left, right) => (
+        (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER)
+        || left.category.localeCompare(right.category)
+        || left.name.localeCompare(right.name)
+      ));
+  }
+
+  // Seeding only upserts, so a built-in entry withdrawn from the catalog leaves
+  // its row behind in every installation that already seeded it. Treat the
+  // catalog as authoritative for built-ins rather than deleting rows, so
+  // restoring an entry restores its administrator policy and tool review with
+  // it. Custom connectors are owned by the tenant and are never filtered.
+  private isPublishedConnector(order: Map<string, number>, connector: Pick<ConnectorDefinition, "id" | "source">) {
+    return connector.source !== "built-in" || order.has(connector.id);
   }
 
   private async connector(tenantId: string, connectorId: string) {
     const seeded = connectorCatalog(tenantId, this.microsoftAuthorizationOrigin);
     await this.registry.seedConnectors(tenantId, seeded);
+    const order = new Map(seeded.map((connector, index) => [connector.id, index]));
     const connector = await this.registry.getConnector(tenantId, connectorId);
-    if (!connector) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
+    if (!connector || !this.isPublishedConnector(order, connector)) {
+      throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "That connector is not in the approved catalog", 404);
+    }
     return connector;
   }
 
@@ -892,12 +920,18 @@ export class McpConnectionService {
     await this.gateway.ensureOAuthMcpServers(managed);
   }
 
-  private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source">) {
-    // Microsoft 365 is a static internal server. Every remote connector,
-    // including an administrator-added custom connector, must reconcile its
-    // durable LiteLLM row when a user connects so a failed startup discovery
-    // cannot leave the connector permanently unusable.
-    return connector.id !== "microsoft-365";
+  private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source" | "serverName">) {
+    // Servers declared in config/litellm/config.yaml are owned by the gateway.
+    // LiteLLM derives their server_id by hashing name, url, transport,
+    // auth_type, and alias, so it never equals the catalog's literal serverId;
+    // reconciling them here finds no id match, then trips the server_name
+    // guard and fails the connection with MCP_REGISTRATION_CONFLICT. They also
+    // carry static provider credentials that dynamic registration must not
+    // replace. Every other remote connector, including an administrator-added
+    // custom connector, must reconcile its durable LiteLLM row when a user
+    // connects so a failed startup discovery cannot leave the connector
+    // permanently unusable.
+    return !GATEWAY_CONFIGURED_SERVER_NAMES.has(connector.serverName);
   }
 
   private publicConnector(connector: ConnectorDefinition) {

@@ -4,6 +4,7 @@ import type { IdentityContext } from "@lemmacomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
+import { withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
 const proxyToken = "proxy-test-token-at-least-24-characters";
@@ -76,7 +77,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
     assert.equal(catalog.statusCode, 200);
     const connectorCards = catalog.json().connections as Array<{ id: string; serverName: string }>;
-    assert.equal(connectorCards.length, 34);
+    assert.equal(connectorCards.length, 25);
     assert.deepEqual(connectorCards.slice(0, 6).map((connector) => [connector.id, connector.serverName]), [
       ["microsoft-365", "lemmacomputer_ms365"],
       ["gmail", "lemmacomputer_gmail"],
@@ -86,12 +87,20 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       ["linear", "lemmacomputer_linear"],
     ]);
     assert.ok(connectorCards.some((connector) => connector.id === "stripe"));
-    assert.ok(connectorCards.some((connector) => connector.id === "slack"));
+    assert.ok(connectorCards.some((connector) => connector.id === "github"));
     assert.ok(connectorCards.some((connector) => connector.id === "neon"));
     assert.ok(connectorCards.some((connector) => connector.id === "exa" && connector.serverName === "lemmacomputer_exa"));
-    assert.ok(connectorCards.some((connector) => connector.id === "alpha-vantage"));
+    assert.ok(connectorCards.some((connector) => connector.id === "supabase"));
     assert.ok(connectorCards.some((connector) => connector.id === "massive"));
-    assert.ok(connectorCards.some((connector) => connector.id === "intrinio"));
+    assert.ok(connectorCards.some((connector) => connector.id === "monday"));
+    // A withheld catalog entry must never reach a customer, whether or not an
+    // earlier release already seeded its row.
+    for (const withheld of withheldConnectors()) {
+      assert.ok(
+        !connectorCards.some((connector) => connector.id === withheld.id),
+        `withheld connector ${withheld.id} must not be listed`,
+      );
+    }
     assert.equal(providerStatusCalls, 0, "catalog browsing must not probe a provider connection");
 
     const status = await app.inject({ method: "GET", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
