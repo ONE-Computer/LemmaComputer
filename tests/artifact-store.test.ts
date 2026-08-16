@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -40,6 +40,22 @@ test("filesystem and memory ArtifactStore adapters preserve opaque locators and 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Compose initializes the canonical artifact volume before non-root Control starts", async () => {
+  const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
+  const initializer = compose.slice(compose.indexOf("  artifact-data-init:"), compose.indexOf("  control-api:"));
+  const control = compose.slice(compose.indexOf("  control-api:"), compose.indexOf("  channel-broker:"));
+
+  assert.match(initializer, /user: root/);
+  assert.match(initializer, /network_mode: none/);
+  assert.match(initializer, /cap_add:\s+- CHOWN\s+- FOWNER/);
+  assert.match(initializer, /chown node:node \/var\/lib\/lemmacomputer\/artifacts/);
+  assert.match(initializer, /chmod 0700 \/var\/lib\/lemmacomputer\/artifacts/);
+  assert.match(initializer, /artifact-data:\/var\/lib\/lemmacomputer\/artifacts/);
+  assert.match(control, /user: node/);
+  assert.match(control, /artifact-data:\/var\/lib\/lemmacomputer\/artifacts/);
+  assert.match(control, /artifact-data-init:\s+condition: service_completed_successfully/);
 });
 
 test("FilesystemArtifactStore rejects symlinks in every locator directory", async () => {
