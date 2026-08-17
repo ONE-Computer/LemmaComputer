@@ -960,7 +960,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setBusy(true);
     setFormError("");
     try {
-      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : returnPath);
+      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : "/");
       if (!started?.location) throw new Error("Company SSO could not be started.");
       window.location.assign(started.location);
     } catch (companyError) {

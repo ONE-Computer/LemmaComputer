@@ -161,7 +161,7 @@ test("social sign-in preserves the selected provider in its safe error callback"
   });
 });
 
-test("company SSO uses a dedicated email-discovery step", async ({ page }) => {
+test("company SSO uses a dedicated email-discovery step from a URL with query parameters", async ({ page }) => {
   let companySsoRequest: Record<string, unknown> | null = null;
   await page.unroute("**/api/v1/auth/customer-capabilities");
   await page.route("**/api/v1/auth/customer-capabilities", (route) => route.fulfill({
@@ -183,7 +183,7 @@ test("company SSO uses a dedicated email-discovery step", async ({ page }) => {
     });
   });
 
-  await page.goto("/");
+  await page.goto("/?return=%2F%3Fview%3Dchat");
   const origin = new URL(page.url()).origin;
   await page.getByRole("button", { name: "Continue with SSO" }).click();
   await expect(page.getByRole("heading", { name: "Sign in with SSO" })).toBeVisible();
