@@ -485,7 +485,22 @@ test("an administrator sets up a provider application for their own organization
       action: "view_setup",
       message: "This service needs an OAuth application from your organization before anyone can connect it.",
     },
-    credentials: { required: true, mode: "deployment", deploymentConfigured: false, clientId: null, updatedAt: null },
+    credentials: {
+      required: true,
+      mode: "deployment",
+      deploymentConfigured: false,
+      clientId: null,
+      updatedAt: null,
+      redirectUri: "http://localhost:4174/oauth/mcp/callback",
+      setup: {
+        console: "Google Cloud console",
+        consoleUrl: "https://console.cloud.google.com/auth/clients",
+        clientType: "Web application",
+        steps: ["Select or create a project in the Google Cloud console.", "Enable the Gmail API for that project."],
+        scopes: ["https://mail.google.com/", "https://www.googleapis.com/auth/gmail.modify"],
+        scopesNote: "Add these under Data Access.",
+      },
+    },
   };
   const configured = {
     ...gmail,
@@ -523,6 +538,17 @@ test("an administrator sets up a provider application for their own organization
 
   const application = page.getByRole("region", { name: "Provider application" });
   await expect(application).toContainText("No application is configured yet");
+
+  // The console steps, the scopes, and the redirect URI are the three things
+  // people get wrong, and each fails at the provider with an error that says
+  // nothing about the cause. They stay collapsed until asked for.
+  const help = application.getByText("How to create this application in Google Cloud console");
+  await expect(application.getByRole("listitem").first()).toBeHidden();
+  await help.click();
+  await expect(application.getByText("Enable the Gmail API for that project.")).toBeVisible();
+  await expect(application.getByText("https://www.googleapis.com/auth/gmail.modify")).toBeVisible();
+  await expect(application.getByLabel("Redirect URI for the Web application"))
+    .toHaveValue("http://localhost:4174/oauth/mcp/callback");
   await application.getByLabel("Client ID").fill("acme-client.apps.googleusercontent.com");
   await application.getByLabel("Client secret").fill("acme-client-secret");
   await application.getByRole("button", { name: "Save application" }).click();

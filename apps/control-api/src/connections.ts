@@ -22,6 +22,7 @@ import {
 import {
   catalogAdminConsentProvider,
   catalogCredentialRequirement,
+  catalogCredentialSetup,
   connectorActivation,
   connectorCatalog,
   tenantOwnedServerName,
@@ -889,6 +890,13 @@ export class McpConnectionService {
       deploymentConfigured: this.configuredStaticMcpClients.has(requirement),
       clientId: connector.oauthClientId,
       updatedAt: connector.credentialsUpdatedAt?.toISOString() ?? null,
+      // The provider redirects to the gateway, not to Control, and the exact
+      // value depends on this deployment's public URL. Getting it wrong is the
+      // most common way this setup fails, and the provider's error says
+      // nothing useful, so show the deployment's own value rather than letting
+      // anyone copy one out of documentation.
+      redirectUri: `${this.liteLlmPublicUrl}/callback`,
+      setup: catalogCredentialSetup(connector.id) ?? null,
     };
   }
 

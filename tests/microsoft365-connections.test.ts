@@ -1190,13 +1190,25 @@ test("a connector needing a provider application is offered as setup, not as a b
     assert.ok(card, `${connectorId} is offered so it can be set up`);
     assert.equal(card.activation.readiness, "setup_required");
     assert.equal(card.activation.action, "view_setup");
-    assert.deepEqual(card.credentials, {
-      required: true,
-      mode: "deployment",
-      deploymentConfigured: false,
-      clientId: null,
-      updatedAt: null,
-    });
+    assert.deepEqual(
+      { ...card.credentials, setup: undefined },
+      {
+        required: true,
+        mode: "deployment",
+        deploymentConfigured: false,
+        clientId: null,
+        updatedAt: null,
+        // The provider redirects to the gateway, not to Control. Registering
+        // the wrong value here is the most common way this setup fails.
+        redirectUri: "http://localhost:4000/callback",
+        setup: undefined,
+      },
+    );
+    // Every connector that needs an application carries the console steps and
+    // the scopes for it, so nobody has to guess in the provider's console.
+    assert.ok(card.credentials?.setup?.steps.length);
+    assert.ok(card.credentials?.setup?.scopes.length);
+    assert.ok(!JSON.stringify(card.credentials?.setup).includes("localhost:4000"), "the redirect URI is never baked into curated guidance");
     await assert.rejects(
       unconfigured.start(alpha, connectorId, true),
       (error: LemmaComputerError) => error.code === "MCP_CONNECTOR_SETUP_REQUIRED",

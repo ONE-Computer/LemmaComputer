@@ -23,7 +23,44 @@ export type ConnectorActivation = {
 type CatalogConnector = Omit<SaveConnectorRegistryRecord, "tenantId"> & {
   withheld?: string;
   requiresCredentials?: StaticCredentialGroup;
+  credentialSetup?: ConnectorCredentialSetup;
 };
+
+/**
+ * What an administrator has to do in the provider's own console before the
+ * client id and secret on this page will work. Registering an OAuth
+ * application is several steps in an unfamiliar console, and getting the
+ * redirect URI or the scopes wrong fails at the authorize redirect with an
+ * error from the provider that says nothing about what to fix.
+ *
+ * `scopes` are the permissions the connector asks for. Where the catalog entry
+ * declares none, the provider's own advertised set is used, so these are
+ * recorded here rather than derived from `scopes` on the record.
+ */
+export type ConnectorCredentialSetup = {
+  console: string;
+  consoleUrl: string;
+  clientType: string;
+  steps: string[];
+  scopes: string[];
+  scopesNote: string;
+};
+
+const googleWorkspaceSetup = (api: string, scopes: string[]): ConnectorCredentialSetup => ({
+  console: "Google Cloud console",
+  consoleUrl: "https://console.cloud.google.com/auth/clients",
+  clientType: "Web application",
+  steps: [
+    "Select or create a project in the Google Cloud console.",
+    `Enable the ${api} for that project.`,
+    "Open Google Auth Platform and set Audience. Choose Internal if the project belongs to your Google Workspace organization: an internal application skips Google's verification review, including the security assessment that the broader permissions below would otherwise require. External needs every person added as a test user while the application is unpublished, and its sign-ins stop working after seven days.",
+    "Under Data Access, add the scopes listed below.",
+    "Under Clients, create an OAuth client of type Web application and add the redirect URI shown below exactly, with no trailing slash.",
+    "Copy the client ID and client secret from that client into this page.",
+  ],
+  scopes,
+  scopesNote: "Add these under Data Access. They are the permissions this connector requests when someone connects.",
+});
 
 // Credential groups a deployment can configure. Each one is a provider OAuth
 // application the operator registers, matching a coupled environment pair in
@@ -115,6 +152,12 @@ export const catalogAdminConsentProvider = (connectorId: string): AdminConsentPr
 export const catalogCredentialRequirement = (connectorId: string): StaticCredentialGroup | undefined =>
   remoteCatalog.find((connector) => connector.id === connectorId)?.requiresCredentials;
 
+// What an administrator has to do in the provider's own console before the
+// credentials they enter will work. Display-only, and safe to show to anyone
+// who may enter credentials.
+export const catalogCredentialSetup = (connectorId: string): ConnectorCredentialSetup | undefined =>
+  remoteCatalog.find((connector) => connector.id === connectorId)?.credentialSetup;
+
 // These are provider-hosted remote MCP endpoints, not a tool allowlist. The
 // Connections screen may display the full catalog without registering every
 // server. Control registers one only after its owner selects Connect, and the
@@ -123,6 +166,13 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "gmail",
     requiresCredentials: "google-workspace",
+    credentialSetup: googleWorkspaceSetup("Gmail API", [
+      "https://mail.google.com/",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/gmail.compose",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.metadata",
+    ]),
     serverId: "lemmacomputer_gmail",
     serverName: "lemmacomputer_gmail",
     name: "Gmail",
@@ -138,6 +188,11 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "google-drive",
     requiresCredentials: "google-workspace",
+    credentialSetup: googleWorkspaceSetup("Google Drive API", [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+    ]),
     serverId: "lemmacomputer_google_drive",
     serverName: "lemmacomputer_google_drive",
     name: "Google Drive",
@@ -153,6 +208,20 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "google-calendar",
     requiresCredentials: "google-workspace",
+    credentialSetup: googleWorkspaceSetup("Google Calendar API", [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/calendar.acls",
+      "https://www.googleapis.com/auth/calendar.calendarlist",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.calendars",
+      "https://www.googleapis.com/auth/calendar.calendars.readonly",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.events.freebusy",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/calendar.freebusy",
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/calendar.settings.readonly",
+    ]),
     serverId: "lemmacomputer_google_calendar",
     serverName: "lemmacomputer_google_calendar",
     name: "Google Calendar",
@@ -351,6 +420,20 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "github",
     requiresCredentials: "github",
+    credentialSetup: {
+      console: "GitHub developer settings",
+      consoleUrl: "https://github.com/settings/developers",
+      clientType: "OAuth app",
+      steps: [
+        "Open your organization's Settings, then Developer settings, then OAuth Apps.",
+        "Create a new OAuth app owned by the organization rather than by one person, so it survives that person leaving.",
+        "Set the Authorization callback URL to the redirect URI shown below exactly, with no trailing slash.",
+        "Generate a client secret on the app you just created.",
+        "Copy the client ID and client secret into this page.",
+      ],
+      scopes: ["repo", "read:org", "read:user", "user:email"],
+      scopesNote: "GitHub asks for these when each person connects, so there is nothing to configure for them on the OAuth app itself.",
+    },
     serverId: "lemmacomputer_github",
     serverName: "lemmacomputer_github",
     name: "GitHub",
@@ -636,7 +719,12 @@ export const connectorCatalog = (
   },
   ...remoteCatalog
     .filter((connector) => isPublishable(connector))
-    .map(({ withheld: _withheld, requiresCredentials: _requiresCredentials, ...connector }) => ({ tenantId, ...connector })),
+    .map(({
+      withheld: _withheld,
+      requiresCredentials: _requiresCredentials,
+      credentialSetup: _credentialSetup,
+      ...connector
+    }) => ({ tenantId, ...connector })),
 ];
 
 const isPublishable = (connector: CatalogConnector) => !connector.withheld;

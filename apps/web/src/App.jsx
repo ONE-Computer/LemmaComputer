@@ -3911,6 +3911,57 @@ function ConnectorIconEditor({ connector, busy, onSave }) {
   );
 }
 
+function CopyableValue({ label, value, name }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <label className="connector-setup-copy">
+      <span>{label}</span>
+      <span>
+        <input name={name} readOnly value={value} onFocus={(event) => event.target.select()} />
+        <button className="connection-quiet-button" type="button" onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(value);
+            setCopied(true);
+          } catch {
+            // The value stays selectable in the field, so a browser that
+            // refuses clipboard access costs nothing but the shortcut.
+          }
+        }}>{copied ? "Copied" : "Copy"}</button>
+      </span>
+    </label>
+  );
+}
+
+// Registering an OAuth application is several steps in a console most people
+// have never opened, and the two things easiest to get wrong, the redirect URI
+// and the scopes, both fail at the provider with an error that says nothing
+// about what to fix. Keep it collapsed so it does not crowd the field the
+// administrator came here to fill in.
+function ConnectorCredentialSetupHelp({ credentials, connectorName }) {
+  const setup = credentials?.setup;
+  if (!setup) return null;
+  return (
+    <details className="connector-setup-help">
+      <summary><Info24Regular aria-hidden="true" />How to create this application in {setup.console}</summary>
+      <div>
+        <ol>
+          {setup.steps.map((step) => <li key={step}>{step}</li>)}
+        </ol>
+        {credentials.redirectUri && <CopyableValue
+          label={`Redirect URI for the ${setup.clientType}`}
+          value={credentials.redirectUri}
+          name="connector-setup-redirect-uri"
+        />}
+        <div className="connector-setup-scopes">
+          <p><strong>Scopes {connectorName} requests</strong>{setup.scopesNote}</p>
+          <ul>{setup.scopes.map((scope) => <li key={scope}><code>{scope}</code></li>)}</ul>
+        </div>
+        <p><a href={setup.consoleUrl} target="_blank" rel="noreferrer noopener">Open {setup.console}</a></p>
+      </div>
+    </details>
+  );
+}
+
 function ConnectorCredentialsCard({ connector, onSaved }) {
   const credentials = connector.credentials;
   const configured = credentials?.mode === "tenant";
@@ -3952,6 +4003,7 @@ function ConnectorCredentialsCard({ connector, onSaved }) {
             : <p className="connector-credentials-current">No application is configured yet, so nobody in your organization can connect {connector.name}.</p>}
         {error && <span role="alert">{error}</span>}
       </div>
+      <ConnectorCredentialSetupHelp credentials={credentials} connectorName={connector.name} />
       {editing ? <div className="connector-credentials-fields">
         <label><span>Client ID</span><input name="connector-credentials-client-id" autoComplete="off" value={draft.clientId} onChange={(event) => setDraft({ ...draft, clientId: event.target.value })} disabled={Boolean(busy)} /></label>
         <label><span>Client secret</span><input name="connector-credentials-client-secret" type="password" autoComplete="new-password" value={draft.clientSecret} onChange={(event) => setDraft({ ...draft, clientSecret: event.target.value })} disabled={Boolean(busy)} /></label>

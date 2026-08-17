@@ -3952,6 +3952,38 @@ textarea:focus-visible,
 }
 .connector-credentials-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
 
+.connector-setup-help { border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; }
+.connector-setup-help summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  color: #1d2c40;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.connector-setup-help summary svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.connector-setup-help > div { display: grid; gap: 14px; padding: 0 14px 14px; }
+.connector-setup-help ol { display: grid; gap: 7px; margin: 0; padding-left: 18px; }
+.connector-setup-help li { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.connector-setup-help p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.connector-setup-help p strong { display: block; color: #1d2c40; }
+.connector-setup-scopes ul { display: grid; gap: 3px; margin: 7px 0 0; padding-left: 18px; }
+.connector-setup-scopes code { font-size: 11px; word-break: break-all; }
+.connector-setup-copy { display: grid; gap: 5px; font-size: 12px; }
+.connector-setup-copy > span:first-child { color: #1d2c40; font-weight: 600; }
+.connector-setup-copy > span:last-child { display: flex; align-items: center; gap: 8px; }
+.connector-setup-copy input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+}
+
 .connector-consent-card {
   display: grid;
   gap: 16px;
