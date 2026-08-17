@@ -142,7 +142,9 @@ export class PolicyBundleAuthority {
   }
 }
 
-export const DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS = 60_000;
+// The controller owns the workspace startup deadline. Control needs additional
+// transport grace so it can receive and preserve the controller's typed result.
+export const DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS = 90_000;
 
 export class HttpControllerClient implements ControllerClient {
   constructor(

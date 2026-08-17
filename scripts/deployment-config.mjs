@@ -705,6 +705,7 @@ const remoteMcpEgressPolicy = '{"schemaVersion":2,"mode":"restricted","id":"egv_
 export function projectServiceEnvironment(input = {}) {
   const values = resolveDeploymentEnvironment(input);
   const v = (key) => values[key];
+  const controllerRequestTimeoutMs = String(Number(v("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS")) + 30_000);
   const ms365Client = v("LEMMACOMPUTER_MS365_CLIENT_ID") || v("LEMMACOMPUTER_ENTRA_CLIENT_ID");
   const ms365Tenant = v("LEMMACOMPUTER_MS365_TENANT_ID") || v("LEMMACOMPUTER_ENTRA_TENANT_ID");
   const ms365Secret = v("LEMMACOMPUTER_MS365_CLIENT_SECRET") || v("LEMMACOMPUTER_ENTRA_CLIENT_SECRET");
@@ -888,7 +889,7 @@ export function projectServiceEnvironment(input = {}) {
       CONTROLLER_URL: controllerUrl,
       WORKSPACE_NODE_TOPOLOGY: v("LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY"),
       CONTROLLER_INTERNAL_TOKEN: v("LEMMACOMPUTER_CONTROLLER_TOKEN"),
-      CONTROLLER_REQUEST_TIMEOUT_MS: v("LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS"),
+      CONTROLLER_REQUEST_TIMEOUT_MS: controllerRequestTimeoutMs,
       CONTROLLER_TLS_CA_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CA_B64"),
       CONTROLLER_TLS_CLIENT_CERT_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_CERT_B64"),
       CONTROLLER_TLS_CLIENT_KEY_B64: v("LEMMACOMPUTER_WORKSPACE_NODE_TLS_CLIENT_KEY_B64"),

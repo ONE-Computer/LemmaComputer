@@ -256,8 +256,8 @@ test("hosted Cowork projects KVM only with the required remote node topology", (
   assert.equal(services["workspace-controller"].WORKSPACE_NODE_TOPOLOGY, "remote");
   assert.equal(services["control-api"].WORKSPACE_NODE_TOPOLOGY, "remote");
   assert.equal(
-    services["control-api"].CONTROLLER_REQUEST_TIMEOUT_MS,
-    services["workspace-controller"].KASM_LOCAL_STARTUP_TIMEOUT_MS,
+    Number(services["control-api"].CONTROLLER_REQUEST_TIMEOUT_MS),
+    Number(services["workspace-controller"].KASM_LOCAL_STARTUP_TIMEOUT_MS) + 30_000,
   );
   assert.equal(services["workspace-controller"].KASM_LOCAL_KVM_ENABLED, "true");
 

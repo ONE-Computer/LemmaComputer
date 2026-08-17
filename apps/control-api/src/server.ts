@@ -455,7 +455,7 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   WORKSPACE_NODE_TOPOLOGY: z.enum(["colocated", "remote"]).default("colocated"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
-  CONTROLLER_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
+  CONTROLLER_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(330_000).default(90_000),
   CONTROLLER_TLS_CA_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_KEY_B64: optionalEnvString(),
