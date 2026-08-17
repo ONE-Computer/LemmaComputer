@@ -107,11 +107,10 @@ const appFor = (actor: SessionPrincipal, spendObservabilityStore: SpendObservabi
   undefined,
   {},
   {
-    authentication: {
-      begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-      complete: async () => { throw new Error("not used"); },
-      authenticate: async (cookie: string | undefined) => cookie === "lemmacomputer_session=valid" ? actor : null,
-      logout: async () => "lemmacomputer_session=; Max-Age=0",
+    customerProductAuthentication: {
+      resolve: async (headers: Headers) => headers.get("cookie") === "lemmacomputer_session=valid"
+        ? { status: "authorized" as const, principal: actor }
+        : { status: "anonymous" as const },
     },
     identityPolicyStore: identityPolicies,
     spendObservabilityStore,

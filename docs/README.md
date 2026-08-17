@@ -133,7 +133,6 @@ Feature-level specifications and the authority that owns each decision.
 - [Service reference](reference/services.md) — every long-running, one-shot, and
   dynamic runtime component, its interfaces, dependencies, state, health
   contract, and extension seam.
-- [Transitional hosted Microsoft Entra External ID adapter](reference/hosted-external-id.md)
   — the legacy hosted adapter and its real-tenant qualification. It is not the
   current universal customer-authentication architecture.
 

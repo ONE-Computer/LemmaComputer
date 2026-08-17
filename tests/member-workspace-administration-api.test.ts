@@ -85,11 +85,8 @@ const appFor = (
   undefined,
   {},
   {
-    authentication: {
-      begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-      complete: async () => { throw new Error("unused"); },
-      authenticate: async () => principal,
-      logout: async () => "",
+    customerProductAuthentication: {
+      resolve: async () => ({ status: "authorized" as const, principal }),
     },
     identityPolicyStore: { listUsers: async (tenantId: string) => tenantId === "acme" ? users : [] } as unknown as IdentityPolicyStore,
     ...(agentInstanceStore ? { agentInstanceStore: agentInstanceStore as never } : {}),

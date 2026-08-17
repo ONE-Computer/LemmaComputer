@@ -135,10 +135,7 @@ class FakeSpendStore implements SpendObservabilityStore {
 }
 
 const authentication = (actor: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("not used"); },
-  authenticate: async () => actor,
-  logout: async () => "lemmacomputer_session=; Max-Age=0",
+  resolve: async () => ({ status: "authorized" as const, principal: actor }),
 });
 const identityPolicies = {
   getEffectivePolicy: async () => null,
@@ -152,7 +149,7 @@ const appFor = (actor: SessionPrincipal, spendObservabilityStore: SpendObservabi
   undefined,
   {},
   {
-    authentication: authentication(actor),
+    customerProductAuthentication: authentication(actor),
     identityPolicyStore: identityPolicies,
     spendObservabilityStore,
     agentBridgeSecret: "spend-observability-agent-bridge-secret-at-least-32-characters",

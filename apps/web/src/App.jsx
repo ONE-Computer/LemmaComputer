@@ -205,12 +205,22 @@ const signInErrorByReason = {
   OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
   SOCIAL_SIGNIN_FAILED: "The provider authenticated this account, but LemmaComputer could not finish sign-in. If your email still needs verification, try the provider again and resend the verification email.",
   INVITATION_SIGNIN_FAILED: "This invitation cannot be used. Ask your organization administrator for a new invitation.",
-  EXTERNAL_ID_SIGNIN_FAILED: "Microsoft could not complete this sign-in. Check the account or ask your organization administrator for a new invitation.",
   OIDC_FAILED: "LemmaComputer could not finish the sign-in bootstrap.",
 };
 const socialProviderNameById = {
   google: "Google",
   microsoft: "Microsoft",
+};
+
+const safeAuthenticationReturnPath = (value) => {
+  if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(value)) return "/";
+  try {
+    const base = new URL(window.location.origin);
+    const parsed = new URL(value, base);
+    return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/";
+  } catch {
+    return "/";
+  }
 };
 const socialSignInErrorMessage = (error, provider) => {
   if (error !== "account_not_linked") return null;
@@ -745,7 +755,7 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
   </div>;
 }
 
-function SignInScreen({ error, invitationActive = false, invitationBusy = false, invitationError = "", invitationContext = null, invitationVerified = false, onSignedIn }) {
+function SignInScreen({ error, invitationActive = false, invitationBusy = false, invitationError = "", invitationContext = null, invitationVerified = false, returnPath = "/", onSignedIn }) {
   const invited = invitationActive;
   const [capabilities, setCapabilities] = useState(null);
   const [mode, setMode] = useState(() => window.location.pathname === "/reset-password"
@@ -786,7 +796,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setStatus("");
     try {
       if (mode === "signup") {
-        const callbackURL = new URL(invited ? "/invite?verified=1" : "/", window.location.origin).toString();
+        const callbackURL = new URL(invited ? "/invite?verified=1" : returnPath, window.location.origin).toString();
         await authApi.signUpWithEmail({
           name,
           email,
@@ -827,7 +837,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setFormError("");
     setStatus("");
     try {
-      await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : "/");
+      await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : returnPath);
       setStatus(capabilities?.developmentEmailCapture
         ? "A new local verification email was captured. Open it below."
         : "Verification email sent. Check your inbox and junk folder, then open the link to continue.");
@@ -844,7 +854,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setFormError("");
     try {
       if (!verificationRecipient) {
-        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : "/");
+        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : returnPath);
       }
       const captured = await authApi.takeDevelopmentEmail(recipient, "email-verification");
       if (!captured?.url) throw new Error("The captured verification email is unavailable.");
@@ -859,7 +869,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setBusy(true);
     setFormError("");
     try {
-      const started = await authApi.signInWithSocialProvider(provider, invited ? "/invite" : "/");
+      const started = await authApi.signInWithSocialProvider(provider, invited ? "/invite" : returnPath);
       if (!started?.url) throw new Error("This sign-in method could not be started.");
       window.location.assign(started.url);
     } catch (socialError) {
@@ -875,7 +885,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setBusy(true);
     setFormError("");
     try {
-      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : "/");
+      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : returnPath);
       if (!started?.location) throw new Error("Company SSO could not be started.");
       window.location.assign(started.location);
     } catch (companyError) {
@@ -5390,6 +5400,9 @@ export function App() {
   const [invitationAcceptable, setInvitationAcceptable] = useState(false);
   const [invitationError, setInvitationError] = useState("");
   const [session, setSession] = useState(null);
+  const [authenticationReturnPath] = useState(() => safeAuthenticationReturnPath(
+    new URLSearchParams(window.location.search).get("return"),
+  ));
   const [customerSession, setCustomerSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
@@ -5519,6 +5532,12 @@ export function App() {
   }[tab.id]));
 
   useDismissOnOutside(profileOpen, () => setProfileOpen(false), profilePopoverRefs);
+
+  useEffect(() => {
+    if (session && !invitationActive && authenticationReturnPath !== "/") {
+      window.location.replace(authenticationReturnPath);
+    }
+  }, [authenticationReturnPath, invitationActive, session]);
 
   const requestConfirmation = (options) => new Promise((resolve) => {
     setConfirmation({ ...options, resolve });
@@ -7320,6 +7339,7 @@ export function App() {
       invitationError={invitationError}
       invitationContext={invitationContext}
       invitationVerified={invitationVerified}
+      returnPath={`${window.location.pathname}${window.location.search}`}
       onSignedIn={() => refreshAuthentication(invitationAcceptable)}
     />;
   }

@@ -200,7 +200,7 @@
       "scope": "organization",
       "scopeKey": "external_identities.tenant_id",
       "operationProfile": "organization-control",
-      "evidence": ["tests/authentication-contracts.test.ts", "tests/entra-authentication.test.ts"]
+      "evidence": ["tests/authentication-contracts.test.ts", "tests/organization-rbac-postgres.test.ts"]
     },
     {
       "store": "control",
@@ -227,7 +227,7 @@
       "scope": "organization",
       "scopeKey": "oidc_login_attempts.tenant_id",
       "operationProfile": "ephemeral-authentication",
-      "evidence": ["tests/entra-authentication.test.ts"]
+      "evidence": ["tests/migrations.test.ts"]
     },
     {
       "store": "control",
@@ -452,7 +452,7 @@
       "scope": "platform-operator",
       "scopeKey": "platform_operator_sessions.operator_id",
       "operationProfile": "private-authentication",
-      "evidence": ["tests/platform-operator-authentication.test.ts", "tests/platform-operator-postgres.test.ts"]
+      "evidence": ["tests/platform-better-authentication.test.ts", "tests/platform-operator-postgres.test.ts"]
     },
     {
       "store": "control",
@@ -479,7 +479,7 @@
       "scope": "platform-operator",
       "scopeKey": "platform_operator_oidc_attempts.state_hash",
       "operationProfile": "ephemeral-authentication",
-      "evidence": ["tests/platform-operator-authentication.test.ts"]
+      "evidence": ["tests/platform-better-authentication.test.ts"]
     },
     {
       "store": "control",

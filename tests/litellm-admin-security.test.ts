@@ -61,18 +61,21 @@ test("hosted LiteLLM administration requires HTTPS mutual TLS and distinct secre
 test("environment initialization and upgrades never derive session or ingress secrets from LiteLLM credentials", async () => {
   const template = [
     "LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET=generated",
-    "LEMMACOMPUTER_SESSION_SECRET=generated",
+    "LEMMACOMPUTER_BETTER_AUTH_SECRET=generated",
+    "LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET=generated",
     "LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET=generated",
   ].join("\n");
   const initialized = initializeEnvironment(await readFile(new URL("../.env.example", import.meta.url), "utf8"), "Etc/UTC");
   const initialValues = parseEnvironment(initialized).values;
-  assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_SESSION_SECRET"));
+  assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_BETTER_AUTH_SECRET"));
+  assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET"));
   assert.notEqual(initialValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), initialValues.get("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"));
 
   const merged = mergeEnvironment(template, `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET=${credentialSecret}`, initialized);
   const mergedValues = parseEnvironment(merged.contents).values;
   assert.equal(mergedValues.get("LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET"), credentialSecret);
-  assert.notEqual(mergedValues.get("LEMMACOMPUTER_SESSION_SECRET"), credentialSecret);
+  assert.notEqual(mergedValues.get("LEMMACOMPUTER_BETTER_AUTH_SECRET"), credentialSecret);
+  assert.notEqual(mergedValues.get("LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET"), credentialSecret);
   assert.notEqual(mergedValues.get("LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET"), credentialSecret);
   assert.equal(merged.mapped, 0);
 });
@@ -91,7 +94,7 @@ test("the shared projection routes LiteLLM administration through the dedicated 
   assert.match(control, /env_file:\s+- path: \.runtime-env\/control-api\.env\s+format: raw/);
   assert.match(proxy, /env_file:\s+- path: \.runtime-env\/litellm-admin-proxy\.env\s+format: raw/);
   assert.equal(controlEnvironment.LITELLM_ADMIN_URL, "http://litellm-admin-listener:8443");
-  assert.ok("SESSION_SECRET" in controlEnvironment);
+  assert.ok("BETTER_AUTH_SECRETS" in controlEnvironment);
   assert.ok("WORKSPACE_INGRESS_SECRET" in controlEnvironment);
   assert.ok("LITELLM_ADMIN_PROXY_TLS_SERVER_CERT_B64" in proxyEnvironment);
   assert.ok("LITELLM_ADMIN_PROXY_TLS_CA_B64" in proxyEnvironment);

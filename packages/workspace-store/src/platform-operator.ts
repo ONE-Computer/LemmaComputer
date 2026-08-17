@@ -20,8 +20,6 @@ import {
 } from "@lemmacomputer/contracts";
 import { tenantKindSchema, type TenantKind } from "./identity-policy.js";
 
-const platformBetterAuthIssuer = "urn:lemmacomputer:platform-better-auth";
-
 export type PlatformOperatorSession = {
   principal: PlatformOperatorPrincipal;
   roles: PlatformRole[];
@@ -1780,7 +1778,7 @@ export class PostgresPlatformOperatorStore {
         operatorSessionId: sessionId,
         operatorId: operator.id,
         identity: {
-          provider: operator.workforce_issuer === platformBetterAuthIssuer ? "better-auth" : "workforce-entra",
+          provider: "better-auth",
           issuer: operator.workforce_issuer,
           subject: operator.workforce_subject,
         },

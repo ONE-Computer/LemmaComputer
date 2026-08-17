@@ -28,9 +28,9 @@ class FakeBudgetStore implements TeamBudgetStore{
   async reserveAttemptInTransaction(){return{decision:"allow" as const};}
 }
 
-const authentication=(actor:SessionPrincipal)=>({begin:async()=>({location:"https://login.example.test",cookie:"state=opaque"}),complete:async()=>{throw new Error("unused");},authenticate:async()=>actor,logout:async()=>""});
+const authentication=(actor:SessionPrincipal)=>({resolve:async()=>({status:"authorized" as const,principal:actor})});
 const identityPolicies={getEffectivePolicy:async()=>null,listUsers:async()=>[]} as unknown as IdentityPolicyStore;
-const appFor=(actor:SessionPrincipal,budgetStore:TeamBudgetStore)=>createControlServer(new MemoryWorkspaceStore(),{} as ControllerClient,proxyToken,undefined,undefined,{}, {authentication:authentication(actor),identityPolicyStore:identityPolicies,budgetStore,agentBridgeSecret:"team-budgets-agent-bridge-secret-at-least-32-characters"});
+const appFor=(actor:SessionPrincipal,budgetStore:TeamBudgetStore)=>createControlServer(new MemoryWorkspaceStore(),{} as ControllerClient,proxyToken,undefined,undefined,{}, {customerProductAuthentication:authentication(actor),identityPolicyStore:identityPolicies,budgetStore,agentBridgeSecret:"team-budgets-agent-bridge-secret-at-least-32-characters"});
 const headers={"x-lemmacomputer-proxy-token":proxyToken,cookie:"lemmacomputer_session=valid"};
 
 test("Team budget API is administrator-only, tenant-derived, validated, and returns current period state",async()=>{

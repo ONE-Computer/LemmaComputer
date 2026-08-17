@@ -549,7 +549,7 @@ test("hosted invitation acceptance is tenant-bound, one-time, and commits member
     provider?: string;
     sessionTokenHash?: string;
   }) => ({
-    provider: input.provider ?? "entra-external-id",
+    provider: input.provider ?? "product",
     issuer,
     subject: input.subject,
     providerObjectId: `object-${input.subject}`,
@@ -656,7 +656,7 @@ test("hosted invitation acceptance is tenant-bound, one-time, and commits member
       subject_user_id: principal.userId,
       token_hash: acceptedSessionHash,
       event_type: "authentication.login_succeeded",
-      provider: "entra-external-id",
+      provider: "product",
     });
 
     const rejectionCases: ReadonlyArray<{

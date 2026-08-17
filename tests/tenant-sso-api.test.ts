@@ -124,16 +124,15 @@ test("tenant SSO administration routes bind every action to the authenticated or
     undefined,
     {},
     {
-      authentication: {
-        begin: async () => { throw new Error("unused"); },
-        complete: async () => { throw new Error("unused"); },
-        authenticate: async (cookie: string | undefined) => cookie === "session=valid"
-          ? actor
-          : cookie === "session=administrator" ? administrator : null,
-        logout: async () => "",
-      },
       customerProductAuthentication: {
-        resolve: async () => ({ status: "anonymous" }),
+        resolve: async (headers: Headers) => {
+          const cookie = headers.get("cookie");
+          return cookie === "session=valid"
+            ? { status: "authorized" as const, principal: actor }
+            : cookie === "session=administrator"
+              ? { status: "authorized" as const, principal: administrator }
+              : { status: "anonymous" as const };
+        },
         getInvitationSsoContext: async (_contextToken: string, email: string) => ({
           organizationId: actor.tenantId,
           email,

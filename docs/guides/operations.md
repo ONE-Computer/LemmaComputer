@@ -11,7 +11,7 @@ network boundaries, health-gated dependencies, and a separate build target for
 the workspace image.
 
 For a first installation, follow the ordered
-[local deployment and Entra setup runbook](local-deployment.md). This page is
+[local deployment and Microsoft integration runbook](local-deployment.md). This page is
 the ongoing configuration, recovery, and production-hardening reference.
 
 ## Configuration lifecycle
@@ -88,14 +88,14 @@ production deployment environment.
 | --- | --- | --- |
 | `LEMMACOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
 | `LEMMACOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
-| `LEMMACOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product origin and Entra callback base |
+| `LEMMACOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product and authentication origin |
 
 Workspace ingress derives the browser-facing connector routes from the one
 canonical origin. It forwards only `GET /oauth/mcp/callback` to private
 LiteLLM and `GET /m365/authorize` to the private Microsoft 365 bridge. LiteLLM
 and the bridge do not publish host ports. Changing
-`LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating the corresponding Entra and
-GitHub OAuth-app redirect URI.
+`LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating configured OAuth application
+redirect URIs.
 
 ### Identity and bootstrap
 
@@ -107,30 +107,15 @@ GitHub OAuth-app redirect URI.
 | `LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID` and secret | Optional pair | Google customer social login |
 | `LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID` and secret | Optional pair | Microsoft customer social login |
 | `LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS` | Tenant OIDC only | Comma-separated exact HTTPS IdP origins permitted for server-side discovery; never use wildcards |
-| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Current customer-managed preflight | Transitional workforce directory; not the product role authority |
-| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Current customer-managed preflight | Transitional workforce Web OIDC application |
-| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Current customer-managed preflight | Transitional workforce confidential-client secret |
-| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID` | Current hosted preflight | Transitional external tenant directory ID |
-| `LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN` | Current hosted preflight | Label before `.ciamlogin.com` |
-| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID` | Current hosted preflight | Transitional external tenant Web OIDC application |
-| `LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET` | Current hosted preflight | Transitional external tenant confidential-client secret |
-| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Transitional Entra bootstrap | Comma-separated immutable Entra object IDs allowed to perform the compatibility owner bootstrap |
-| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
-| `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID` | No | Owned tenant identifier |
-| `LEMMACOMPUTER_BOOTSTRAP_USER_ID` | No | Owned ID for a bootstrap administrator |
-| `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | No | Initial organization display name |
-
-Object-ID matching is case-insensitive. Keep the one-time bootstrap allowlist small.
-After identity records and memberships exist, changing bootstrap identifiers
-does not migrate existing rows.
+| `LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET` | Hosted/worktree platform realm | Versioned signing and encryption secret isolated from customer authentication |
+| `LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL` | Hosted | Exact identity of the first platform administrator |
+| `LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_SECRET` | First platform enrollment only | One-time secret removed from deployment custody after passkey enrollment |
 
 In both profiles, Better Auth proves customer authentication and LemmaComputer
 resolves the active organization membership and permissions. Self-service
 organization creation establishes protected ownership; invitations activate
-only their predetermined organization and role. Social-login, company-SSO,
-workforce-Entra, and External-ID claims cannot select or elevate a product
-membership. The latter two remain transitional adapters subject to their own
-profile preflight. An organization administrator can later suspend or
+only their predetermined organization and role. Social-login and company-SSO
+claims cannot select or elevate a product membership. An organization administrator can later suspend or
 reactivate a membership, revoke its active sessions, change its policy
 assignment, and manage sandbox and egress security-group configuration.
 A returning user does not automatically regain a policy that an administrator
@@ -185,13 +170,13 @@ disconnect without recording credentials, codes, assertions, or tokens.
 ### Microsoft 365
 
 `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and
-`LEMMACOMPUTER_MS365_CLIENT_SECRET` are optional as a group. Empty values reuse
-the Web Entra application. A separate connector application is recommended for
-production because it isolates Graph scopes and credential rotation.
+`LEMMACOMPUTER_MS365_CLIENT_SECRET` are optional as a group. When used, all
+three are required and belong to a dedicated connector application so Graph
+scopes and credential rotation stay isolated from customer authentication.
 
 The connector requests only the fixed scope list in `compose.yaml`. Tenant
 administrators should review those scopes against the enabled tool allowlist.
-See [Configure Microsoft Entra](local-deployment.md#configure-the-transitional-workforce-entra-and-microsoft-365-app)
+See [Configure Microsoft 365](local-deployment.md#configure-a-dedicated-microsoft-365-connector-app)
 for the exact local redirect URIs and delegated permission list.
 
 ### Hosted MCP connectors
@@ -426,16 +411,14 @@ The server certificate must verify for
 `litellm-admin-listener`), and the client certificate subject CN must match
 `LEMMACOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME` (normally
 `lemmacomputer-control`). Hosted startup refuses HTTP, missing or malformed mTLS
-material, and any reuse of `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET` as a session
-or workspace-ingress secret. The proxy rejects missing client certificates at
+material, and any reuse of `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET` as a
+customer-authentication, platform-authentication, or workspace-ingress secret. The proxy rejects missing client certificates at
 the TLS handshake and rejects a certificate for a different workload identity.
 
 For an upgrade from an older installation, run `npm run env:update`, put three
 independent values in `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET`,
-`LEMMACOMPUTER_SESSION_SECRET`, and
-`LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight. Do not
-rotate the credential-derivation secret merely to rotate sessions or ingress;
-those values are intentionally separate now.
+`LEMMACOMPUTER_BETTER_AUTH_SECRET`, `LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET`,
+and `LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight.
 
 ### Stable cryptographic material
 
@@ -804,7 +787,7 @@ Rotation is not equivalent to regenerating `.env`.
 
 - Rotate provider keys in LiteLLM and revoke the prior provider credential
   after route verification.
-- Rotate Entra client secrets with an overlap window.
+- Rotate optional OAuth and connector client secrets with an overlap window.
 - Rotate service tokens by deploying consumers and producers with a
   dual-acceptance window where supported.
 - Rotate policy signing keys by publishing the new public key alongside the old

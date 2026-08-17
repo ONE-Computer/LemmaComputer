@@ -1,7 +1,7 @@
 # Local deployment and Microsoft integration setup
 
-**Who this is for:** someone wiring up the transitional customer-managed Entra
-or Microsoft 365 integration. This is an integration-specific supplement, not a
+**Who this is for:** someone wiring up Microsoft social login, company SSO, or
+the Microsoft 365 connector. This is an integration-specific supplement, not a
 starting point.
 
 To simply run LemmaComputer, use the Quick start in the [README](../../README.md).
@@ -16,10 +16,9 @@ browser URL and OAuth callback. Do not change the worktree port to `4174`.
 
 The runbook produces a loopback-only LemmaComputer deployment with the local
 Docker sandbox driver, embedded Better Auth customer sign-in, optional
-Microsoft integrations, and at least one model route. The current strict
-customer-managed preflight still requires the transitional workforce-Entra
-application values described below; customer roles and workspace access remain
-LemmaComputer organization decisions.
+Microsoft integrations, and at least one model route. Customer sign-in uses
+Better Auth; customer roles and workspace access remain LemmaComputer
+organization decisions.
 
 The root `compose.yaml` is for development and evaluation. It is not a
 production security perimeter. Read
@@ -80,18 +79,15 @@ docker info >/dev/null
 Expected architecture output is `x86_64`. Resolve Docker daemon or socket
 access errors before continuing.
 
-## Configure the transitional workforce Entra and Microsoft 365 app
+## Configure a dedicated Microsoft 365 connector app
 
-This registration currently satisfies the strict customer-managed preflight
-and may also be reused for the Microsoft 365 connector. It is separate from
+This registration is only for the Microsoft 365 connector. It is separate from
 Better Auth Microsoft social login and from organization-managed company SSO.
 Do not infer a LemmaComputer organization, role, or workspace policy from this
 directory or its claims.
 
-LemmaComputer is a confidential, single-tenant Web application. The shortest
-local setup uses one Entra app registration for both product sign-in and
-delegated Microsoft 365 access. A separate connector app is also supported and
-is described below.
+Use a confidential, single-tenant Web application dedicated to delegated
+Microsoft 365 access.
 
 ### Create the app registration
 
@@ -105,8 +101,8 @@ is described below.
    rejects an ID token from another tenant.
 4. Register the application.
 5. From **Overview**, record:
-   - **Directory (tenant) ID** for `LEMMACOMPUTER_ENTRA_TENANT_ID`;
-   - **Application (client) ID** for `LEMMACOMPUTER_ENTRA_CLIENT_ID`.
+   - **Directory (tenant) ID** for `LEMMACOMPUTER_MS365_TENANT_ID`;
+   - **Application (client) ID** for `LEMMACOMPUTER_MS365_CLIENT_ID`.
 
 Microsoft's current registration guide is
 [Register an application in Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app).
@@ -115,17 +111,15 @@ Microsoft's current registration guide is
 
 Open **Authentication → Add a platform → Web** and add these exact URIs:
 
-Append these paths to the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` in the current
-`.env` and register the two resulting absolute URLs:
+Append this path to the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` in the current
+`.env` and register the resulting absolute URL:
 
 ```text
-/api/v1/auth/callback
 /oauth/mcp/callback
 ```
 
-The first is the LemmaComputer sign-in callback. The second is used by the
-LiteLLM/Microsoft 365 OAuth bridge. Both are server-side Web callbacks; do not
-register them as SPA, mobile, or public-client callbacks.
+This is the LiteLLM/Microsoft 365 OAuth bridge callback. Register it as a
+server-side Web callback, not SPA, mobile, or public-client.
 
 For this flow:
 
@@ -147,7 +141,7 @@ path changes, update both `.env` and the app registration. See Microsoft's
 1. Open **Certificates & secrets → Client secrets → New client secret**.
 2. Choose a short, operationally manageable lifetime and create the secret.
 3. Copy the secret **Value** immediately. Use the value, not the secret ID, for
-   `LEMMACOMPUTER_ENTRA_CLIENT_SECRET`.
+   `LEMMACOMPUTER_MS365_CLIENT_SECRET`.
 
 The value is shown only once. Do not paste it into an issue, chat, shell
 history, log, or committed file. Microsoft documents the current workflow in
@@ -191,23 +185,9 @@ Microsoft maintains the permission semantics and consent requirements in the
 and explains tenant-wide consent in
 [Grant tenant-wide admin consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent).
 
-### Optional: use separate Web and Microsoft 365 apps
-
-Separating the app registrations isolates Graph consent and connector-secret
-rotation from product sign-in:
-
-- The Web sign-in app uses
-  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/api/v1/auth/callback` and the
-  `LEMMACOMPUTER_ENTRA_*` variables. It needs only the OpenID sign-in scopes used
-  by LemmaComputer.
-- The Microsoft 365 connector app uses
-  `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback`, the delegated Graph permissions above, and
-  the `LEMMACOMPUTER_MS365_*` variables.
-
-Both apps should be single-tenant. If one app is used for both roles, leave all
-three `LEMMACOMPUTER_MS365_*` values empty so the canonical service projection reuses
-`LEMMACOMPUTER_ENTRA_*`. If a separate connector app is used, set all three
-Microsoft 365 values; do not partially configure the group.
+Set all three `LEMMACOMPUTER_MS365_*` values together. The connector does not
+fall back to a product-sign-in application, which keeps Graph consent and
+connector-secret rotation isolated from customer authentication.
 
 ## Initialize the environment
 
@@ -268,27 +248,19 @@ projection to a non-Compose deployment adapter.
 ### Values the operator must set
 
 Edit `.env` without printing it to shared logs. Do not add OpenAI or Anthropic
-provider keys there; replace these four placeholders for the complete
-customer-managed reference flow:
+provider keys there. Supply Microsoft 365 values only when testing that connector:
 
 | Variable | Required for the reference path | Value |
 | --- | --- | --- |
-| `LEMMACOMPUTER_ENTRA_TENANT_ID` | Yes | Entra Directory (tenant) ID |
-| `LEMMACOMPUTER_ENTRA_CLIENT_ID` | Yes | Entra Application (client) ID |
-| `LEMMACOMPUTER_ENTRA_CLIENT_SECRET` | Yes | Entra client secret **Value** |
-| `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` | Yes | Comma-separated immutable Entra object IDs allowed to perform the one-time organization-owner bootstrap |
-| `LEMMACOMPUTER_ADMINISTRATOR_EMAILS` | No | Deprecated compatibility input; email never grants a LemmaComputer role |
+| `LEMMACOMPUTER_MS365_TENANT_ID` | Microsoft 365 only | Connector Directory (tenant) ID |
+| `LEMMACOMPUTER_MS365_CLIENT_ID` | Microsoft 365 only | Connector Application (client) ID |
+| `LEMMACOMPUTER_MS365_CLIENT_SECRET` | Microsoft 365 only | Connector client secret **Value** |
 | `LEMMACOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
 
-Entra object-ID comparison is case-insensitive. Keep the bootstrap list
-small. Every user in the configured Entra tenant may authenticate, but only the
-listed immutable object IDs can perform the one-time organization-owner bootstrap.
-
-A worktree intentionally permits these placeholders so agents can build and
-test unrelated code without external credentials. Therefore `npm run
-env:check` can pass in a worktree before these values are replaced; that result
-proves contract validity, not live authentication readiness. List unresolved
-markers safely with `rg -n '=replace-with-' .env`.
+Customer accounts and organization ownership are created through Better Auth
+and LemmaComputer product flows; Microsoft directory claims never bootstrap a
+product role. A worktree needs no external identity credentials unless the
+specific integration under test requires them.
 
 OpenAI, Anthropic, GLM (Z.ai), and Bedrock keys are configured only after the stack is healthy:
 sign in as the bootstrapped owner, open **AI control plane → Models &
@@ -407,8 +379,8 @@ docker compose exec -T litellm python -c "import urllib.request; urllib.request.
 Then:
 
 1. Open the exact `LEMMACOMPUTER_PUBLIC_WEB_URL` from the current `.env`.
-2. Configure the signing-in account's immutable Entra `oid` in
-   `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS`, then sign in with that identity.
+2. Create or sign into the Better Auth customer account and create the initial
+   organization through the product flow.
 3. Verify the account has administrator navigation.
 4. Open **AI control plane → Models & providers**, save the key for every
    provider referenced by the policy, choose its approved models, and confirm
@@ -464,7 +436,7 @@ for ownership and backup details.
 
 ## Troubleshooting
 
-### Entra reports a redirect URI mismatch
+### Microsoft 365 reports a redirect URI mismatch
 
 Verify the callback exactly, including `http`, hostname, port, path, and lack of
 a trailing slash:
@@ -472,22 +444,15 @@ a trailing slash:
 Use the exact generated public origin plus these paths:
 
 ```text
-/api/v1/auth/callback
 /oauth/mcp/callback
 ```
 
 Remove stale tunnel callbacks once they are no longer used.
 
-### Entra rejects the client credential
+### Microsoft 365 rejects the client credential
 
 Use the client secret **Value**, not its ID. Check that the secret belongs to
 the same application/client ID and has not expired.
-
-### Sign-in succeeds but the user is not an administrator
-
-Confirm `LEMMACOMPUTER_BOOTSTRAP_OWNER_OBJECT_IDS` contains the immutable object ID returned by
-the configured tenant. If the user already exists, inspect the owned identity
-and role assignment rather than changing bootstrap identifiers blindly.
 
 ### Microsoft 365 connection fails
 
@@ -534,8 +499,8 @@ Fix the first unhealthy dependency rather than repeatedly regenerating
 
 An automation agent preparing a local instance should leave the operator with:
 
-- the Entra app name plus tenant/client IDs, never the client secret;
-- confirmation that the two exact callbacks are registered as Web redirects;
+- the Microsoft 365 app name plus tenant/client IDs, never the client secret;
+- confirmation that the exact `/oauth/mcp/callback` is registered as a Web redirect;
 - confirmation that the 13 delegated Graph permissions show granted status;
 - confirmation that `.env` exists with mode `0600`, without displaying it;
 - the workspace image tag and build result;

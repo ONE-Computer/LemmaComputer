@@ -302,8 +302,6 @@ export const authApi = {
     }));
   },
   customerSignOut: () => request("/api/v1/auth/customer/sign-out", mutation()),
-  loginUrl: "/api/v1/auth/login",
-  beginExternalIdInvitation: (invitation: unknown, returnPath = "/") => request("/api/v1/auth/external-id/invitation", mutation("POST", { invitation, return: returnPath })),
   logout: async () => {
     await request("/api/v1/auth/logout", mutation()).catch(() => null);
     await request("/api/v1/auth/customer/sign-out", mutation()).catch(() => null);

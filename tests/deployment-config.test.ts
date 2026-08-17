@@ -67,15 +67,7 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT: "",
     LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID: "alias/lemmacomputer-artifacts",
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://hosted.example.test",
-    LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "hosted-external-directory",
-    LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "hosted-test",
-    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID: "hosted-external-client",
-    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: "hosted-external-secret",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID: "hosted-workforce-directory",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID: "hosted-platform-client",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: "hosted-platform-secret",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET: "platform-session-secret-that-is-long-enough-0001",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
+    LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL: "operator@hosted.example.test",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.example.test/lemma",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "security-alert-webhook-secret-at-least-32-characters",
     LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "remote",
@@ -107,7 +99,6 @@ const validHostedEnvironment = () => {
     LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64: pemBase64("PRIVATE KEY"),
     LEMMACOMPUTER_TELEGRAM_RAW_TOKEN_INPUT_MODE: "reject",
     LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET: "credential-secret-that-is-long-enough-0000001",
-    LEMMACOMPUTER_SESSION_SECRET: "session-secret-that-is-long-enough-0000000001",
     LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET: "ingress-secret-that-is-long-enough-0000000001",
     LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
     LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
@@ -122,9 +113,6 @@ const validCustomerManagedEnvironment = () => {
   const values = Object.fromEntries(parseEnvironment(initialized).values);
   Object.assign(values, {
     LEMMACOMPUTER_INSTALLATION_KIND: "customer-managed",
-    LEMMACOMPUTER_ENTRA_TENANT_ID: "customer-directory-tenant",
-    LEMMACOMPUTER_ENTRA_CLIENT_ID: "customer-application-client",
-    LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "customer-application-secret",
     LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE: `lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
     LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE: `lemmacomputer/openvtc-consent@sha256:${"b".repeat(64)}`,
     LEMMACOMPUTER_MS365_MCP_IMAGE: `lemmacomputer/ms365-mcp@sha256:${"c".repeat(64)}`,
@@ -136,9 +124,6 @@ const validCustomerManagedEnvironment = () => {
 const initializedCustomerManagedEnvironment = () => initializeEnvironment(
   renderEnvironmentTemplate(),
   "Etc/UTC",
-).replace(
-  "LEMMACOMPUTER_ENTRA_TENANT_ID=replace-with-entra-directory-tenant-id",
-  "LEMMACOMPUTER_ENTRA_TENANT_ID=customer-directory-tenant",
 ).replace(
   "LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE=lemmacomputer/control-runtime:dev",
   `LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE=lemmacomputer/control-runtime@sha256:${"a".repeat(64)}`,
@@ -493,17 +478,17 @@ test("hosted remote nodes require mutual TLS on desktop and application relay ro
 
 test("hosted validation rejects secret reuse and raw Telegram token compatibility mode", () => {
   const reusedSessionSecret = validHostedEnvironment();
-  reusedSessionSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedSessionSecret.LEMMACOMPUTER_SESSION_SECRET;
+  reusedSessionSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedSessionSecret.LEMMACOMPUTER_BETTER_AUTH_SECRET;
   assert.throws(
     () => validateDeploymentEnvironment(reusedSessionSecret, { profile: "hosted", strict: true }),
-    /LITELLM_CREDENTIAL_SECRET.*SESSION_SECRET|must not equal/i,
+    /customer authentication.*distinct|must be distinct/i,
   );
 
   const reusedIngressSecret = validHostedEnvironment();
   reusedIngressSecret.LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET = reusedIngressSecret.LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET;
   assert.throws(
     () => validateDeploymentEnvironment(reusedIngressSecret, { profile: "hosted", strict: true }),
-    /LITELLM_CREDENTIAL_SECRET.*WORKSPACE_INGRESS_SECRET|must not equal/i,
+    /workspace ingress secrets must be distinct|must not equal/i,
   );
 
   const legacyTelegram = validHostedEnvironment();
@@ -514,26 +499,18 @@ test("hosted validation rejects secret reuse and raw Telegram token compatibilit
   );
 });
 
-test("hosted validation requires an isolated platform-operator workforce realm", () => {
-  const missingWorkforceRealm = validHostedEnvironment();
-  missingWorkforceRealm.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID = "";
+test("hosted validation requires an isolated platform-operator passkey realm", () => {
+  const missingOperatorIdentity = validHostedEnvironment();
+  missingOperatorIdentity.LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL = "";
   assert.throws(
-    () => validateDeploymentEnvironment(missingWorkforceRealm, { profile: "hosted", strict: true }),
-    /PLATFORM_OPERATOR_ENTRA_TENANT_ID.*required/i,
+    () => validateDeploymentEnvironment(missingOperatorIdentity, { profile: "hosted", strict: true }),
+    /PLATFORM_AUTH_BOOTSTRAP_EMAIL.*required/i,
   );
 
-  const sharedApplication = validHostedEnvironment();
-  sharedApplication.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID = sharedApplication.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID;
-  assert.throws(
-    () => validateDeploymentEnvironment(sharedApplication, { profile: "hosted", strict: true }),
-    /PLATFORM_OPERATOR_ENTRA_CLIENT_ID.*separate application/i,
-  );
-
-  const sharedSessionSecret = validHostedEnvironment();
-  sharedSessionSecret.LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET = sharedSessionSecret.LEMMACOMPUTER_SESSION_SECRET;
-  assert.throws(
-    () => validateDeploymentEnvironment(sharedSessionSecret, { profile: "hosted", strict: true }),
-    /PLATFORM_OPERATOR_SESSION_SECRET.*distinct/i,
+  const enrolledDeployment = validHostedEnvironment();
+  enrolledDeployment.LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_SECRET = "";
+  assert.doesNotThrow(
+    () => validateDeploymentEnvironment(enrolledDeployment, { profile: "hosted", strict: true }),
   );
 });
 
@@ -552,34 +529,11 @@ test("profile validation rejects workspace and hosted-control contradictions", (
     /HOSTED_MCP_EGRESS_ORIGINS is hosted-only/i,
   );
 
-  const externalIdInCustomerDeployment = validCustomerManagedEnvironment();
-  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID = "external-directory";
-  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN = "external-test";
-  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID = "external-client";
-  externalIdInCustomerDeployment.LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET = "external-secret";
-  assert.throws(
-    () => validateDeploymentEnvironment(externalIdInCustomerDeployment, { profile: "customer-managed", strict: true }),
-    /EXTERNAL_ID_.*hosted-only/i,
-  );
-
   const platformOperatorInCustomerDeployment = validCustomerManagedEnvironment();
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID = "workforce-directory";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID = "platform-client";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET = "platform-secret";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET = "platform-session-secret-that-is-long-enough-0001";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT = "c1";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL = "https://security-alerts.example.test/lemma";
-  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET = "security-alert-webhook-secret-at-least-32-characters";
+  platformOperatorInCustomerDeployment.LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL = "operator@example.test";
   assert.throws(
     () => validateDeploymentEnvironment(platformOperatorInCustomerDeployment, { profile: "customer-managed", strict: true }),
-    /PLATFORM_OPERATOR_.*hosted-only/i,
-  );
-
-  const unconfiguredCustomerIssuer = validCustomerManagedEnvironment();
-  unconfiguredCustomerIssuer.LEMMACOMPUTER_ENTRA_TENANT_ID = "replace-with-entra-directory-tenant-id";
-  assert.throws(
-    () => validateDeploymentEnvironment(unconfiguredCustomerIssuer, { profile: "customer-managed", strict: true }),
-    /ENTRA_TENANT_ID must identify the customer directory/i,
+    /PLATFORM_AUTH_BOOTSTRAP_EMAIL.*hosted-only/i,
   );
 });
 
@@ -610,9 +564,9 @@ test("service projections preserve credential and TLS key custody", () => {
   assert.ok("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-controller"]);
   assert.ok(!("WORKSPACE_NODE_APPLICATION_TLS_CLIENT_KEY_B64" in services["workspace-ingress"]));
   assert.ok(!("LEMMACOMPUTER_WEB_PROXY_TOKEN" in services["channel-broker"]));
-  assert.ok(!("PLATFORM_AUTH_DATABASE_URL" in services["control-api"]));
-  assert.ok(!("PLATFORM_BETTER_AUTH_SECRETS" in services["control-api"]));
-  assert.ok(!("PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET" in services["control-api"]));
+  assert.ok("PLATFORM_AUTH_DATABASE_URL" in services["control-api"]);
+  assert.ok("PLATFORM_BETTER_AUTH_SECRETS" in services["control-api"]);
+  assert.ok("PLATFORM_AUTH_BOOTSTRAP_SECRET" in services["control-api"]);
   assert.match(serializeEnvironment(services["channel-broker"]), /^CHANNEL_CREDENTIAL_SECRET=/m);
 });
 
@@ -623,10 +577,10 @@ test("worktree platform authentication uses isolated credentials projected only 
   const services = projectServiceEnvironment(values);
 
   assert.match(services["control-api"].PLATFORM_AUTH_DATABASE_URL, /lemmacomputer_platform_auth_runtime/);
-  assert.equal(services["control-api"].PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET, values.LEMMACOMPUTER_PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET);
+  assert.equal(services["control-api"].PLATFORM_AUTH_BOOTSTRAP_SECRET, values.LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_SECRET);
   assert.match(services["platform-auth-db-migrate"].AUTH_DATABASE_URL, /lemmacomputer_platform_auth_migrator/);
   assert.ok(!("PLATFORM_BETTER_AUTH_SECRETS" in services.web));
-  assert.ok(!("PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET" in services.web));
+  assert.ok(!("PLATFORM_AUTH_BOOTSTRAP_SECRET" in services.web));
 
   assert.throws(
     () => validateDeploymentEnvironment({

@@ -34,10 +34,7 @@ const headers = {
 };
 
 const authentication = {
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("unused"); },
-  authenticate: async () => administrator,
-  logout: async () => "",
+  resolve: async () => ({ status: "authorized" as const, principal: administrator }),
 };
 
 test("a new organization has no policy ceiling and its administrator can create a workspace", async () => {
@@ -118,7 +115,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     throw new Error("Unqualified selections must be rejected before persistence");
   };
   const app = createControlServer(store, controller, proxyToken, undefined, undefined, {}, {
-    authentication,
+    customerProductAuthentication: authentication,
     identityPolicyStore,
     protectedWorkspacePolicy,
     routingStore,

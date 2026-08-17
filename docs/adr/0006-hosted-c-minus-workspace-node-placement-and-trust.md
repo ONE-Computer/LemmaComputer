@@ -35,7 +35,7 @@ sticky, persisted placement:
   recorded workspace owner, not through a load balancer or the tenant's current
   default.
 
-Only the separate workforce operator realm may register nodes or change tenant
+Only the separate platform operator passkey realm may register nodes or change tenant
 placement. Registration and assignment are audited. `active`, `draining`, and
 `disabled` are admission states; they are not claims of live node health.
 
