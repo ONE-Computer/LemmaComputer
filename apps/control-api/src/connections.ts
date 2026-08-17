@@ -123,11 +123,20 @@ const requiresAdminConsent = (error: string, description = "") => {
   return /AADSTS(?:65001|90094|900941)/i.test(description);
 };
 
+// The pseudo-directory every personal Microsoft account belongs to. It has no
+// administrator and nothing tenant-wide to consent to, so a response naming it
+// is not an organization approval whatever else it claims. The consent request
+// already goes to /organizations, which personal accounts cannot reach, so this
+// only closes the case of a response that did not come from that endpoint.
+const MICROSOFT_CONSUMER_DIRECTORY = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
 // Entra returns the consenting directory as a GUID on the admin-consent
 // redirect. Requiring that shape keeps a malformed or hand-written response
 // from being recorded as a grant.
 const isDirectoryTenantId = (value: unknown): value is string =>
-  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  typeof value === "string"
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  && value.toLowerCase() !== MICROSOFT_CONSUMER_DIRECTORY;
 
 const stateDigest = (state: string) => createHash("sha256").update(state).digest("base64url");
 const policyProjectionDigest = (policy: RuntimePolicy) => createHash("sha256")

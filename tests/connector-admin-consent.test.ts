@@ -137,6 +137,12 @@ test("a tampered, foreign, expired, or refused approval records nothing", async 
   await unrecorded({ state, error: "access_denied", error_description: "AADSTS65004" }, "a refusal is not a grant");
   await unrecorded({ state, admin_consent: "True" }, "a grant without a directory id is not recorded");
   await unrecorded({ state, tenant: "not-a-directory", admin_consent: "True" }, "a malformed directory id is not recorded");
+  // Every personal Microsoft account lives in one pseudo-directory that has no
+  // administrator and nothing tenant-wide to approve.
+  await unrecorded(
+    { state, tenant: "9188040d-6c67-4c5b-b112-36a304b66dad", admin_consent: "True" },
+    "the personal-account directory cannot approve an organization",
+  );
   await unrecorded({ state, tenant: acmeDirectory, admin_consent: "False" }, "an explicit decline is not a grant");
 
   const expiredService = service(registry, { adminConsentTtlMs: 1, now: () => Date.now() });
