@@ -142,14 +142,21 @@ export class PolicyBundleAuthority {
   }
 }
 
+export const DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS = 60_000;
+
 export class HttpControllerClient implements ControllerClient {
-  constructor(private readonly baseUrl: string, private readonly token: string, private readonly transport: FetchLike = fetch) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly token: string,
+    private readonly transport: FetchLike = fetch,
+    private readonly requestTimeoutMs = DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS,
+  ) {}
   private async call(path: string, init?: RequestInit) {
     const hasBody = init?.body !== undefined;
     const response = await this.transport(`${this.baseUrl}${path}`, {
       ...init,
       headers: { ...(hasBody ? { "content-type": "application/json" } : {}), "x-controller-token": this.token, ...init?.headers },
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string; retryable?: boolean } };

@@ -455,6 +455,7 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   WORKSPACE_NODE_TOPOLOGY: z.enum(["colocated", "remote"]).default("colocated"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
+  CONTROLLER_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(300_000).default(60_000),
   CONTROLLER_TLS_CA_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_KEY_B64: optionalEnvString(),
@@ -6183,6 +6184,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
           clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
           serverName: node.tlsServerName,
         }),
+        env.CONTROLLER_REQUEST_TIMEOUT_MS,
       ))
     : new HttpControllerClient(
         env.CONTROLLER_URL,
@@ -6195,6 +6197,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
               serverName: env.CONTROLLER_TLS_SERVER_NAME!,
             })
           : fetch,
+        env.CONTROLLER_REQUEST_TIMEOUT_MS,
       );
   const platformSecurityAlertDispatcher = platformOperatorStore
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
