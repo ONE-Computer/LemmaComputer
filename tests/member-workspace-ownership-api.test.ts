@@ -44,10 +44,7 @@ const headers = {
   "idempotency-key": "member-workspace-create-0001",
 };
 const authentication = (actor: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("unused"); },
-  authenticate: async () => actor,
-  logout: async () => "",
+  resolve: async () => ({ status: "authorized" as const, principal: actor }),
 });
 const controller: ControllerClient = {
   create: async ({ workspaceId }) => ({ providerId: `sandbox-${workspaceId}`, state: "ready", failureCode: null }),
@@ -65,7 +62,7 @@ const appFor = (actor: SessionPrincipal, store: MemoryWorkspaceStore) => createC
   undefined,
   undefined,
   {},
-  { authentication: authentication(actor), agentBridgeSecret: "member-workspace-agent-bridge-secret-at-least-32-characters" },
+  { customerProductAuthentication: authentication(actor), agentBridgeSecret: "member-workspace-agent-bridge-secret-at-least-32-characters" },
 );
 
 test("a member-created workspace is bound to that member inside the organization", async () => {

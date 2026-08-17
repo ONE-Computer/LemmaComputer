@@ -112,24 +112,16 @@ test("customer and platform-operator realms cannot be substituted", () => {
     operatorSessionId: "operator_session_01KZQ4N4MJM6B0QGQ5AJ2W6J5K",
     operatorId: "44444444-4444-4444-8444-444444444444",
     identity: {
-      provider: "workforce-entra",
-      issuer: "https://login.microsoftonline.com/organizations/v2.0",
-      subject: "workforce-object-id",
+      provider: "better-auth",
+      issuer: "https://app.lemmacomputer.example/api/v1/platform/auth/better-auth",
+      subject: "platform-operator-id",
     },
-    assurance: { level: "aal2", factors: ["federated", "totp"] },
+    assurance: { level: "aal2", factors: ["passkey"] },
     authenticatedAt: "2026-08-09T03:00:00.000Z",
     recentStepUpAt: "2026-08-09T03:01:00.000Z",
   } as const;
   assert.equal(platformOperatorPrincipalSchema.safeParse(operator).success, true);
-  assert.equal(platformOperatorPrincipalSchema.safeParse({
-    ...operator,
-    identity: {
-      provider: "better-auth",
-      issuer: "urn:lemmacomputer:platform-better-auth",
-      subject: "local-platform-operator",
-    },
-    assurance: { level: "aal2", factors: ["passkey"] },
-  }).success, true);
+  assert.equal(platformOperatorPrincipalSchema.safeParse(operator).success, true);
   assert.equal(customerAuthenticatedPrincipalSchema.safeParse(operator).success, false);
   assert.equal(productAuthorizationContextSchema.safeParse(operator).success, false);
 });
@@ -200,24 +192,24 @@ test("platform roles allow only their documented actions and unknown actions den
   assert.equal(platformRoleAllowsAction(["customer-owner"], "platform.audit.read"), false);
 });
 
-test("operator step-up requires a workforce principal with aal2 no more than ten minutes old", () => {
+test("operator step-up requires a passkey principal with aal2 no more than ten minutes old", () => {
   const operator = {
     realm: "platform-operator",
     operatorSessionId: "operator_session_01KZQ4N4MJM6B0QGQ5AJ2W6J5K",
     operatorId: "44444444-4444-4444-8444-444444444444",
     identity: {
-      provider: "workforce-entra",
-      issuer: "https://login.microsoftonline.com/workforce/v2.0",
-      subject: "workforce-object-id",
+      provider: "better-auth",
+      issuer: "https://app.lemmacomputer.example/api/v1/platform/auth/better-auth",
+      subject: "platform-operator-id",
     },
-    assurance: { level: "aal2", factors: ["federated", "totp"] },
+    assurance: { level: "aal2", factors: ["passkey"] },
     authenticatedAt: "2026-08-09T03:00:00.000Z",
     recentStepUpAt: "2026-08-09T03:01:00.000Z",
   } as const;
   const now = new Date("2026-08-09T03:10:00.000Z");
   assert.equal(hasRecentPlatformOperatorStepUp(operator, now), true);
   assert.equal(hasRecentPlatformOperatorStepUp(customerPrincipal, now), false);
-  assert.equal(hasRecentPlatformOperatorStepUp({ ...operator, assurance: { level: "aal1", factors: ["federated"] } }, now), false);
+  assert.equal(hasRecentPlatformOperatorStepUp({ ...operator, assurance: { level: "aal1", factors: ["password"] } }, now), false);
   assert.equal(hasRecentPlatformOperatorStepUp({ ...operator, recentStepUpAt: "2026-08-09T02:59:59.999Z" }, now), false);
 });
 

@@ -2687,6 +2687,47 @@ textarea:focus-visible,
   color: #31445b;
   font-size: 13px;
   font-weight: 600;
+  text-decoration: none;
+}
+
+a.chat-file-part:hover {
+  border-color: #8aa7c8;
+  background: #eef5fc;
+}
+
+.chat-fork-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  color: #66758a;
+  font-size: 12px;
+}
+
+.chat-fork-actions button {
+  border: 1px solid #ccd6e2;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #fff;
+  color: #31445b;
+  cursor: pointer;
+}
+
+.chat-history-offline {
+  margin: 0 16px 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #f3f6f9;
+  color: #526276;
+  font-size: 12px;
+}
+
+.sidebar-chat-history button span small {
+  display: block;
+  color: #7a8797;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .chat-file-part > svg {

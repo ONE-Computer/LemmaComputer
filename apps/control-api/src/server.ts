@@ -6,8 +6,9 @@ import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspac
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
+import { FilesystemArtifactStore, S3ArtifactStore, type ArtifactStore } from "@lemmacomputer/artifact-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
@@ -22,7 +23,6 @@ import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, RoutedControllerClient, WorkspaceService, type ControllerClient } from "./service.js";
-import { EntraAuthenticationService, ExternalIdAuthenticationService, testPrincipalFromHeaders } from "./auth.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
 import { HttpOpenVtcConsentClient } from "./openvtc-consent-client.js";
@@ -31,6 +31,7 @@ import { COMPANION_PUSH_PROTOCOL, WebPushProvider } from "./web-push.js";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import {
   AgentChatAuthority,
+  AgentMessageAccumulator,
   AgentUiStreamMapper,
   HttpAgentChatClient,
   assignedChatAgentIds,
@@ -38,6 +39,7 @@ import {
   reconcileChatMessages,
   type AgentChatClient,
 } from "./agent-chat.js";
+import { DurableChatService } from "./durable-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
@@ -57,13 +59,14 @@ import {
 } from "./customer-product-authentication.js";
 import { fromNodeHeaders } from "better-auth/node";
 import { registerPlatformOperatorRoutes, type PlatformOperatorAuthenticationBoundary, type PlatformOperatorStoreBoundary } from "./platform-operator-routes.js";
-import { PlatformOperatorAuthenticationService } from "./platform-operator-auth.js";
 import {
   BetterAuthPlatformOperatorAuthenticationService,
   createPlatformAuthentication,
   platformAuthenticationControlPath,
   registerPlatformAuthenticationRoutes,
+  worktreePlatformOperatorBootstrap,
   type PlatformAuthentication,
+  type PlatformOperatorBootstrap,
 } from "./platform-better-authentication.js";
 import { PlatformSecurityAlertDispatcher, SignedWebhookPlatformSecurityAlertAdapter, type PlatformSecurityAlertDispatcherStatus } from "./platform-security-alert-dispatcher.js";
 import { ControlPlaneTenantCleanupAdapter, PlatformTenantCleanupDispatcher, type PlatformTenantCleanupDispatcherStatus } from "./platform-tenant-cleanup-dispatcher.js";
@@ -75,7 +78,6 @@ import {
 
 import { paginateSpendReport, parseSpendQuery, parseUnpricedUsageAcknowledgement } from "./spend-observability.js";
 import { parsePersonalAiUsageQuery, personalAiUsageReport } from "./personal-ai-usage.js";
-type AuthenticationBoundary = Pick<EntraAuthenticationService, "begin" | "complete" | "authenticate" | "logout">;
 type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
   "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
@@ -86,6 +88,25 @@ type TenantSsoAdministrationBoundary = Pick<
   "list" | "register" | "requestDomainVerification" | "verifyDomain" | "startTest" | "completeTest" | "startEnforcedSignIn" | "startInvitationSignIn" | "transition"
   | "rotateCredentials" | "refreshMetadata" | "disconnect"
 > & Partial<Pick<TenantSsoAdministrationService, "isInvitationSignInAvailable">>;
+
+const testPrincipalFromHeaders = (headers: Record<string, unknown>): SessionPrincipal => {
+  const tenantId = String(headers["x-lemmacomputer-test-tenant-id"] ?? "test-tenant");
+  const userId = String(headers["x-lemmacomputer-test-user-id"] ?? "test-user");
+  return {
+    userId,
+    tenantId,
+    organizationId: tenantId,
+    membershipId: `test-membership:${tenantId}:${userId}`,
+    membershipStatus: "active",
+    role: "owner",
+    email: `${userId}@example.test`,
+    displayName: userId,
+    tenantDisplayName: tenantId,
+    tenantKind: "organization",
+    roles: ["owner", "administrator"],
+    identity: { tenantId, subjectId: userId, audience: "lemmacomputer-control" },
+  };
+};
 
 const invitationContextCookieName = "lemmacomputer_invitation_context";
 const invitationContextFromCookie = (header: string | undefined) => {
@@ -452,6 +473,7 @@ const envSchema = z.object({
   CONTROLLER_URL: z.string().url().default("http://127.0.0.1:4101"),
   WORKSPACE_NODE_TOPOLOGY: z.enum(["colocated", "remote"]).default("colocated"),
   CONTROLLER_INTERNAL_TOKEN: z.string().min(24),
+  CONTROLLER_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(330_000).default(90_000),
   CONTROLLER_TLS_CA_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_CERT_B64: optionalEnvString(),
   CONTROLLER_TLS_CLIENT_KEY_B64: optionalEnvString(),
@@ -461,7 +483,9 @@ const envSchema = z.object({
   BETTER_AUTH_SECRETS: z.string().min(1),
   PLATFORM_AUTH_DATABASE_URL: optionalEnvString(),
   PLATFORM_BETTER_AUTH_SECRETS: optionalEnvString(),
-  PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET: optionalEnvString(32),
+  PLATFORM_AUTH_BOOTSTRAP_EMAIL: optionalEnvString(),
+  PLATFORM_AUTH_BOOTSTRAP_DISPLAY_NAME: z.string().min(1).default("Platform administrator"),
+  PLATFORM_AUTH_BOOTSTRAP_SECRET: optionalEnvString(32),
   BETTER_AUTH_TRUSTED_PROXY_CIDRS: z.string().default(""),
   CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: z.string().default(""),
   AUTH_EMAIL_TRANSPORT: z.enum(["capture", "postmark"]),
@@ -508,22 +532,9 @@ const envSchema = z.object({
   WEB_PUSH_VAPID_PUBLIC_KEY: optionalEnvString(),
   WEB_PUSH_VAPID_PRIVATE_KEY: optionalEnvString(),
   WEB_PUSH_SUBSCRIPTION_SECRET: optionalEnvString(32),
-  ENTRA_TENANT_ID: z.string().min(1),
-  ENTRA_CLIENT_ID: z.string().min(1),
-  ENTRA_CLIENT_SECRET: z.string().min(1),
-  EXTERNAL_ID_TENANT_ID: optionalEnvString(),
-  EXTERNAL_ID_TENANT_SUBDOMAIN: optionalEnvString(),
-  EXTERNAL_ID_CLIENT_ID: optionalEnvString(),
-  EXTERNAL_ID_CLIENT_SECRET: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_TENANT_ID: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_CLIENT_ID: optionalEnvString(),
-  PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: optionalEnvString(),
-  PLATFORM_OPERATOR_SESSION_SECRET: optionalEnvString(32),
-  PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: optionalEnvString(),
   PLATFORM_SECURITY_ALERT_WEBHOOK_URL: optionalEnvString(),
   PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: optionalEnvString(32),
   PLATFORM_SUPPORT_APPROVAL_REQUIRED: z.enum(["true", "false"]).default("true"),
-  SESSION_SECRET: z.string().min(32),
   AI_USAGE_INTERNAL_TOKEN: z.string().min(32),
   AI_USAGE_TASK_BINDING_SECRET: z.string().min(32),
   WORKSPACE_INGRESS_PUBLIC_URL: optionalEnvString(),
@@ -532,6 +543,13 @@ const envSchema = z.object({
   WORKSPACE_INGRESS_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
   EGRESS_GRANT_SECRET: z.string().min(32).optional(),
   AGENT_CHAT_SECRET: z.string().min(32),
+  ARTIFACT_STORE_BACKEND: z.enum(["filesystem", "s3"]),
+  ARTIFACT_FILESYSTEM_ROOT: optionalEnvString(),
+  ARTIFACT_S3_BUCKET: optionalEnvString(),
+  ARTIFACT_S3_REGION: optionalEnvString(),
+  ARTIFACT_S3_ENDPOINT: optionalEnvString(),
+  ARTIFACT_S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).default("false"),
+  ARTIFACT_S3_KMS_KEY_ID: optionalEnvString(),
   CHANNEL_BROKER_URL: optionalEnvString(),
   CHANNEL_BROKER_INTERNAL_TOKEN: optionalEnvString(32),
   TELEGRAM_RAW_TOKEN_INPUT_MODE: z.preprocess(
@@ -550,9 +568,6 @@ const envSchema = z.object({
   POLICY_BUNDLE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
   GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
   BOOTSTRAP_TENANT_ID: z.string().min(1).default("acme"),
-  BOOTSTRAP_USER_ID: z.string().min(1).default("alex-morgan"),
-  TENANT_DISPLAY_NAME: z.string().min(1).default("Example Organization"),
-  BOOTSTRAP_OWNER_OBJECT_IDS: z.string().min(1),
 });
 
 export const usesPlacementRoutedController = (input: {
@@ -649,8 +664,6 @@ export function createControlServer(
     microsoftAdminConsent?: { clientId: string; consentSecret: string };
   } = {},
   security: {
-    authentication?: AuthenticationBoundary;
-    externalIdAuthentication?: AuthenticationBoundary;
     customerAuthentication?: CustomerAuthentication;
     customerSsoAuthentication?: CustomerAuthentication;
     customerProductAuthentication?: CustomerProductAuthenticationBoundary;
@@ -682,6 +695,10 @@ export function createControlServer(
     policyBundleAuthority?: PolicyBundleAuthority;
     agentChatSecret?: string;
     agentChatClient?: AgentChatClient;
+    chatStore?: ChatStore;
+    artifactStore?: ArtifactStore;
+    requireArtifactNodePlacement?: boolean;
+    requireCanonicalChatPersistence?: boolean;
     agentInstanceStore?: AgentInstanceStore;
     toolAuditStore?: ToolAuditStore;
     channelBrokerClient?: ChannelBrokerManagementClient;
@@ -747,8 +764,8 @@ export function createControlServer(
     bodyLimit: 32 * 1024,
     routerOptions: { maxParamLength: 2048 },
   });
-  if (!security.authentication && !security.customerProductAuthentication && !security.testIdentityMode) {
-    throw new Error("Control requires a customer or compatibility authentication boundary; test identity mode must be enabled explicitly in tests");
+  if (!security.customerProductAuthentication && !security.testIdentityMode) {
+    throw new Error("Control requires the customer Better Auth product boundary; test identity mode must be enabled explicitly in tests");
   }
   const invitationDelivery = security.invitationDelivery
     ?? (security.testIdentityMode ? { mode: "copy-link" as const } : undefined);
@@ -792,6 +809,33 @@ export function createControlServer(
   const agentBridgeAuthority = new AgentBridgeAuthority(agentBridgeSecret, security.agentBridgeGrantTtlSeconds);
   const agentChatAuthority = security.agentChatSecret ? new AgentChatAuthority(security.agentChatSecret) : undefined;
   const agentChat = security.agentChatClient ?? new HttpAgentChatClient();
+  const durableChat = security.chatStore && security.artifactStore
+    ? new DurableChatService(security.chatStore, security.artifactStore, {
+        requireNodePlacement: security.requireArtifactNodePlacement ?? false,
+      })
+    : undefined;
+  if (!durableChat && security.requireCanonicalChatPersistence) {
+    throw new Error("Control requires ChatStore and ArtifactStore canonical persistence");
+  }
+  const requireDurableChat = () => {
+    if (!durableChat || !security.chatStore) {
+      throw new LemmaComputerError("CHAT_STORE_UNAVAILABLE", "Durable Chat is unavailable", 503, true);
+    }
+    return { service: durableChat, store: security.chatStore };
+  };
+  let artifactStagingCleanupTimer: NodeJS.Timeout | undefined;
+  if (durableChat) {
+    app.addHook("onReady", async () => {
+      await durableChat.cleanupExpiredStaging();
+      artifactStagingCleanupTimer = setInterval(() => {
+        void durableChat.cleanupExpiredStaging().catch(() => undefined);
+      }, 60_000);
+      artifactStagingCleanupTimer.unref();
+    });
+    app.addHook("onClose", async () => {
+      if (artifactStagingCleanupTimer) clearInterval(artifactStagingCleanupTimer);
+    });
+  }
   const agentProcesses = new AgentProcessLifecycleService(security.agentInstanceStore);
   const activityEvents = new ActivityEventService(store);
   const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
@@ -1150,7 +1194,7 @@ export function createControlServer(
       if (connectionOptions.installationKind === "customer-managed") {
         return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Route not found", correlationId: request.id, retryable: false } });
       }
-      if (requestPath === "/v1/platform/auth/login" || requestPath === "/v1/platform/auth/callback") return;
+      if (requestPath === "/v1/platform/auth/login") return;
       if (!security.platformOperatorAuthentication) {
         return reply.code(503).send({ error: { code: "PLATFORM_AUTH_NOT_CONFIGURED", message: "Platform authentication is unavailable", correlationId: request.id, retryable: true } });
       }
@@ -1164,8 +1208,6 @@ export function createControlServer(
       platformOperatorPrincipals.set(request, operator);
       return;
     }
-    if (requestPath.startsWith("/v1/auth/login") || requestPath.startsWith("/v1/auth/callback")
-      || requestPath.startsWith("/v1/auth/external-id/")) return;
     // A customer's directory administrator opens the consent link from their
     // mail client and has no LemmaComputer session, and usually no account.
     // The signed state in the query is what binds the response to an
@@ -1195,9 +1237,7 @@ export function createControlServer(
       ? testPrincipalFromHeaders(request.headers)
       : customerResolution?.status === "authorized"
         ? customerResolution.principal
-        : security.authentication
-          ? await security.authentication.authenticate(request.headers.cookie)
-          : null;
+        : null;
     if (!principal) {
       return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
     }
@@ -1668,6 +1708,8 @@ export function createControlServer(
             launchKind: "schedule", sessionId, idempotencyKey: runId,
           });
         },
+        security.chatStore,
+        durableChat,
       )
     : undefined;
   const requireSchedules = () => {
@@ -1807,9 +1849,26 @@ export function createControlServer(
     )) {
       throw new LemmaComputerError("CHANNEL_UPDATE_REPLAYED", "The channel update was already dispatched", 409);
     }
-    const session = input.sessionId
-      ? { id: input.sessionId }
-      : await agentChat.createSession(access, `Telegram ${input.externalSenderId}`);
+    const durable = requireDurableChat();
+    const existingConversation = input.sessionId
+      ? await durable.store.getConversation(input.identity, input.sessionId)
+      : null;
+    if (input.sessionId && (
+      !existingConversation
+      || existingConversation.workspaceId !== input.workspaceId
+      || existingConversation.defaultAgentCatalogId !== input.agentCatalogId
+    )) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
+    const conversation = existingConversation ?? await durable.store.createConversation({
+      identity: input.identity,
+      workspaceId: input.workspaceId,
+      defaultAgentCatalogId: input.agentCatalogId,
+      title: `Telegram ${input.externalSenderId}`,
+      requestedServiceClass: "balanced",
+    });
+    const session = { id: conversation.id };
+    const history = await durable.store.listMessages(input.identity, session.id);
     const message = sendChatTurnSchema.parse({
       message: {
         id: randomUUID(),
@@ -1826,12 +1885,24 @@ export function createControlServer(
         ],
       },
     }).message;
+    const persistedUser = await durable.service.persistUserMessage({
+      identity: input.identity,
+      conversation,
+      access,
+      message,
+    });
+    const vendorSessionId = await durable.store.getVendorSession(
+      input.identity,
+      session.id,
+      input.agentCatalogId,
+    ) ?? undefined;
     const frame = (event: unknown) => `${JSON.stringify(channelTurnStreamEventSchema.parse(event))}\n`;
     const stream = async function*() {
       let text = "";
       const notices: string[] = [];
-      const artifacts: Array<{ artifactId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
+      const artifacts: Array<{ artifactId: string; revisionId: string; mediaType: string; filename: string; byteLength: number; sha256: string }> = [];
       let state: "needs_input" | "completed" | "cancelled" | "failed" = "failed";
+      const accumulator = new AgentMessageAccumulator(input.agentCatalogId);
       let lifecycle: Awaited<ReturnType<AgentProcessLifecycleService["begin"]>> | undefined;
       let processStarted = false;
       let processEnded = false;
@@ -1847,35 +1918,66 @@ export function createControlServer(
           `channel:${input.connectionId}:${input.updateId}`, session.id, undefined, "auto", agentInstanceId,
         );
         for await (const event of agentChat.streamTurn(
-          access, session.id, message, undefined, usageTaskBinding, agentInstanceId,
+          access, session.id, persistedUser.runtimeMessage, undefined, usageTaskBinding, agentInstanceId,
+          undefined, history, vendorSessionId,
         )) {
           if (event.type === "turn-start") {
             await lifecycle.markRunning(event.turnId);
+            await durable.store.beginRun({
+              identity: input.identity,
+              conversationId: session.id,
+              turnId: event.turnId,
+              effectiveAgentCatalogId: input.agentCatalogId,
+              requestedServiceClass: conversation.requestedServiceClass,
+              reasoningEffort: conversation.reasoningEffort,
+              policyVersionId: policy.policyVersionId,
+              policyVersion: policy.policyVersion,
+              policyHash: policy.policyHash,
+              workspaceId: input.workspaceId,
+              workspaceNodeId: access.workspaceNodeId,
+              accessGeneration: access.accessGeneration,
+              agentInstanceId,
+            });
             processStarted = true;
           }
-          if (event.type === "progress") {
+          const projected: AgentChatEvent = event.type === "artifact"
+            ? await durable.service.persistGeneratedArtifact({
+                identity: input.identity,
+                conversation,
+                access,
+                client: agentChat,
+                event,
+              })
+            : event;
+          accumulator.apply(projected);
+          const checkpoint = accumulator.snapshot();
+          if (checkpoint) {
+            await durable.store.upsertMessage(input.identity, session.id, checkpoint);
+            await durable.service.bindMessageArtifacts(input.identity, session.id, checkpoint);
+          }
+          if (projected.type === "progress") {
             yield frame({ type: "heartbeat" });
           }
-          if (event.type === "text-delta") {
-            text += event.delta;
+          if (projected.type === "text-delta") {
+            text += projected.delta;
             if (text.length > 16_000) {
               throw new LemmaComputerError("CHANNEL_RESPONSE_TOO_LARGE", "The channel response exceeded its limit", 502);
             }
-            yield frame({ type: "text-delta", delta: event.delta });
+            yield frame({ type: "text-delta", delta: projected.delta });
           }
-          if (event.type === "artifact") {
-            artifacts.push({ artifactId: event.artifactId, mediaType: event.mediaType, filename: event.filename,
-              byteLength: event.byteLength, sha256: event.sha256 });
+          if (projected.type === "artifact") {
+            artifacts.push({ artifactId: projected.artifactId, revisionId: projected.revisionId!, mediaType: projected.mediaType, filename: projected.filename,
+              byteLength: projected.byteLength, sha256: projected.sha256 });
           }
-          if (event.type === "notice" && !notices.includes(event.message)) {
-            notices.push(event.message);
-            yield frame({ type: "notice", notice: event.message });
+          if (projected.type === "notice" && !notices.includes(projected.message)) {
+            notices.push(projected.message);
+            yield frame({ type: "notice", notice: projected.message });
           }
-          if (event.type === "approval") {
-            let summary = event.summary;
+          if (projected.type === "approval") {
+            let summary = projected.summary;
             try {
-              const operation = await operations.get(input.identity, event.operationId);
-              summary = chatApprovalSummary(event.state, operation.safeSummary);
+              const operation = await operations.get(input.identity, projected.operationId);
+              summary = chatApprovalSummary(projected.state, operation.safeSummary);
             } catch (error) {
               if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
             }
@@ -1885,15 +1987,24 @@ export function createControlServer(
               yield frame({ type: "notice", notice });
             }
           }
-          if (event.type === "turn-finish") {
-            state = event.state;
-            await lifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
+          if (projected.type === "turn-finish") {
+            state = projected.state;
+            if (projected.vendorSessionId) {
+              await durable.store.setVendorSession(input.identity, session.id, input.agentCatalogId, projected.vendorSessionId);
+            }
+            await durable.store.finishRun(input.identity, session.id, projected.turnId, {
+              status: projected.state,
+              assistantMessageId: checkpoint?.id,
+              ...(projected.state === "failed" ? { failureCode: "AGENT_TURN_FAILED" } : {}),
+              completedAt: new Date(projected.completedAt),
+            });
+            await lifecycle.end(projected.state === "failed" ? "provider_failed" : "process_exited");
             processEnded = true;
-            if (event.state === "failed" && !text) {
+            if (projected.state === "failed" && !text) {
               yield frame({
                 type: "error",
                 code: "CHANNEL_TURN_FAILED",
-                message: event.message ?? "The agent could not complete the message",
+                message: projected.message ?? "The agent could not complete the message",
                 retryable: true,
               });
               return;
@@ -1924,9 +2035,19 @@ export function createControlServer(
   });
   app.post("/internal/v1/channels/artifacts", { bodyLimit: 32 * 1024 }, async (request, reply) => {
     const input = channelArtifactDownloadRequestSchema.parse(request.body ?? {});
-    const { access } = await verifiedChannelRoute(input, false);
-    const data = await agentChat.downloadArtifact(access, input.artifact.artifactId);
-    if (data.length !== input.artifact.byteLength || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256) {
+    await verifiedChannelRoute(input, false);
+    const saved = await requireDurableChat().service.readArtifact(
+      input.identity,
+      input.artifact.artifactId,
+      input.artifact.revisionId,
+    );
+    const data = saved.bytes;
+    if (
+      saved.artifact.workspaceId !== input.workspaceId
+      || data.length !== input.artifact.byteLength
+      || saved.revision.sha256 !== input.artifact.sha256
+      || createHash("sha256").update(data).digest("hex") !== input.artifact.sha256
+    ) {
       throw new LemmaComputerError("CHANNEL_ARTIFACT_MISMATCH", "The generated file changed before delivery", 409);
     }
     if (data.length > channelArtifactMaxBytes) throw new LemmaComputerError("CHANNEL_ARTIFACT_TOO_LARGE", "The generated file exceeds its delivery limit", 502);
@@ -2223,59 +2344,6 @@ export function createControlServer(
       request.id,
     );
   });
-  app.get<{ Querystring: { return?: string } }>("/v1/auth/login", async (request, reply) => {
-    if (connectionOptions.installationKind === "hosted") {
-      if (!security.externalIdAuthentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Hosted sign-in is not configured", 503);
-      const started = await security.externalIdAuthentication.begin(request.query.return);
-      return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
-    }
-    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
-    const started = await security.authentication.begin(request.query.return);
-    return reply.code(302).header("set-cookie", started.cookie).header("location", started.location).send();
-  });
-  app.post<{ Body: { invitation?: string; return?: string } }>("/v1/auth/external-id/invitation", async (request, reply) => {
-    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
-      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
-    }
-    try {
-      const input = z.strictObject({ invitation: z.string().min(20).max(512), return: z.string().optional() }).parse(request.body ?? {});
-      const started = await security.externalIdAuthentication.begin(input.return, input.invitation);
-      return reply.header("set-cookie", started.cookie).send({ location: started.location });
-    } catch {
-      throw new LemmaComputerError("EXTERNAL_ID_SIGNIN_FAILED", "This sign-in could not be started", 403);
-    }
-  });
-  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/external-id/callback", async (request, reply) => {
-    if (connectionOptions.installationKind === "customer-managed" || !security.externalIdAuthentication) {
-      throw new LemmaComputerError("AUTH_PROVIDER_NOT_AVAILABLE", "This sign-in method is unavailable", 404);
-    }
-    try {
-      const completed = await security.externalIdAuthentication.complete({ ...request.query, cookie: request.headers.cookie });
-      reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
-      return reply.code(303).header("location", completed.returnPath).send();
-    } catch (error) {
-      request.log.warn({ code: error instanceof LemmaComputerError ? error.code : "EXTERNAL_ID_FAILED" }, "External ID callback rejected");
-      return reply.code(303).header("location", "/?signin=error&reason=EXTERNAL_ID_SIGNIN_FAILED").send();
-    }
-  });
-  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>("/v1/auth/callback", async (request, reply) => {
-    if (!security.authentication) throw new LemmaComputerError("AUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured", 503);
-    try {
-      const completed = await security.authentication.complete({ ...request.query, cookie: request.headers.cookie });
-      reply.header("set-cookie", [completed.cookie, completed.clearStateCookie]);
-      return reply.code(303).header("location", completed.returnPath).send();
-    } catch (error) {
-      const reason = error instanceof LemmaComputerError ? error.code : "OIDC_FAILED";
-      request.log.warn({
-        err: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          code: reason,
-          message: error instanceof Error ? error.message : "Unknown OIDC callback error",
-        },
-      }, "OIDC callback rejected");
-      return reply.code(303).header("location", `/?signin=error&reason=${encodeURIComponent(reason)}`).send();
-    }
-  });
   app.get("/v1/auth/session", async (request) => {
     const current = principal(request);
     const effectivePolicy = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(current.userId) : null;
@@ -2547,8 +2615,7 @@ export function createControlServer(
   });
   app.post("/v1/auth/logout", async (request, reply) => {
     await security.customerProductAuthentication?.revokeCurrentSession(fromNodeHeaders(request.raw.headers));
-    if (!security.authentication) return reply.code(204).send();
-    return reply.code(204).header("set-cookie", await security.authentication.logout(request.headers.cookie)).send();
+    return reply.code(204).send();
   });
   app.get("/v1/teams/default", async (request, reply) => {
     const actor = principal(request);
@@ -5218,13 +5285,20 @@ export function createControlServer(
     }
   });
   app.get<{ Params: { workspaceId: string; catalogId: string }; Querystring: { cursor?: string; limit?: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
-    const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
-    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
-    const access = await service.agentChatAccess(identity(request), policy, request.params.workspaceId, catalogId);
+    chatAgentCatalogIdSchema.parse(request.params.catalogId);
+    await requireWorkspacePolicy(request, request.params.workspaceId);
+    const owner = identity(request);
     const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
     const cursor = request.query.cursor ? chatSessionIdSchema.parse(request.query.cursor) : undefined;
-    const page = await agentChat.listSessions(access, { cursor, limit });
-    const sessions = page.sessions.map((session) => ({ ...session, agentCatalogId: catalogId }));
+    const page = await requireDurableChat().store.listConversations(owner, request.params.workspaceId, { cursor, limit });
+    const sessions = page.conversations.map((session) => ({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString(),
+      reasoningEffort: session.reasoningEffort,
+      agentCatalogId: session.defaultAgentCatalogId,
+    }));
     return reply.header("cache-control", "no-store").send({ sessions, nextCursor: page.nextCursor });
   });
   app.post<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
@@ -5234,18 +5308,37 @@ export function createControlServer(
     const owner = identity(request);
     await requireChatServiceClass(owner, input.requestedServiceClass);
     await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
-    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
-    const session = await agentChat.createSession(access, input.title, input.reasoningEffort);
-    return reply.code(201).header("cache-control", "no-store").send({ ...session, agentCatalogId: catalogId });
+    if (!assignedChatAgentIds(policy).includes(catalogId)) {
+      throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+    }
+    const session = await requireDurableChat().store.createConversation({
+      identity: owner,
+      workspaceId: request.params.workspaceId,
+      defaultAgentCatalogId: catalogId,
+      title: input.title,
+      requestedServiceClass: input.requestedServiceClass,
+      reasoningEffort: input.reasoningEffort,
+    });
+    return reply.code(201).header("cache-control", "no-store").send({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString(),
+      reasoningEffort: session.reasoningEffort,
+      agentCatalogId: session.defaultAgentCatalogId,
+    });
   });
   app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
     const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
-    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
-    const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const conversation = await requireDurableChat().store.getConversation(owner, sessionId);
+    if (!conversation || conversation.workspaceId !== request.params.workspaceId) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
     const messages = await reconcileChatMessages(
-      await agentChat.listMessages(access, sessionId),
+      await requireDurableChat().store.listMessages(owner, sessionId),
       async (operationId) => {
         try {
           const operation = await operations.get(owner, operationId);
@@ -5258,6 +5351,63 @@ export function createControlServer(
     );
     return reply.header("cache-control", "no-store").send({ messages });
   });
+  app.post<{ Params: { workspaceId: string; sessionId: string } }>(
+    "/v1/workspaces/:workspaceId/chat/sessions/:sessionId/forks",
+    async (request, reply) => {
+      const input = z.strictObject({
+        fromMessageId: chatPartIdSchema,
+        agentCatalogId: chatAgentCatalogIdSchema,
+        requestedServiceClass: z.enum(["lite", "balanced", "pro"]),
+        reasoningEffort: z.enum(["auto", "low", "medium", "high"]).optional(),
+      }).parse(request.body ?? {});
+      const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+      if (!assignedChatAgentIds(policy).includes(input.agentCatalogId)) {
+        throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
+      }
+      const owner = identity(request);
+      await requireChatServiceClass(owner, input.requestedServiceClass);
+      await requireReasoningEffort(owner, policy, input.agentCatalogId, input.requestedServiceClass, input.reasoningEffort);
+      const source = await requireDurableChat().store.getConversation(owner, request.params.sessionId);
+      if (!source || source.workspaceId !== request.params.workspaceId) {
+        throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+      }
+      const fork = await requireDurableChat().store.forkConversation({
+        identity: owner,
+        conversationId: source.id,
+        fromMessageId: input.fromMessageId,
+        defaultAgentCatalogId: input.agentCatalogId,
+        requestedServiceClass: input.requestedServiceClass,
+        reasoningEffort: input.reasoningEffort,
+      });
+      return reply.code(201).header("cache-control", "no-store").send({
+        id: fork.id,
+        title: fork.title,
+        createdAt: fork.createdAt.toISOString(),
+        updatedAt: fork.updatedAt.toISOString(),
+        reasoningEffort: fork.reasoningEffort,
+        agentCatalogId: fork.defaultAgentCatalogId,
+        parentConversationId: fork.parentConversationId,
+        forkedFromMessageId: fork.forkedFromMessageId,
+      });
+    },
+  );
+  app.get<{ Params: { artifactId: string }; Querystring: { revision?: string } }>(
+    "/v1/chat/artifacts/:artifactId/content",
+    async (request, reply) => {
+      const artifactId = z.string().regex(/^artifact-[a-f0-9]{32}$/).parse(request.params.artifactId);
+      const revisionId = request.query.revision
+        ? z.string().regex(/^revision-[a-f0-9]{32}$/).parse(request.query.revision)
+        : undefined;
+      const saved = await requireDurableChat().service.readArtifact(identity(request), artifactId, revisionId);
+      return reply
+        .header("cache-control", "private, no-store")
+        .header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(saved.artifact.displayName)}`)
+        .header("x-content-type-options", "nosniff")
+        .header("x-lemmacomputer-artifact-sha256", saved.revision.sha256)
+        .type(saved.revision.mediaType)
+        .send(saved.bytes);
+    },
+  );
   const activityScope = async (request: {
     params: { workspaceId: string; catalogId: string; sessionId: string; turnId: string };
   }) => {
@@ -5296,7 +5446,6 @@ export function createControlServer(
       const expected = principal(request);
       const customerHeaders = fromNodeHeaders(request.raw.headers);
       const customerProductAuthentication = security.customerProductAuthentication;
-      const legacyAuthentication = security.authentication;
       const authorize = security.testIdentityMode
         ? undefined
         : async () => {
@@ -5304,9 +5453,7 @@ export function createControlServer(
               ? await customerProductAuthentication.resolve(customerHeaders).then((resolution) => (
                   resolution.status === "authorized" ? resolution.principal : null
                 ))
-              : legacyAuthentication
-                ? await legacyAuthentication.authenticate(request.headers.cookie)
-                : null;
+              : null;
             if (!current
               || current.userId !== expected.userId
               || current.tenantId !== expected.tenantId
@@ -5410,7 +5557,23 @@ export function createControlServer(
         );
       }
     }
+    const durable = requireDurableChat();
+    const conversation = await durable.store.getConversation(owner, sessionId);
+    if (!conversation || conversation.workspaceId !== request.params.workspaceId) {
+      throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    }
+    if (conversation.defaultAgentCatalogId !== catalogId) {
+      throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "Continue with another agent by creating an explicit conversation fork", 409);
+    }
+    const history = await durable.store.listMessages(owner, sessionId);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
+    const persistedUser = await durable.service.persistUserMessage({
+      identity: owner,
+      conversation,
+      access,
+      message: input.message,
+    });
+    const vendorSessionId = await durable.store.getVendorSession(owner, sessionId, catalogId) ?? undefined;
     const processLifecycle = await agentProcesses.beginBrowserChat({
       identity: owner,
       workspace,
@@ -5421,6 +5584,7 @@ export function createControlServer(
       idempotencyKey: launchIdempotencyKey,
     });
     const mapper = new AgentUiStreamMapper(catalogId);
+    const accumulator = new AgentMessageAccumulator(catalogId);
     const chunks: ReturnType<AgentUiStreamMapper["chunks"]>[number][] = [];
     const waiters = new Set<() => void>();
     let pumpDone = false;
@@ -5443,14 +5607,37 @@ export function createControlServer(
           input.reasoningEffort, policy.maximumReasoningEffort,
         );
         for await (const event of agentChat.streamTurn(
-          access, sessionId, input.message, undefined, usageTaskBinding, agentInstanceId,
-          input.reasoningEffort,
+          access, sessionId, persistedUser.runtimeMessage, undefined, usageTaskBinding, agentInstanceId,
+          input.reasoningEffort, history, vendorSessionId,
         )) {
           if (event.type === "turn-start") {
             await processLifecycle.markRunning(event.turnId);
+            await durable.store.beginRun({
+              identity: owner,
+              conversationId: sessionId,
+              turnId: event.turnId,
+              effectiveAgentCatalogId: catalogId,
+              requestedServiceClass: input.requestedServiceClass,
+              reasoningEffort: input.reasoningEffort,
+              policyVersionId: policy.policyVersionId,
+              policyVersion: policy.policyVersion,
+              policyHash: policy.policyHash,
+              workspaceId: request.params.workspaceId,
+              workspaceNodeId: access.workspaceNodeId,
+              accessGeneration: access.accessGeneration,
+              agentInstanceId,
+            });
             processStarted = true;
           }
-          let projected = event;
+          let projected: AgentChatEvent = event.type === "artifact"
+            ? await durable.service.persistGeneratedArtifact({
+                identity: owner,
+                conversation,
+                access,
+                client: agentChat,
+                event,
+              })
+            : event;
           if (event.type === "approval") {
             try {
               const operation = await operations.get(owner, event.operationId);
@@ -5472,8 +5659,23 @@ export function createControlServer(
             event: projected,
           });
           lastEvent = projected;
+          accumulator.apply(projected);
+          const checkpoint = accumulator.snapshot();
+          if (checkpoint) {
+            await durable.store.upsertMessage(owner, sessionId, checkpoint);
+            await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
+          }
           chunks.push(...mapper.chunks(projected));
           if (event.type === "turn-finish") {
+            if (event.vendorSessionId) {
+              await durable.store.setVendorSession(owner, sessionId, catalogId, event.vendorSessionId);
+            }
+            await durable.store.finishRun(owner, sessionId, event.turnId, {
+              status: event.state,
+              assistantMessageId: checkpoint?.id,
+              ...(event.state === "failed" ? { failureCode: "AGENT_TURN_FAILED" } : {}),
+              completedAt: new Date(event.completedAt),
+            });
             await processLifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
             processEnded = true;
           }
@@ -5512,6 +5714,24 @@ export function createControlServer(
             displayName: access.displayName,
             event: terminal,
           }).catch(() => undefined);
+          try {
+            accumulator.apply(terminal);
+            const checkpoint = accumulator.snapshot();
+            if (checkpoint) {
+              await durable.store.upsertMessage(owner, sessionId, checkpoint);
+              await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
+            }
+            if (processStarted) {
+              await durable.store.finishRun(owner, sessionId, terminal.turnId, {
+                status: "failed",
+                assistantMessageId: checkpoint?.id,
+                failureCode: error instanceof LemmaComputerError ? error.code : "AGENT_STREAM_FAILED",
+                completedAt: new Date(completedAt),
+              });
+            }
+          } catch (persistenceError) {
+            pumpError = persistenceError;
+          }
         }
       } finally {
         pumpDone = true;
@@ -5685,6 +5905,22 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const env = envSchema.parse(process.env);
   const store = PostgresWorkspaceStore.fromConnectionString(env.DATABASE_URL);
   await store.assertSchemaCompatible();
+  const chatStore = PostgresChatStore.fromConnectionString(env.DATABASE_URL);
+  let artifactStore: ArtifactStore;
+  if (env.ARTIFACT_STORE_BACKEND === "filesystem") {
+    if (!env.ARTIFACT_FILESYSTEM_ROOT) throw new Error("Filesystem artifact storage requires ARTIFACT_FILESYSTEM_ROOT");
+    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted") throw new Error("Hosted deployments require S3 artifact storage");
+    artifactStore = new FilesystemArtifactStore(env.ARTIFACT_FILESYSTEM_ROOT);
+  } else {
+    if (!env.ARTIFACT_S3_BUCKET || !env.ARTIFACT_S3_REGION) throw new Error("S3 artifact storage requires bucket and region");
+    artifactStore = new S3ArtifactStore({
+      bucket: env.ARTIFACT_S3_BUCKET,
+      region: env.ARTIFACT_S3_REGION,
+      ...(env.ARTIFACT_S3_ENDPOINT ? { endpoint: env.ARTIFACT_S3_ENDPOINT } : {}),
+      forcePathStyle: env.ARTIFACT_S3_FORCE_PATH_STYLE === "true",
+      ...(env.ARTIFACT_S3_KMS_KEY_ID ? { kmsKeyId: env.ARTIFACT_S3_KMS_KEY_ID } : {}),
+    });
+  }
   const authenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.AUTH_DATABASE_URL);
   try {
     await authenticationSchema.assertSchemaCompatible();
@@ -5701,11 +5937,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   }
   const authenticationPool = new postgres.Pool({ connectionString: env.AUTH_DATABASE_URL });
   const publicWebOrigin = new URL(env.PUBLIC_WEB_URL).origin;
+  const customerAuthenticationSecrets = parseVersionedBetterAuthSecrets(env.BETTER_AUTH_SECRETS);
   let platformAuthenticationPool: postgres.Pool | undefined;
   let platformAuthentication: PlatformAuthentication | undefined;
-  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree") {
+  let platformOperatorBootstrap: PlatformOperatorBootstrap | undefined;
+  if (env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed") {
     if (!env.PLATFORM_AUTH_DATABASE_URL || !env.PLATFORM_BETTER_AUTH_SECRETS) {
-      throw new Error("Worktree platform authentication requires its isolated database and Better Auth secrets");
+      throw new Error("Platform authentication requires its isolated database and Better Auth secrets");
+    }
+    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !env.PLATFORM_AUTH_BOOTSTRAP_EMAIL) {
+      throw new Error("Hosted platform authentication requires an explicit bootstrap operator email");
     }
     const platformAuthenticationSchema = await PostgresAuthenticationStore.fromConnectionString(env.PLATFORM_AUTH_DATABASE_URL);
     try {
@@ -5722,6 +5963,14 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
       passkey: { rpId: new URL(publicWebOrigin).hostname, origin: publicWebOrigin },
     });
+    platformOperatorBootstrap = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
+      ? worktreePlatformOperatorBootstrap(env.PLATFORM_AUTH_BOOTSTRAP_SECRET!)
+      : {
+          mode: "hosted",
+          email: env.PLATFORM_AUTH_BOOTSTRAP_EMAIL!,
+          displayName: env.PLATFORM_AUTH_BOOTSTRAP_DISPLAY_NAME,
+          secret: env.PLATFORM_AUTH_BOOTSTRAP_SECRET,
+        };
   }
   const transactionalEmail = createTransactionalEmailAdapter({
     transport: env.AUTH_EMAIL_TRANSPORT,
@@ -5736,7 +5985,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     baseUrl: publicWebOrigin,
     trustedOrigins: [publicWebOrigin],
     ssoTrustedOrigins: env.CUSTOMER_SSO_TRUSTED_IDP_ORIGINS.split(",").map((value) => value.trim()).filter(Boolean),
-    versionedSecrets: parseVersionedBetterAuthSecrets(env.BETTER_AUTH_SECRETS),
+    versionedSecrets: customerAuthenticationSecrets,
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     trustedProxyCidrs: env.BETTER_AUTH_TRUSTED_PROXY_CIDRS.split(",").map((value) => value.trim()).filter(Boolean),
     email: transactionalEmail,
@@ -5787,7 +6036,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND,
     adminUrl: env.LITELLM_ADMIN_URL,
     credentialSecret: env.LITELLM_CREDENTIAL_SECRET,
-    sessionSecret: env.SESSION_SECRET,
+    sessionSecret: customerAuthenticationSecrets[0]!.value,
     workspaceIngressSecret: env.WORKSPACE_INGRESS_SECRET,
     caBase64: env.LITELLM_ADMIN_TLS_CA_B64,
     clientCertificateBase64: env.LITELLM_ADMIN_TLS_CLIENT_CERT_B64,
@@ -5887,81 +6136,23 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         ),
       }
     : undefined;
-  const workforceAuthentication = new EntraAuthenticationService(identityPolicyStore, {
-    tenantId: env.ENTRA_TENANT_ID,
-    clientId: env.ENTRA_CLIENT_ID,
-    clientSecret: env.ENTRA_CLIENT_SECRET,
-    publicWebUrl: env.PUBLIC_WEB_URL,
-    sessionSecret: env.SESSION_SECRET,
-    bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
-    bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
-    tenantDisplayName: env.TENANT_DISPLAY_NAME,
-    bootstrapOwnerObjectIds: env.BOOTSTRAP_OWNER_OBJECT_IDS.split(",").map((item) => item.trim()).filter(Boolean),
-    membershipAdmissionMode: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted"
-      ? "existing-membership-only"
-      : "directory-jit",
-  });
-  const externalIdAuthentication = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
-    && env.EXTERNAL_ID_TENANT_ID && env.EXTERNAL_ID_TENANT_SUBDOMAIN
-    && env.EXTERNAL_ID_CLIENT_ID && env.EXTERNAL_ID_CLIENT_SECRET
-    ? new ExternalIdAuthenticationService(identityPolicyStore, {
-        tenantId: env.EXTERNAL_ID_TENANT_ID,
-        tenantSubdomain: env.EXTERNAL_ID_TENANT_SUBDOMAIN,
-        clientId: env.EXTERNAL_ID_CLIENT_ID,
-        clientSecret: env.EXTERNAL_ID_CLIENT_SECRET,
-        publicWebUrl: env.PUBLIC_WEB_URL,
-        sessionSecret: env.SESSION_SECRET,
-        bootstrapOwnedTenantId: env.BOOTSTRAP_TENANT_ID,
-        bootstrapOwnedUserId: env.BOOTSTRAP_USER_ID,
-        tenantDisplayName: env.TENANT_DISPLAY_NAME,
-        bootstrapOwnerObjectIds: [],
-      })
-    : undefined;
-  const platformOperatorValues = [
-    env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
-    env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
-    env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
-    env.PLATFORM_OPERATOR_SESSION_SECRET,
-    env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
-    env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL,
-    env.PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET,
-  ];
-  if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !platformOperatorValues.every(Boolean)) {
-    throw new Error("Hosted deployments require the separate platform-operator workforce realm");
-  }
   const platformOperatorStore = env.LEMMACOMPUTER_INSTALLATION_KIND !== "customer-managed"
     ? PostgresPlatformOperatorStore.fromConnectionString(env.DATABASE_URL)
     : undefined;
-  const workforcePlatformOperatorAuthentication = platformOperatorStore
-    && env.PLATFORM_OPERATOR_ENTRA_TENANT_ID
-    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID
-    && env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET
-    && env.PLATFORM_OPERATOR_SESSION_SECRET
-    && env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT
-    ? new PlatformOperatorAuthenticationService(platformOperatorStore, {
-        tenantId: env.PLATFORM_OPERATOR_ENTRA_TENANT_ID,
-        clientId: env.PLATFORM_OPERATOR_ENTRA_CLIENT_ID,
-        clientSecret: env.PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET,
-        publicWebUrl: env.PUBLIC_WEB_URL,
-        sessionSecret: env.PLATFORM_OPERATOR_SESSION_SECRET,
-        stepUpAuthenticationContext: env.PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT,
-      })
-    : undefined;
-  const platformBetterAuthService = env.LEMMACOMPUTER_INSTALLATION_KIND === "worktree"
-    && platformOperatorStore
+  const platformBetterAuthService = platformOperatorStore
     && platformAuthentication
     && platformAuthenticationPool
+    && platformOperatorBootstrap
     ? new BetterAuthPlatformOperatorAuthenticationService(
         platformAuthentication,
         platformAuthenticationPool,
         platformOperatorStore,
         publicWebOrigin,
-        env.LEMMACOMPUTER_INSTALLATION_KIND,
-        env.PLATFORM_AUTH_DEVELOPMENT_BOOTSTRAP_SECRET,
+        platformOperatorBootstrap,
       )
     : undefined;
-  await platformBetterAuthService?.initializeDevelopmentOperator();
-  const platformOperatorAuthentication = platformBetterAuthService ?? workforcePlatformOperatorAuthentication;
+  await platformBetterAuthService?.initializeBootstrapOperator();
+  const platformOperatorAuthentication = platformBetterAuthService;
   const controllerTlsClientValues = [
     env.CONTROLLER_TLS_CA_B64,
     env.CONTROLLER_TLS_CLIENT_CERT_B64,
@@ -5994,6 +6185,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
           clientKey: Buffer.from(env.CONTROLLER_TLS_CLIENT_KEY_B64!, "base64").toString("utf8"),
           serverName: node.tlsServerName,
         }),
+        env.CONTROLLER_REQUEST_TIMEOUT_MS,
       ))
     : new HttpControllerClient(
         env.CONTROLLER_URL,
@@ -6006,6 +6198,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
               serverName: env.CONTROLLER_TLS_SERVER_NAME!,
             })
           : fetch,
+        env.CONTROLLER_REQUEST_TIMEOUT_MS,
       );
   const platformSecurityAlertDispatcher = platformOperatorStore
     && env.PLATFORM_SECURITY_ALERT_WEBHOOK_URL
@@ -6060,10 +6253,6 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       mcpEgressProxyToken: env.MCP_EGRESS_PROXY_TOKEN,
       agentBridgeSecret: env.AGENT_BRIDGE_SECRET,
       agentBridgeGrantTtlSeconds: env.AGENT_BRIDGE_GRANT_TTL_SECONDS,
-      authentication: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && externalIdAuthentication
-        ? externalIdAuthentication
-        : workforceAuthentication,
-      externalIdAuthentication,
       customerAuthentication,
       customerSsoAuthentication,
       customerProductAuthentication,
@@ -6095,6 +6284,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       },
       policyBundleAuthority,
       agentChatSecret: env.AGENT_CHAT_SECRET,
+      chatStore,
+      artifactStore,
+      requireArtifactNodePlacement: env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted",
+      requireCanonicalChatPersistence: true,
       agentInstanceStore,
       toolAuditStore,
       channelBrokerClient,
@@ -6134,6 +6327,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (pushRetryTimer) clearInterval(pushRetryTimer);
     clearInterval(agentInstanceReconciliationTimer);
     await store.close();
+    await chatStore.close();
     await connectorRegistryStore.close();
     await providerSettingsStore.close();
     await scheduleStore.close();

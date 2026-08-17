@@ -38,10 +38,10 @@ Only a step-up-authenticated platform administrator can mutate placement:
   disables a node;
 - `PUT /v1/platform/tenants/:tenantId/workspace-node` changes the default for
   new workspaces; and
-- the corresponding GET routes expose nodes and assignments to the workforce
+- the corresponding GET routes expose nodes and assignments to the platform
   operator realm, never the customer realm.
 
-The workforce operator UI exposes those registry, admission, and assignment
+The platform operator UI exposes those registry, admission, and assignment
 operations. It also writes `workspace.defaultSharedNodeId` through the audited
 platform-configuration boundary. When that setting names an active registered
 node, hosted self-service onboarding atomically assigns new personal and

@@ -1,6 +1,6 @@
 # ADR 0003: Deployment profile capability contract
 
-- Status: Accepted; customer-identity clauses amended by [ADR 0004](0004-better-auth-adoption-and-qualification.md)
+- Status: Accepted; customer-identity clauses amended by [ADR 0004](0004-better-auth-adoption-and-qualification.md) and transitional sign-in matrix superseded by [ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md)
 - Date: 2026-08-05
 
 ## Context
@@ -31,7 +31,7 @@ variables cannot redefine the profile's security properties.
   billing, telemetry, or background-job dependency.
 - `hosted` is LemmaComputer-operated, supports multiple organizations, permits
   embedded Better Auth customer authentication with a pooled logical
-  authentication database, retains a separate workforce operator realm, requires a platform-qualified
+  authentication database, retains a separate passkey-only platform operator realm, requires a platform-qualified
   remote-isolated workspace provider, and permits managed billing, telemetry,
   and hosted workers.
 - `worktree` is development-only. It may exercise either profile's adapters for
@@ -39,9 +39,8 @@ variables cannot redefine the profile's security properties.
   value is a development-harness selector; documentation and qualification must
   not present it as a third production deployment profile.
 
-Workforce Entra in customer-managed and External ID/enterprise Entra in hosted
-are bounded transitional customer adapters. Both production profiles expose the
-same provider-neutral Better Auth method contract: email/password, passkey,
+Both production profiles expose the same provider-neutral Better Auth method
+contract: email/password, passkey,
 Google, Microsoft, SAML, and OIDC. Profile eligibility never makes provider
 claims authoritative for organizations, roles, permissions, or placement.
 

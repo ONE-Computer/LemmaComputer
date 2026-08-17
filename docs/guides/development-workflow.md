@@ -327,15 +327,13 @@ external values only when the requested flow needs them:
 | --- | --- |
 | Build, unit tests, Compose health, fixture-based tenant testing | Nothing |
 | Real email delivery | Postmark server token, sender, and the Postmark transport setting |
-| Transitional workforce Entra or Microsoft 365 using the same app | Entra tenant ID, client ID, client secret, and bootstrap owner object IDs |
-| Separate Microsoft 365 connector application | Microsoft 365 tenant ID, client ID, and client secret |
+| Microsoft 365 connector | Dedicated Microsoft 365 tenant ID, client ID, and client secret |
 | Google or Microsoft social login | The selected provider's complete client-ID and client-secret pair |
 | Local remote-node qualification | Nothing; the command generates disposable certificates |
 | Production remote node | Private networking plus complete workload identities and CA-managed certificates |
 
-The worktree profile intentionally permits unresolved Entra placeholders. Use
-the [Microsoft integration runbook](local-deployment.md) only when the task
-actually exercises those flows.
+Use the [Microsoft integration runbook](local-deployment.md) only when the task
+actually exercises the Microsoft 365 connector or Microsoft customer social login.
 
 ## Stateful local-stack handover
 

@@ -1,6 +1,6 @@
 # ADR 0004: Better Auth adoption and qualification
 
-- Status: Accepted
+- Status: Accepted; transitional adapter portions superseded by [ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md)
 - Date: 2026-08-09
 - Epic: #1
 - Implementation issue: #51
@@ -74,7 +74,8 @@ MFA, passkey, provider-token, or raw authentication-session material.
   organization, membership, role, permission, provider-group, or placement
   authority.
 - Customer methods are email/password, passkey, Google OAuth, Microsoft OAuth,
-  SAML, and OIDC. Workforce OIDC is excluded from the customer principal.
+  SAML, and OIDC. The platform passkey realm is excluded from the customer
+  principal.
 - Assurance is `aal1` or `aal2` with explicit password, TOTP, passkey, or
   federated factors. Sensitive product operations require `aal2` and a
   server-validated step-up no more than ten minutes old.
@@ -83,13 +84,11 @@ MFA, passkey, provider-token, or raw authentication-session material.
   revocation, and explicit account linking. Unknown capabilities fail parsing.
 - Every provider contract fixes implicit email linking to `false` and product
   authorization claims to `ignored`.
-- `PlatformOperatorPrincipal` accepts only the separate workforce identity
+- `PlatformOperatorPrincipal` accepts only the separate platform passkey
   realm. It cannot parse as a customer principal or product authorization
   context.
 
-The current Entra and External ID customer implementations are adapters behind
-this boundary during the bounded replacement window. No new provider-specific
-authorization branch may be added.
+Direct provider-specific product authentication adapters are not permitted.
 
 ## Authentication database and migration operations
 
@@ -178,13 +177,13 @@ An owner recovery case records the account and organization, evidence class,
 reason, approver, timestamps, resulting identity links, and all revocations;
 secret evidence is not copied into product audit.
 
-Platform support elevation is hosted-only and requires a workforce operator
+Platform support elevation is hosted-only and requires a platform operator
 session, target organization, reason, fixed permission scope, expiry of at most
 30 minutes, and step-up within ten minutes. Customer-content or identity
 recovery scopes require configured approval. Break-glass elevation is at most
 15 minutes, cannot be silent, emits an immediate security alert, and is reviewed
 after use. Operator sessions are never accepted as customer membership and
-customer-managed artifacts contain no operator routes or workforce dependency.
+customer-managed artifacts contain no operator routes or platform dependency.
 
 ## Failure and incident response
 
@@ -207,21 +206,13 @@ customer-managed artifacts contain no operator routes or workforce dependency.
   codes, cookies, assertions, private keys, passkey material, and TOTP or backup
   codes.
 
-## Expand, migrate, contract
+## Completed contraction
 
-1. Introduce the provider-neutral contracts and tests while current customer
-   Entra adapters remain isolated behind the boundary.
-2. Issue #52 adds Better Auth storage, migration/check jobs, customer methods,
-   product-session mapping, and recovery. New customer authentication then uses
-   Better Auth.
-3. Existing Microsoft identities link only through authenticated proof. No
-   Microsoft password, MFA secret, or provider token is migrated.
-4. Issues #53, #56, and #12 move signup, invitation activation, and tenant SSO
-   to Better Auth. Issue #54 retains workforce Entra only for operators.
-5. After recovery, rollback, redaction, and adversarial gates pass, remove the
-   customer External ID routes, customer configuration, and the compatibility
-   projection writer. This is a bounded pre-production replacement, not a
-   permanent dual-auth compatibility layer.
+The provider-neutral contracts, Better Auth store, customer methods, product
+session mapping, invitations, and tenant SSO are implemented. Direct customer
+and platform Microsoft identity adapters were removed before production under
+[ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md). No
+Microsoft password, MFA secret, or provider token was migrated.
 
 ## Qualification and evidence
 

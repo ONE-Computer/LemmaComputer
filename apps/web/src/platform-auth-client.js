@@ -27,6 +27,10 @@ export const platformPasskeyApi = {
   capabilities: () => request("/capabilities"),
   signIn: () => requireResult(client.signIn.passkey()),
   add: (name = "Platform security key") => requireResult(client.passkey.addPasskey({ name })),
-  beginDevelopmentBootstrap: () => request("/development-bootstrap", { method: "POST" }),
-  finalizeDevelopmentBootstrap: () => request("/development-bootstrap/finalize", { method: "POST" }),
+  beginBootstrap: (secret) => request("/bootstrap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(secret ? { secret } : {}),
+  }),
+  finalizeBootstrap: () => request("/bootstrap/finalize", { method: "POST" }),
 };

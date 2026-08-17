@@ -171,10 +171,7 @@ class FakeTeamStore implements TeamStore {
 }
 
 const authentication = (actor: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("not used"); },
-  authenticate: async () => actor,
-  logout: async () => "lemmacomputer_session=; Max-Age=0",
+  resolve: async () => ({ status: "authorized" as const, principal: actor }),
 });
 
 const identityPolicies = {
@@ -190,7 +187,7 @@ const appFor = (actor: SessionPrincipal, teamStore: TeamStore) => createControlS
   undefined,
   {},
   {
-    authentication: authentication(actor),
+    customerProductAuthentication: authentication(actor),
     identityPolicyStore: identityPolicies,
     teamStore,
     agentBridgeSecret: "teams-api-agent-bridge-secret-at-least-32-characters",

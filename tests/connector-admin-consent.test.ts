@@ -272,16 +272,11 @@ test("an administrator with no LemmaComputer account can complete the approval",
 
 test("the approval landing route is the only connector route reachable without a session", async () => {
   const registry = new MemoryConnectorRegistryStore();
-  // A real authentication boundary that admits nobody. Under this server every
-  // route answers 401 unless it is deliberately exempt, which is what the
-  // administrator's browser relies on: they arrive from their mail client with
-  // no LemmaComputer cookie and usually no account at all.
-  const refuseEveryone = {
-    begin: async () => ({ location: "https://login.example", cookies: [] }),
-    complete: async () => { throw new Error("not used"); },
-    authenticate: async () => null,
-    logout: () => [],
-  };
+  // A real product authentication boundary that admits nobody. Under this
+  // server every route answers 401 unless it is deliberately exempt, which is
+  // what the administrator's browser relies on: they arrive from their mail
+  // client with no LemmaComputer cookie and usually no account at all.
+  const refuseEveryone = { resolve: async () => ({ status: "anonymous" as const }) };
   const linkService = service(registry);
   const link = await linkService.adminConsentLink(acme, "microsoft-365", "alex");
   const state = new URL(link.consentUrl).searchParams.get("state")!;
@@ -302,7 +297,7 @@ test("the approval landing route is the only connector route reachable without a
       microsoftAdminConsent: { clientId, consentSecret },
     },
     {
-      authentication: refuseEveryone as never,
+      customerProductAuthentication: refuseEveryone as never,
       connectorRegistryStore: registry,
       agentBridgeSecret: "consent-test-agent-bridge-secret-at-least-32-characters",
     },

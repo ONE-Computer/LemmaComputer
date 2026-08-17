@@ -39,86 +39,24 @@ const identity: IdentityContext = {
   audience: "lemmacomputer-control",
 };
 
-test("Hermes session titles stay in the LemmaComputer adapter so duplicate user titles cannot block a new chat", async () => {
+test("the workspace runtime is stateless for canonical chat history", async () => {
   const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
-  const sessionsStart = adapter.indexOf("async def sessions");
-  const hermesCreation = adapter.indexOf('if AGENT == "hermes-claw":', sessionsStart);
-  const creation = adapter.slice(hermesCreation, adapter.indexOf("async with state_lock:", hermesCreation));
-  assert.match(creation, /json=\{\}/);
-  assert.doesNotMatch(creation, /json=\{"title": item\["title"\]\}/);
-  assert.match(adapter, /nextCursor/);
+  assert.doesNotMatch(adapter, /structured-sessions\.json/);
+  assert.doesNotMatch(adapter, /^STATE_FILE\s*=|def read_state|def write_state|persist_turn_messages/m);
+  assert.doesNotMatch(adapter, /Route\("\/api\/sessions",/);
+  assert.match(adapter, /history = value\.get\("history", \[\]\)/);
+  assert.match(adapter, /vendor_session_id = value\.get\("vendorSessionId"\)/);
   assert.match(adapter, /NEEDS_INPUT_MARKER = "\[LEMMACOMPUTER_NEEDS_INPUT\]"/);
   assert.match(adapter, /terminal_state = "needs_input"/);
   assert.match(adapter, /"reasoningEffort": reasoning_effort/);
-  assert.match(adapter, /item\.get\("reasoningEffort"\) != reasoning_effort/);
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
-test("agent turns durably upsert submitted and streaming messages before terminal completion", async () => {
+test("the runtime receives Control history but never writes canonical transcript files", async () => {
   const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
-  const persistence = adapter.slice(
-    adapter.indexOf("def upsert_session_message"),
-    adapter.indexOf("async def health"),
-  );
-  const eventApplication = adapter.slice(
-    adapter.indexOf("def apply_event"),
-    adapter.indexOf("async def claude_vendor_events"),
-  );
-  const home = await mkdtemp(path.join(tmpdir(), "lemmacomputer-chat-persistence-"));
-  const program = `
-import asyncio, json, sys
-from pathlib import Path
-from typing import Any
-STATE_FILE = Path(sys.argv[1]) / "structured-sessions.json"
-state_lock = asyncio.Lock()
-def read_state(): return json.loads(STATE_FILE.read_text())
-def write_state(document): STATE_FILE.write_text(json.dumps(document))
-def find_session(document, session_id): return next((item for item in document["sessions"] if item.get("id") == session_id), None)
-MAX_TEXT = 128000
-${eventApplication}
-${persistence}
-session_id = "session-1"
-user = {"id":"user-1","role":"user","metadata":{"agentCatalogId":"claude-cli","state":"completed","createdAt":"2026-07-30T00:00:00Z"},"parts":[{"type":"text","text":"Build the site","state":"done"}]}
-streaming = {"id":"assistant-1","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-1","state":"streaming","createdAt":"2026-07-30T00:00:01Z"},"parts":[{"type":"text","text":"Building","state":"streaming","_id":"text-1"},{"type":"data-progress","id":"progress-1","data":{"activityId":"progress-1","label":"Still working…","state":"running"}}]}
-completed = {"id":"assistant-1","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-1","state":"completed","createdAt":"2026-07-30T00:00:01Z"},"parts":[{"type":"data-terminal","id":"terminal-1","data":{"turnId":"turn-1","state":"completed"}}]}
-STATE_FILE.write_text(json.dumps({"version":2,"sessions":[{"id":session_id,"vendorSessionId":None,"title":"Build","createdAt":"2026-07-30T00:00:00Z","updatedAt":"2026-07-30T00:00:00Z","messages":[]}]}))
-async def run():
-    await persist_turn_messages(session_id, [user], None, "2026-07-30T00:00:01Z")
-    started = read_state()["sessions"][0]
-    await persist_turn_messages(session_id, [streaming], None, "2026-07-30T00:00:02Z")
-    checkpointed = read_state()["sessions"][0]
-    await persist_turn_messages(session_id, [user, completed], "vendor-1", "2026-07-30T00:00:03Z")
-    await persist_turn_messages(session_id, [user, completed], "vendor-1", "2026-07-30T00:00:03Z")
-    finished = read_state()["sessions"][0]
-    repeated_terminal = {"id":"assistant-terminal","role":"assistant","metadata":{"agentCatalogId":"claude-cli","turnId":"turn-terminal","state":"streaming","createdAt":"2026-07-30T00:00:01Z"},"parts":[]}
-    apply_event(repeated_terminal, {"type":"turn-finish","turnId":"turn-terminal","state":"completed"})
-    apply_event(repeated_terminal, {"type":"turn-finish","turnId":"turn-terminal","state":"cancelled","message":"Disconnected"})
-    print(json.dumps({
-      "startedRoles":[message["role"] for message in started["messages"]],
-      "checkpointedStates":[message["metadata"]["state"] for message in checkpointed["messages"]],
-      "checkpointHasPrivateIds":any("_id" in part for message in checkpointed["messages"] for part in message["parts"]),
-      "finishedStates":[message["metadata"]["state"] for message in finished["messages"]],
-      "finishedIds":[message["id"] for message in finished["messages"]],
-      "vendorSessionId":finished["vendorSessionId"],
-      "terminalCount":len([part for part in repeated_terminal["parts"] if part["type"] == "data-terminal"]),
-      "terminalState":repeated_terminal["metadata"]["state"],
-    }))
-asyncio.run(run())
-`;
-  try {
-    const { stdout } = await execFileAsync("python3", ["-c", program, home]);
-    const result = JSON.parse(stdout);
-    assert.deepEqual(result.startedRoles, ["user"]);
-    assert.deepEqual(result.checkpointedStates, ["completed", "streaming"]);
-    assert.equal(result.checkpointHasPrivateIds, false);
-    assert.deepEqual(result.finishedStates, ["completed", "completed"]);
-    assert.deepEqual(result.finishedIds, ["user-1", "assistant-1"]);
-    assert.equal(result.vendorSessionId, "vendor-1");
-    assert.equal(result.terminalCount, 1);
-    assert.equal(result.terminalState, "cancelled");
-  } finally {
-    await rm(home, { recursive: true, force: true });
-  }
+  assert.match(adapter, /prompt_with_transcript\(\s*item, prompt_with_documents\(text, attachments, return_artifacts\)/);
+  assert.match(adapter, /"vendorSessionId": vendor_session_id/);
+  assert.doesNotMatch(adapter, /write_text\(json\.dumps\(.*sessions/s);
 });
 
 test("detached turn production survives subscriber disconnect and remains replayable", async () => {
@@ -306,6 +244,7 @@ test("channel response artifacts are bounded, hashed, and typed", () => {
   assert.equal(channelArtifactMaxBytes, 50 * 1024 * 1024);
   assert.equal(channelArtifactMaxTotalBytes, 100 * 1024 * 1024);
   const artifact = { artifactId: "artifact-44444444444444444444444444444444", filename: "Deck.pptx",
+    revisionId: "revision-44444444444444444444444444444444",
     mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", byteLength: channelArtifactMaxBytes, sha256: "a".repeat(64) };
   assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [artifact], state: "completed" }).success, true);
   assert.equal(channelTurnResponseSchema.safeParse({ sessionId: "session-1", text: "Done", notices: [], artifacts: [{ ...artifact, byteLength: channelArtifactMaxBytes + 1 }], state: "completed" }).success, false);
@@ -355,15 +294,16 @@ class FakeController implements ControllerClient {
 
 test("agent chat grants are deterministic, workspace-and-runtime-bound, and only issued for selected runtimes", () => {
   const authority = new AgentChatAuthority("test-agent-chat-root-secret-at-least-32-characters");
-  const first = authority.issue(identity, "11111111-1111-4111-8111-111111111111", hermesPolicy, "hermes-claw");
-  const same = authority.issue(identity, "11111111-1111-4111-8111-111111111111", hermesPolicy, "hermes-claw");
-  const other = authority.issue(identity, "22222222-2222-4222-8222-222222222222", hermesPolicy, "hermes-claw");
+  const firstWorkspace = { id: "11111111-1111-4111-8111-111111111111", workspaceNodeId: "node-1", accessGeneration: 1 };
+  const first = authority.issue(identity, firstWorkspace, hermesPolicy, "hermes-claw");
+  const same = authority.issue(identity, firstWorkspace, hermesPolicy, "hermes-claw");
+  const other = authority.issue(identity, { ...firstWorkspace, id: "22222222-2222-4222-8222-222222222222" }, hermesPolicy, "hermes-claw");
   assert.deepEqual(first, same);
   assert.notEqual(first?.key, other?.key);
   assert.equal(first?.baseUrl, "http://lemmacomputer-sandbox-11111111-1111-4111-8111-111111111111:8642");
 
   const claudePolicy = { ...hermesPolicy, agentProfile: "claude-desktop-managed-v1" as const, agents: undefined };
-  assert.equal(authority.issue(identity, "11111111-1111-4111-8111-111111111111", claudePolicy, "hermes-claw"), undefined);
+  assert.equal(authority.issue(identity, firstWorkspace, claudePolicy, "hermes-claw"), undefined);
 });
 
 test("workspace provisioning projects dedicated chat runtime grants and stopped workspaces cannot authorize chat", async () => {
@@ -432,6 +372,8 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
   try {
     for (const catalogId of ["hermes-claw", "claude-cli", "codex-cli"] as const) {
       const access: AgentChatAccess = {
+        tenantId: "acme", subjectId: "alex", workspaceNodeId: "node-1", accessGeneration: 1,
+        policyVersionId: "policy-version-1", policyVersion: 1, policyHash: "a".repeat(64), agentId: `${catalogId}-agent`,
         workspaceId: "11111111-1111-4111-8111-111111111111",
         catalogId,
         displayName: catalogId,
@@ -467,12 +409,13 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
     assert.deepEqual(requests.map(({ url, body }) => ({ url, body })), [
       {
         url: "/api/sessions/session-1/turns",
-        body: { message, agentInstanceId: "22222222-2222-4222-8222-222222222222" },
+        body: { message, history: [], agentInstanceId: "22222222-2222-4222-8222-222222222222" },
       },
       {
         url: "/api/sessions/session-1/turns",
         body: {
           message: { ...message, metadata: { ...message.metadata, agentCatalogId: "claude-cli" } },
+          history: [],
           agentInstanceId: "22222222-2222-4222-8222-222222222222",
           reasoningEffort: "medium",
         },
@@ -481,6 +424,7 @@ test("Hermes, Claude, and Codex satisfy the same ordered owned stream contract",
         url: "/api/sessions/session-1/turns",
         body: {
           message: { ...message, metadata: { ...message.metadata, agentCatalogId: "codex-cli" } },
+          history: [],
           agentInstanceId: "22222222-2222-4222-8222-222222222222",
         },
       },
@@ -505,6 +449,8 @@ test("agent chat cancellation targets the active detached workspace turn", async
   const address = server.address();
   assert.ok(address && typeof address === "object");
   const access: AgentChatAccess = {
+    tenantId: "acme", subjectId: "alex", workspaceNodeId: "node-1", accessGeneration: 1,
+    policyVersionId: "policy-version-1", policyVersion: 1, policyHash: "a".repeat(64), agentId: "claude-agent",
     workspaceId: "11111111-1111-4111-8111-111111111111",
     catalogId: "claude-cli",
     displayName: "Claude CLI",
@@ -577,6 +523,8 @@ test("agent streams reject malformed ordering, cross-session events, and abrupt 
     assert.ok(address && typeof address === "object");
     const client = new HttpAgentChatClient();
     const access: AgentChatAccess = {
+      tenantId: "acme", subjectId: "alex", workspaceNodeId: "node-1", accessGeneration: 1,
+      policyVersionId: "policy-version-1", policyVersion: 1, policyHash: "a".repeat(64), agentId: "claude-agent",
       workspaceId: "11111111-1111-4111-8111-111111111111",
       catalogId: "claude-cli",
       displayName: "Claude CLI",

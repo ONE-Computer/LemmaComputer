@@ -91,6 +91,7 @@ export const renderControlOverride = () => `services:
     networks:
       node-transport: {}
     depends_on: !override
+      artifact-data-init: { condition: service_completed_successfully }
       db-migrate: { condition: service_completed_successfully }
       auth-db-migrate: { condition: service_completed_successfully }
       platform-auth-db-migrate: { condition: service_completed_successfully }

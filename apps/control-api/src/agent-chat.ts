@@ -4,7 +4,6 @@ import {
   LemmaComputerError,
   agentChatEventSchema,
   chatAgentCatalogIdSchema,
-  chatReasoningEffortSchema,
   channelArtifactMaxBytes,
   chatSessionIdSchema,
   chatUiMessageSchema,
@@ -19,7 +18,14 @@ import {
 } from "@lemmacomputer/contracts";
 
 export type AgentChatAccess = {
+  tenantId: string;
+  subjectId: string;
   workspaceId: string;
+  workspaceNodeId: string | null;
+  accessGeneration: number;
+  policyVersionId: string;
+  policyVersion: number;
+  policyHash: string;
   catalogId: ChatAgentCatalogId;
   displayName: string;
   key: string;
@@ -73,7 +79,7 @@ export class AgentChatAuthority {
 
   issue(
     identity: IdentityContext,
-    workspaceId: string,
+    workspace: { id: string; workspaceNodeId?: string | null; accessGeneration: number },
     policy: RuntimePolicy,
     catalogId: ChatAgentCatalogId,
   ): AgentChatAccess | undefined {
@@ -83,23 +89,32 @@ export class AgentChatAuthority {
       .update("lemmacomputer-agent-chat/v1\0")
       .update(identity.tenantId).update("\0")
       .update(identity.subjectId).update("\0")
-      .update(workspaceId).update("\0")
+      .update(workspace.id).update("\0")
+      .update(workspace.workspaceNodeId ?? "colocated").update("\0")
+      .update(String(workspace.accessGeneration)).update("\0")
       .update(catalogId).update("\0")
       .update(policy.policyHash)
       .digest("base64url");
     return {
-      workspaceId,
+      tenantId: identity.tenantId,
+      subjectId: identity.subjectId,
+      workspaceId: workspace.id,
+      workspaceNodeId: workspace.workspaceNodeId ?? null,
+      accessGeneration: workspace.accessGeneration,
+      policyVersionId: policy.policyVersionId,
+      policyVersion: policy.policyVersion,
+      policyHash: policy.policyHash,
       catalogId,
       displayName: chatDisplayNames[catalogId],
       agentId,
       key,
-      baseUrl: `http://lemmacomputer-sandbox-${workspaceId}:${chatRuntimePorts[catalogId]}`,
+      baseUrl: `http://lemmacomputer-sandbox-${workspace.id}:${chatRuntimePorts[catalogId]}`,
     };
   }
 
-  list(identity: IdentityContext, workspaceId: string, policy: RuntimePolicy): AgentChatAccess[] {
+  list(identity: IdentityContext, workspace: { id: string; workspaceNodeId?: string | null; accessGeneration: number }, policy: RuntimePolicy): AgentChatAccess[] {
     return assignedChatAgentIds(policy).flatMap((catalogId) => {
-      const access = this.issue(identity, workspaceId, policy, catalogId);
+      const access = this.issue(identity, workspace, policy, catalogId);
       return access ? [access] : [];
     });
   }
@@ -107,9 +122,6 @@ export class AgentChatAuthority {
 
 export interface AgentChatClient {
   health(access: AgentChatAccess): Promise<void>;
-  listSessions(access: AgentChatAccess, options?: { cursor?: string; limit?: number }): Promise<AgentChatSessionPage>;
-  createSession(access: AgentChatAccess, title?: string, reasoningEffort?: ChatReasoningEffort): Promise<AgentChatSession>;
-  listMessages(access: AgentChatAccess, sessionId: string): Promise<ChatUiMessage[]>;
   cancelTurn(access: AgentChatAccess, sessionId: string): Promise<void>;
   downloadArtifact(access: AgentChatAccess, artifactId: string): Promise<Buffer>;
   streamTurn(
@@ -120,6 +132,8 @@ export interface AgentChatClient {
     usageTaskBinding?: string,
     agentInstanceId?: string,
     reasoningEffort?: ChatReasoningEffort,
+    history?: ChatUiMessage[],
+    vendorSessionId?: string,
   ): AsyncIterable<AgentChatEvent>;
 }
 
@@ -210,32 +224,7 @@ export const reconcileChatMessages = async (
   return { ...message, parts };
 }));
 
-const object = (value: unknown): Record<string, unknown> => value && typeof value === "object"
-  ? value as Record<string, unknown>
-  : {};
-
-const nullableText = (value: unknown) => typeof value === "string" && value.length ? value : null;
 const agentTurnTimeoutMs = 15 * 60_000;
-
-const session = (value: unknown): AgentChatSession => {
-  const item = object(value);
-  const id = chatSessionIdSchema.safeParse(item.id);
-  if (!id.success) throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
-  const reasoningEffort = item.reasoning_effort ?? item.reasoningEffort;
-  const parsedReasoningEffort = reasoningEffort === undefined
-    ? undefined
-    : chatReasoningEffortSchema.safeParse(reasoningEffort);
-  if (parsedReasoningEffort && !parsedReasoningEffort.success) {
-    throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid session", 502, true);
-  }
-  return {
-    id: id.data,
-    title: nullableText(item.title),
-    createdAt: nullableText(item.created_at ?? item.createdAt),
-    updatedAt: nullableText(item.updated_at ?? item.updatedAt),
-    ...(parsedReasoningEffort?.success ? { reasoningEffort: parsedReasoningEffort.data } : {}),
-  };
-};
 
 const upstreamError = (access: AgentChatAccess, status: number) => new LemmaComputerError(
   status === 400
@@ -324,41 +313,6 @@ export class HttpAgentChatClient implements AgentChatClient {
     return Buffer.concat(chunks, size);
   }
 
-  async listSessions(access: AgentChatAccess, options: { cursor?: string; limit?: number } = {}) {
-    const query = new URLSearchParams();
-    if (options.cursor) query.set("cursor", options.cursor);
-    if (options.limit) query.set("limit", String(options.limit));
-    const payload = object(await this.json(access, `/api/sessions${query.size ? `?${query}` : ""}`));
-    const values = Array.isArray(payload.sessions) ? payload.sessions : [];
-    return {
-      sessions: values.map(session),
-      nextCursor: nullableText(payload.nextCursor ?? payload.next_cursor),
-    };
-  }
-
-  async createSession(access: AgentChatAccess, title?: string, reasoningEffort?: ChatReasoningEffort) {
-    const payload = object(await this.json(access, "/api/sessions", {
-      method: "POST",
-      body: JSON.stringify({ ...(title ? { title } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) }),
-    }));
-    return session(payload.session ?? payload);
-  }
-
-  async listMessages(access: AgentChatAccess, sessionId: string) {
-    const id = chatSessionIdSchema.parse(sessionId);
-    const payload = object(await this.json(access, `/api/sessions/${encodeURIComponent(id)}/messages`));
-    if (!Array.isArray(payload.messages)) {
-      throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
-    }
-    return payload.messages.map((value) => {
-      const parsed = chatUiMessageSchema.safeParse(value);
-      if (!parsed.success || parsed.data.metadata.agentCatalogId !== access.catalogId) {
-        throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned invalid conversation history", 502, true);
-      }
-      return parsed.data;
-    });
-  }
-
   async cancelTurn(access: AgentChatAccess, sessionId: string) {
     const id = chatSessionIdSchema.parse(sessionId);
     await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns/active`, {
@@ -374,6 +328,8 @@ export class HttpAgentChatClient implements AgentChatClient {
     usageTaskBinding?: string,
     agentInstanceId?: string,
     reasoningEffort?: ChatReasoningEffort,
+    history: ChatUiMessage[] = [],
+    vendorSessionId?: string,
   ): AsyncIterable<AgentChatEvent> {
     const id = chatSessionIdSchema.parse(sessionId);
     const response = await this.response(access, `/api/sessions/${encodeURIComponent(id)}/turns`, {
@@ -383,6 +339,8 @@ export class HttpAgentChatClient implements AgentChatClient {
         ...(usageTaskBinding ? { usageTaskBinding } : {}),
         ...(agentInstanceId ? { agentInstanceId } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        history,
+        ...(vendorSessionId ? { vendorSessionId } : {}),
       }),
       signal,
     }, agentTurnTimeoutMs);
@@ -483,12 +441,15 @@ export class AgentUiStreamMapper {
       }];
     }
     if (event.type === "artifact") {
+      if (!event.revisionId) {
+        throw new LemmaComputerError("CHAT_ARTIFACT_NOT_FINALIZED", "The generated file was not finalized by Control", 502);
+      }
       const artifact: ChatArtifact = {
-        artifactId: event.artifactId, mediaType: event.mediaType, filename: event.filename,
+        artifactId: event.artifactId, revisionId: event.revisionId, mediaType: event.mediaType, filename: event.filename,
         byteLength: event.byteLength, sha256: event.sha256,
       };
       return [{ type: "data-file-reference", id: artifact.artifactId, data: {
-        mediaType: artifact.mediaType, filename: artifact.filename, storage: "workspace",
+        mediaType: artifact.mediaType, filename: artifact.filename, storage: "control", revisionId: artifact.revisionId,
       } }];
     }
     if (event.type === "text-delta") {
@@ -553,5 +514,110 @@ export class AgentUiStreamMapper {
         },
       },
     ];
+  }
+}
+
+export class AgentMessageAccumulator {
+  private message?: ChatUiMessage;
+  private readonly textParts = new Map<string, number>();
+
+  constructor(private readonly catalogId: ChatAgentCatalogId) {}
+
+  apply(event: AgentChatEvent) {
+    if (event.type === "turn-start") {
+      this.message = {
+        id: event.messageId,
+        role: "assistant",
+        metadata: {
+          agentCatalogId: this.catalogId,
+          turnId: event.turnId,
+          state: "streaming",
+          createdAt: event.createdAt,
+        },
+        parts: [],
+      } as ChatUiMessage;
+      return;
+    }
+    if (!this.message) throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent event stream has no message", 502);
+    const parts = this.message.parts;
+    if (event.type === "text-delta") {
+      const index = this.textParts.get(event.textId);
+      if (index === undefined) {
+        this.textParts.set(event.textId, parts.length);
+        parts.push({ type: "text", text: event.delta, state: "streaming" });
+      } else {
+        const part = parts[index];
+        if (part?.type !== "text") throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent reused a chat part identifier", 502);
+        part.text += event.delta;
+      }
+      return;
+    }
+    if (event.type === "artifact") {
+      if (!event.revisionId) throw new LemmaComputerError("CHAT_ARTIFACT_NOT_FINALIZED", "The generated file was not finalized by Control", 502);
+      parts.push({
+        type: "data-file-reference",
+        id: event.artifactId,
+        data: { mediaType: event.mediaType, filename: event.filename, storage: "control", revisionId: event.revisionId },
+      });
+      return;
+    }
+    if (event.type === "progress") {
+      const replacement = {
+        type: "data-progress" as const,
+        id: event.activityId,
+        data: { activityId: event.activityId, label: event.label, state: event.state },
+      };
+      const index = parts.findIndex((part) => "id" in part && part.id === event.activityId);
+      if (index < 0) parts.push(replacement); else parts[index] = replacement;
+      return;
+    }
+    if (event.type === "tool" && event.progressLabel) {
+      const id = `progress-${event.turnId}`;
+      const replacement = {
+        type: "data-progress" as const,
+        id,
+        data: { activityId: id, label: event.progressLabel, state: "running" as const },
+      };
+      const index = parts.findIndex((part) => "id" in part && part.id === id);
+      if (index < 0) parts.push(replacement); else parts[index] = replacement;
+      return;
+    }
+    if (event.type === "approval") {
+      const replacement = {
+        type: "data-approval" as const,
+        id: event.approvalId,
+        data: {
+          approvalId: event.approvalId,
+          toolCallId: event.toolCallId,
+          operationId: event.operationId,
+          state: event.state,
+          summary: event.summary,
+        },
+      };
+      const index = parts.findIndex((part) => "id" in part && part.id === event.approvalId);
+      if (index < 0) parts.push(replacement); else parts[index] = replacement;
+      return;
+    }
+    if (event.type !== "turn-finish") return;
+    for (const part of parts) {
+      if (part.type === "text") part.state = "done";
+      if (part.type === "data-progress" && part.data.state === "running") {
+        part.data.state = "completed";
+        part.data.label = event.state === "needs_input" ? "Waiting for your reply"
+          : event.state === "cancelled" ? "Work stopped"
+          : event.state === "failed" ? "Work failed" : "Work complete";
+      }
+    }
+    parts.push({
+      type: "data-terminal",
+      id: `terminal-${event.turnId}`,
+      data: { turnId: event.turnId, state: event.state, ...(event.message ? { message: event.message } : {}) },
+    });
+    this.message.metadata.state = event.state;
+  }
+
+  snapshot() {
+    if (!this.message?.parts.length) return undefined;
+    return chatUiMessageSchema.parse(structuredClone(this.message));
   }
 }

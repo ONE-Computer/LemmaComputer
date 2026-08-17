@@ -142,14 +142,23 @@ export class PolicyBundleAuthority {
   }
 }
 
+// The controller owns the workspace startup deadline. Control needs additional
+// transport grace so it can receive and preserve the controller's typed result.
+export const DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS = 90_000;
+
 export class HttpControllerClient implements ControllerClient {
-  constructor(private readonly baseUrl: string, private readonly token: string, private readonly transport: FetchLike = fetch) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly token: string,
+    private readonly transport: FetchLike = fetch,
+    private readonly requestTimeoutMs = DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS,
+  ) {}
   private async call(path: string, init?: RequestInit) {
     const hasBody = init?.body !== undefined;
     const response = await this.transport(`${this.baseUrl}${path}`, {
       ...init,
       headers: { ...(hasBody ? { "content-type": "application/json" } : {}), "x-controller-token": this.token, ...init?.headers },
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string; retryable?: boolean } };
@@ -611,7 +620,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, claimed, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, claimed, verifiedPolicy);
-      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
@@ -679,7 +688,7 @@ export class WorkspaceService {
       const verifiedPolicy = authorized?.payload.policy ?? policy;
       const grants = await this.ensureAgentGrants(identity, accessRecord, verifiedPolicy);
       const egressProxy = this.egressProxyAuthority?.issue(identity, accessRecord, verifiedPolicy);
-      const chatRuntimes = this.agentChatAuthority?.list(identity, claimed.id, verifiedPolicy)
+      const chatRuntimes = this.agentChatAuthority?.list(identity, accessRecord, verifiedPolicy)
         .map(({ catalogId, key }) => ({ catalogId, key }));
       if (verifiedPolicy.egress && !egressProxy) throw new LemmaComputerError("EGRESS_PROXY_NOT_CONFIGURED", "The assigned egress firewall cannot be provisioned", 503);
       const sandbox = await this.controller.create({
@@ -786,7 +795,7 @@ export class WorkspaceService {
     return {
       state: record.state,
       failureCode: record.failureCode,
-      accesses: this.agentChatAuthority.list(identity, record.id, policy),
+      accesses: this.agentChatAuthority.list(identity, record, policy),
     };
   }
 

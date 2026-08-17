@@ -8,13 +8,16 @@ import type {
 } from "@lemmacomputer/contracts";
 import { LemmaComputerError } from "@lemmacomputer/contracts";
 import {
+  MemoryChatStore,
   nextScheduleAt,
   type ClaimedScheduleRun,
   type ScheduleRecord,
   type ScheduleRunRecord,
   type ScheduleStore,
 } from "@lemmacomputer/workspace-store";
+import { MemoryArtifactStore } from "@lemmacomputer/artifact-store";
 import { SchedulePromptVault, ScheduleService } from "../apps/control-api/src/schedules.js";
+import { DurableChatService } from "../apps/control-api/src/durable-chat.js";
 import { SchedulerWorker } from "../apps/scheduler-worker/src/server.js";
 import type { AgentChatAccess, AgentChatClient } from "../apps/control-api/src/agent-chat.js";
 
@@ -177,7 +180,14 @@ class MemoryScheduleStore implements ScheduleStore {
 }
 
 const access: AgentChatAccess = {
+  tenantId: "acme",
+  subjectId: "alex",
   workspaceId,
+  workspaceNodeId: "node-1",
+  accessGeneration: 1,
+  policyVersionId: "policy-version-1",
+  policyVersion: 1,
+  policyHash: "a".repeat(64),
   catalogId: "codex-cli",
   displayName: "Codex",
   agentId: "codex-agent-policy-id",
@@ -188,21 +198,15 @@ const scheduledInstanceId = "22222222-2222-4222-8222-222222222222";
 
 const successfulAgent: AgentChatClient = {
   health: async () => {},
-  listSessions: async () => ({ sessions: [], nextCursor: null }),
-  createSession: async () => ({
-    id: "session-scheduled-1",
-    title: "Scheduled",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }),
-  listMessages: async () => [],
   cancelTurn: async () => {},
-  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding, agentInstanceId) {
+  downloadArtifact: async () => Buffer.alloc(0),
+  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding, agentInstanceId, _reasoningEffort, history) {
     assert.equal(usageTaskBinding, "signed-schedule-binding");
-    assert.equal(sessionId, "session-scheduled-1");
+    assert.match(sessionId, /^[0-9a-f-]{36}$/);
     assert.equal(agentInstanceId, scheduledInstanceId);
     assert.equal(message.parts[0]?.type, "text");
     assert.equal(message.parts[0]?.type === "text" ? message.parts[0].text : "", "Summarize the project.");
+    assert.deepEqual(history, [], "the current scheduled prompt must not also be sent as prior history");
     yield {
       version: 1,
       sequence: 0,
@@ -249,12 +253,14 @@ test("saved prompts are encrypted and bound to their owner and schedule", () => 
   );
 });
 
-test("a claimed run revalidates its target and creates a fresh agent session", async () => {
+test("a claimed run revalidates its target and creates a fresh Control conversation", async () => {
   const store = new MemoryScheduleStore();
   let validations = 0;
   let bindingIssued = false;
   let runningTurn: string | undefined;
   let endReason: string | undefined;
+  const chatStore = new MemoryChatStore(() => ({ workspaceNodeId: "node-1", accessGeneration: 1 }));
+  const durableChat = new DurableChatService(chatStore, new MemoryArtifactStore(), { requireNodePlacement: false });
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
@@ -272,7 +278,7 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
       assert.equal(input.workspaceId, workspaceId);
       assert.equal(input.agentId, "codex-agent-policy-id");
       assert.match(input.taskId, /^schedule:[0-9a-f-]{36}$/);
-      assert.equal(input.sessionId, "session-scheduled-1");
+      assert.match(input.sessionId, /^[0-9a-f-]{36}$/);
       assert.match(input.turnId, /^[0-9a-f-]{36}$/);
       assert.equal(input.agentInstanceId, scheduledInstanceId);
       return "signed-schedule-binding";
@@ -286,6 +292,8 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
         end: async (reason) => { endReason = reason; },
       };
     },
+    chatStore,
+    durableChat,
   );
   const schedule = await service.create(identity, {
     title: "Daily project summary",
@@ -302,11 +310,17 @@ test("a claimed run revalidates its target and creates a fresh agent session", a
   assert.ok(claimed?.run.leaseToken);
   const completed = await service.executeClaimed(claimed.run.id, claimed.run.leaseToken!);
   assert.equal(completed.state, "succeeded");
-  assert.equal(completed.sessionId, "session-scheduled-1");
+  assert.match(completed.sessionId ?? "", /^[0-9a-f-]{36}$/);
   assert.equal(validations, 2);
   assert.equal(bindingIssued, true);
   assert.equal(runningTurn, "turn-scheduled-1");
   assert.equal(endReason, "process_exited");
+  const conversations = await chatStore.listConversations(identity, workspaceId, { limit: 10 });
+  assert.equal(conversations.conversations.length, 1);
+  assert.deepEqual(
+    (await chatStore.listMessages(identity, conversations.conversations[0]!.id)).map((message) => message.role),
+    ["user", "assistant"],
+  );
 });
 
 test("a claimed run with revoked authority is skipped before contacting the agent", async () => {
@@ -315,10 +329,6 @@ test("a claimed run with revoked authority is skipped before contacting the agen
   const agent: AgentChatClient = {
     ...successfulAgent,
     health: async () => { agentCalls += 1; },
-    createSession: async (...args) => {
-      agentCalls += 1;
-      return successfulAgent.createSession(...args);
-    },
   };
   const service = new ScheduleService(
     store,

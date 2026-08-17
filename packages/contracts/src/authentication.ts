@@ -11,7 +11,6 @@ export const authenticationMethods = [
   "microsoft-oauth",
   "saml",
   "oidc",
-  "workforce-oidc",
 ] as const;
 export const authenticationMethodSchema = z.enum(authenticationMethods);
 export type AuthenticationMethod = z.infer<typeof authenticationMethodSchema>;
@@ -35,7 +34,7 @@ export const authenticationAssuranceSchema = z.strictObject({
 export type AuthenticationAssurance = z.infer<typeof authenticationAssuranceSchema>;
 
 export const authenticationProviderIdentitySchema = z.strictObject({
-  provider: z.enum(["better-auth", "entra-external-id", "workforce-entra"]),
+  provider: z.literal("better-auth"),
   issuer: z.url(),
   subject: z.string().trim().min(1).max(512),
 });
@@ -48,18 +47,11 @@ export const customerAuthenticatedPrincipalSchema = z.strictObject({
   authenticationSessionId: opaqueSessionIdSchema,
   accountUserId: z.uuid(),
   identity: authenticationProviderIdentitySchema,
-  method: z.enum(authenticationMethods.filter((method) => method !== "workforce-oidc") as [
-    Exclude<AuthenticationMethod, "workforce-oidc">,
-    ...Exclude<AuthenticationMethod, "workforce-oidc">[],
-  ]),
+  method: authenticationMethodSchema,
   assurance: authenticationAssuranceSchema,
   emailVerified: z.boolean(),
   authenticatedAt: z.iso.datetime(),
   recentStepUpAt: z.iso.datetime().nullable(),
-}).superRefine((value, context) => {
-  if (value.identity.provider === "workforce-entra") {
-    context.addIssue({ code: "custom", path: ["identity", "provider"], message: "Workforce identity cannot authenticate a customer principal" });
-  }
 });
 export type CustomerAuthenticatedPrincipal = z.infer<typeof customerAuthenticatedPrincipalSchema>;
 
@@ -71,10 +63,6 @@ export const platformOperatorPrincipalSchema = z.strictObject({
   assurance: authenticationAssuranceSchema,
   authenticatedAt: z.iso.datetime(),
   recentStepUpAt: z.iso.datetime().nullable(),
-}).superRefine((value, context) => {
-  if (!["workforce-entra", "better-auth"].includes(value.identity.provider)) {
-    context.addIssue({ code: "custom", path: ["identity", "provider"], message: "Platform operators require a dedicated workforce or platform authentication realm" });
-  }
 });
 export type PlatformOperatorPrincipal = z.infer<typeof platformOperatorPrincipalSchema>;
 
@@ -263,11 +251,8 @@ export const authenticationProviderContractSchema = z.strictObject({
   if (new Set(value.capabilities).size !== value.capabilities.length) {
     context.addIssue({ code: "custom", path: ["capabilities"], message: "Authentication capabilities must be unique" });
   }
-  if (value.realm === "customer" && value.methods.includes("workforce-oidc")) {
-    context.addIssue({ code: "custom", path: ["methods"], message: "Customer providers cannot expose the workforce operator method" });
-  }
-  if (value.realm === "platform-operator" && value.methods.some((method) => method !== "workforce-oidc")) {
-    context.addIssue({ code: "custom", path: ["methods"], message: "Platform operator providers cannot expose customer authentication methods" });
+  if (value.realm === "platform-operator" && value.methods.some((method) => method !== "passkey")) {
+    context.addIssue({ code: "custom", path: ["methods"], message: "Platform operator providers are passkey-only" });
   }
 });
 export type AuthenticationProviderContract = z.infer<typeof authenticationProviderContractSchema>;

@@ -23,9 +23,11 @@ import {
   type ScheduleRecord,
   type ScheduleRunRecord,
   type ScheduleStore,
+  type ChatStore,
 } from "@lemmacomputer/workspace-store";
-import type { AgentChatAccess, AgentChatClient } from "./agent-chat.js";
+import { AgentMessageAccumulator, type AgentChatAccess, type AgentChatClient } from "./agent-chat.js";
 import type { AgentProcessLifecycle } from "./agent-process-lifecycle.js";
+import type { DurableChatService } from "./durable-chat.js";
 
 const key = (secret: string) => createHash("sha256")
   .update("lemmacomputer/schedule-prompt/k1\0")
@@ -150,6 +152,8 @@ export class ScheduleService {
       identity: IdentityContext; workspaceId: string; catalogId: ChatAgentCatalogId;
       logicalAgentId: string; sessionId: string; runId: string;
     }) => Promise<AgentProcessLifecycle>,
+    private readonly chatStore?: ChatStore,
+    private readonly durableChat?: DurableChatService,
   ) {}
 
   private next(cronExpression: string, timeZone: string, after = new Date()) {
@@ -259,8 +263,16 @@ export class ScheduleService {
     try {
       const access = await this.resolveAccess(identity, schedule.workspaceId, schedule.agentCatalogId);
       await this.agentChat.health(access);
-      const session = await this.agentChat.createSession(access, `Scheduled: ${schedule.title}`);
-      sessionId = session.id;
+      const session = this.chatStore
+        ? await this.chatStore.createConversation({
+            identity,
+            workspaceId: schedule.workspaceId,
+            defaultAgentCatalogId: schedule.agentCatalogId,
+            title: `Scheduled: ${schedule.title}`,
+            requestedServiceClass: "balanced",
+          })
+        : undefined;
+      sessionId = session?.id ?? randomUUID();
       lifecycle = await this.beginAgentProcess?.({
         identity, workspaceId: schedule.workspaceId, catalogId: schedule.agentCatalogId,
         logicalAgentId: access.agentId, sessionId, runId: run.id,
@@ -279,17 +291,63 @@ export class ScheduleService {
           text: this.vault.unprotect(identity, schedule.id, schedule.promptCiphertext),
         }],
       };
+      const history = session && this.chatStore ? await this.chatStore.listMessages(identity, session.id) : [];
+      const vendorSessionId = session && this.chatStore
+        ? await this.chatStore.getVendorSession(identity, session.id, schedule.agentCatalogId)
+        : null;
+      if (session && this.durableChat) {
+        await this.durableChat.persistUserMessage({ identity, conversation: session, access, message });
+      }
+      const accumulator = new AgentMessageAccumulator(schedule.agentCatalogId);
       let terminal: "needs_input" | "completed" | "cancelled" | "failed" | null = null;
       let terminalMessage: string | undefined;
       const usageTaskBinding = this.issueUsageTaskBinding?.({
         identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
-        taskId: `schedule:${run.id}`, sessionId: session.id, turnId: message.id, agentInstanceId,
+        taskId: `schedule:${run.id}`, sessionId, turnId: message.id, agentInstanceId,
       });
-      for await (const event of this.agentChat.streamTurn(access, session.id, message, undefined, usageTaskBinding, agentInstanceId)) {
-        if (event.type === "turn-start" && lifecycle) { await lifecycle.markRunning(event.turnId); processStarted = true; }
+      for await (const runtimeEvent of this.agentChat.streamTurn(
+        access, sessionId, message, undefined, usageTaskBinding, agentInstanceId, undefined, history, vendorSessionId ?? undefined,
+      )) {
+        const event = runtimeEvent.type === "artifact" && session && this.durableChat
+          ? await this.durableChat.persistGeneratedArtifact({ identity, conversation: session, access, client: this.agentChat, event: runtimeEvent })
+          : runtimeEvent;
+        if (event.type === "turn-start") {
+          if (lifecycle) { await lifecycle.markRunning(event.turnId); processStarted = true; }
+          if (session && this.chatStore) {
+            await this.chatStore.beginRun({
+              identity, conversationId: session.id, turnId: event.turnId,
+              effectiveAgentCatalogId: schedule.agentCatalogId,
+              requestedServiceClass: "balanced",
+              policyVersionId: access.policyVersionId,
+              policyVersion: access.policyVersion,
+              policyHash: access.policyHash,
+              workspaceId: schedule.workspaceId,
+              workspaceNodeId: access.workspaceNodeId,
+              accessGeneration: access.accessGeneration,
+              ...(agentInstanceId ? { agentInstanceId } : {}),
+            });
+          }
+        }
+        accumulator.apply(event);
+        const checkpoint = accumulator.snapshot();
+        if (checkpoint && session && this.chatStore && this.durableChat) {
+          await this.chatStore.upsertMessage(identity, session.id, checkpoint);
+          await this.durableChat.bindMessageArtifacts(identity, session.id, checkpoint);
+        }
         if (event.type === "turn-finish") {
           terminal = event.state;
           terminalMessage = event.message;
+          if (session && this.chatStore) {
+            if (event.vendorSessionId) {
+              await this.chatStore.setVendorSession(identity, session.id, schedule.agentCatalogId, event.vendorSessionId);
+            }
+            await this.chatStore.finishRun(identity, session.id, event.turnId, {
+              status: event.state,
+              ...(checkpoint ? { assistantMessageId: checkpoint.id } : {}),
+              ...(event.state === "failed" ? { failureCode: "SCHEDULE_TURN_FAILED" } : {}),
+              completedAt: new Date(),
+            });
+          }
         }
       }
       if (lifecycle) { await lifecycle.end(terminal === "failed" ? "provider_failed" : "process_exited"); processEnded = true; }

@@ -345,7 +345,7 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(chatAdapter, /os\.O_EXCL \| getattr\(os, "O_NOFOLLOW", 0\)/);
   assert.match(chatAdapter, /"originalFilename": filename/);
   assert.match(chatAdapter, /os\.symlink\(path, visible_path\)/);
-  assert.match(chatAdapter, /"type": "data-file-reference"/);
+  assert.match(chatAdapter, /part\.get\("type"\) == "data-file-reference"/);
   assert.doesNotMatch(chatAdapter, /persisted_parts\.append\(\{\s*"type": "file",[\s\S]*?"url": url/);
   assert.match(chatAdapter, /"workspacePath": workspace_path/);
   assert.match(chatAdapter, /pass the exact workspace path below as localFilePath/);

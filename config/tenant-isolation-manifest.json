@@ -200,7 +200,7 @@
       "scope": "organization",
       "scopeKey": "external_identities.tenant_id",
       "operationProfile": "organization-control",
-      "evidence": ["tests/authentication-contracts.test.ts", "tests/entra-authentication.test.ts"]
+      "evidence": ["tests/authentication-contracts.test.ts", "tests/organization-rbac-postgres.test.ts"]
     },
     {
       "store": "control",
@@ -227,7 +227,7 @@
       "scope": "organization",
       "scopeKey": "oidc_login_attempts.tenant_id",
       "operationProfile": "ephemeral-authentication",
-      "evidence": ["tests/entra-authentication.test.ts"]
+      "evidence": ["tests/migrations.test.ts"]
     },
     {
       "store": "control",
@@ -452,7 +452,7 @@
       "scope": "platform-operator",
       "scopeKey": "platform_operator_sessions.operator_id",
       "operationProfile": "private-authentication",
-      "evidence": ["tests/platform-operator-authentication.test.ts", "tests/platform-operator-postgres.test.ts"]
+      "evidence": ["tests/platform-better-authentication.test.ts", "tests/platform-operator-postgres.test.ts"]
     },
     {
       "store": "control",
@@ -479,7 +479,7 @@
       "scope": "platform-operator",
       "scopeKey": "platform_operator_oidc_attempts.state_hash",
       "operationProfile": "ephemeral-authentication",
-      "evidence": ["tests/platform-operator-authentication.test.ts"]
+      "evidence": ["tests/platform-better-authentication.test.ts"]
     },
     {
       "store": "control",
@@ -682,6 +682,14 @@
     { "store": "control", "resource": "tool_audit_pending_admissions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "tool_audit_pending_admissions.tenant_id + subject_id + workspace_id + agent_instance_id", "operationProfile": "background-job", "evidence": ["tests/tool-audit-postgres.test.ts", "tests/tool-audit.test.ts"] },
     { "store": "control", "resource": "tool_audit_events", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "tool_audit_events.tenant_id + subject_id + workspace_id + agent_instance_id", "operationProfile": "append-only-audit", "evidence": ["tests/tool-audit-postgres.test.ts", "tests/tool-audit.test.ts"] },
     { "store": "control", "resource": "tool_audit_hourly_rollups", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "tool_audit_hourly_rollups.tenant_id", "operationProfile": "background-job", "evidence": ["tests/tool-audit-postgres.test.ts"] },
-    { "store": "control", "resource": "tool_audit_daily_rollups", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "tool_audit_daily_rollups.tenant_id", "operationProfile": "background-job", "evidence": ["tests/tool-audit-postgres.test.ts"] }
+    { "store": "control", "resource": "tool_audit_daily_rollups", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "tool_audit_daily_rollups.tenant_id", "operationProfile": "background-job", "evidence": ["tests/tool-audit-postgres.test.ts"] },
+    { "store": "control", "resource": "chat_conversations", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "chat_conversations.tenant_id + subject_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/agent-chat.test.ts"] },
+    { "store": "control", "resource": "chat_messages", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "chat_messages.tenant_id + conversation_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/agent-chat.test.ts"] },
+    { "store": "control", "resource": "chat_agent_runs", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "chat_agent_runs.tenant_id + conversation_id + workspace_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/agent-chat.test.ts"] },
+    { "store": "control", "resource": "chat_vendor_session_bindings", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "chat_vendor_session_bindings.tenant_id + conversation_id + agent_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/agent-chat.test.ts"] },
+    { "store": "control", "resource": "artifact_staging_uploads", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "artifact_staging_uploads.tenant_id + subject_id + workspace_id", "operationProfile": "background-job", "evidence": ["tests/chat-store-postgres.test.ts", "tests/artifact-store.test.ts"] },
+    { "store": "control", "resource": "artifacts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "artifacts.tenant_id + subject_id + workspace_id + conversation_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/artifact-store.test.ts"] },
+    { "store": "control", "resource": "artifact_revisions", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "artifact_revisions.tenant_id + artifact_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/artifact-store.test.ts"] },
+    { "store": "control", "resource": "chat_message_artifacts", "authority": "lemmacomputer", "scope": "organization", "scopeKey": "chat_message_artifacts.tenant_id + message_id + artifact_id", "operationProfile": "organization-control", "evidence": ["tests/chat-store-postgres.test.ts", "tests/artifact-store.test.ts"] }
   ]
 }

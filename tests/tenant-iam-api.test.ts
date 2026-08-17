@@ -115,10 +115,7 @@ const memberManager: SessionPrincipal = {
   identity: { ...owner.identity, subjectId: "iam-member-manager" },
 };
 const authentication = (actor: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("unused"); },
-  authenticate: async () => actor,
-  logout: async () => "",
+  resolve: async () => ({ status: "authorized" as const, principal: actor }),
 });
 const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=valid" };
 
@@ -158,7 +155,7 @@ class FakeTenantIamStore {
 
 const appFor = (actor: SessionPrincipal, store: FakeTenantIamStore) => createControlServer(
   new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
-    authentication: authentication(actor),
+    customerProductAuthentication: authentication(actor),
     identityPolicyStore: store as unknown as IdentityPolicyStore,
     agentBridgeSecret: "tenant-iam-agent-bridge-secret-at-least-32-characters",
   },
@@ -370,7 +367,7 @@ test("workspace-scoped administration resolves the target workspace before autho
   };
   const app = createControlServer(
     workspaceStore, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
-      authentication: authentication(actor),
+      customerProductAuthentication: authentication(actor),
       identityPolicyStore: new FakeTenantIamStore() as unknown as IdentityPolicyStore,
       agentBridgeSecret: "tenant-iam-agent-bridge-secret-at-least-32-characters",
     },
@@ -434,7 +431,7 @@ test("resource-scoped API grants allow only the matching workspace and provider"
   const teamStore = { listAuditEvents: async () => auditEvents };
   const app = createControlServer(
     new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, connectorGateway, undefined, {}, {
-      authentication: authentication(scopedAdministrator),
+      customerProductAuthentication: authentication(scopedAdministrator),
       identityPolicyStore: store as unknown as IdentityPolicyStore,
       providerSettingsStore,
       providerAdministration,

@@ -29,11 +29,11 @@ const operatorPrincipal = {
   operatorSessionId: "22222222-2222-4222-8222-222222222222",
   operatorId: "33333333-3333-4333-8333-333333333333",
   identity: {
-    provider: "workforce-entra",
-    issuer: "https://login.microsoftonline.com/workforce/v2.0",
-    subject: "operator-object-id",
+    provider: "better-auth",
+    issuer: "https://app.lemmacomputer.example/api/v1/platform/auth/better-auth",
+    subject: "operator-id",
   },
-  assurance: { level: "aal2", factors: ["federated", "totp"] },
+  assurance: { level: "aal2", factors: ["passkey"] },
   authenticatedAt: "2026-08-09T03:00:00.000Z",
   recentStepUpAt: "2026-08-09T03:05:00.000Z",
 } as const satisfies PlatformOperatorPrincipal;
@@ -61,11 +61,10 @@ const administratorSession: PlatformOperatorSession = {
   roles: ["platform-administrator"],
 };
 
-const customerAuthentication = {
-  begin: async () => ({ location: "https://customer.example.test", cookie: "customer-state=opaque" }),
-  complete: async () => { throw new Error("unused"); },
-  authenticate: async (cookie: string | undefined) => cookie?.includes("customer_session=valid") ? customerPrincipal : null,
-  logout: async () => "customer_session=; Max-Age=0",
+const customerProductAuthentication = {
+  resolve: async (headers: Headers) => headers.get("cookie")?.includes("customer_session=valid")
+    ? { status: "authorized" as const, principal: customerPrincipal }
+    : { status: "anonymous" as const },
 };
 
 test("hosted platform routes use only the operator cookie and customer-managed registers no operator routes", async () => {
@@ -73,27 +72,11 @@ test("hosted platform routes use only the operator cookie and customer-managed r
   const operatorAuthentication = {
     begin: async (returnPath?: string) => {
       calls.push({ method: "begin", input: returnPath });
-      return {
-        location: "https://login.microsoftonline.com/workforce/oauth2/v2.0/authorize",
-        cookie: "oc_platform_oidc_state=opaque; Path=/api/v1/platform/auth/callback; HttpOnly; SameSite=Lax",
-      };
-    },
-    complete: async (input: unknown) => {
-      calls.push({ method: "complete", input });
-      return {
-        session: operatorSession,
-        returnPath: "/platform",
-        cookie: "oc_platform_session=valid; Path=/v1/platform; HttpOnly; SameSite=Strict",
-        clearStateCookie: "oc_platform_oidc_state=; Max-Age=0",
-      };
+      return { location: `/platform/sign-in?return=${encodeURIComponent(returnPath ?? "/platform")}` };
     },
     beginStepUp: async (cookie: string | undefined, returnPath?: string) => {
       calls.push({ method: "beginStepUp", input: { cookie, returnPath } });
-      return { location: "https://login.microsoftonline.com/workforce/oauth2/v2.0/authorize", cookie: "oc_platform_step_up_state=opaque" };
-    },
-    completeStepUp: async (input: unknown) => {
-      calls.push({ method: "completeStepUp", input });
-      return { session: operatorSession, returnPath: "/platform", clearStateCookie: "oc_platform_step_up_state=; Max-Age=0" };
+      return { location: `/platform/sign-in?stepUp=1&return=${encodeURIComponent(returnPath ?? "/platform")}` };
     },
     authenticate: async (cookie: string | undefined) => cookie?.includes("oc_platform_session=auditor")
       ? auditorSession
@@ -173,7 +156,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     undefined,
     { installationKind: "hosted" },
     {
-      authentication: customerAuthentication,
+      customerProductAuthentication,
       platformOperatorAuthentication: operatorAuthentication,
       platformOperatorStore: operatorStore,
       platformSecurityAlertDispatcher: {
@@ -199,7 +182,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     undefined,
     { installationKind: "customer-managed" },
     {
-      authentication: customerAuthentication,
+      customerProductAuthentication,
       platformOperatorAuthentication: operatorAuthentication,
       platformOperatorStore: operatorStore,
       agentBridgeSecret: "platform-customer-agent-bridge-secret-at-least-32-characters",
@@ -214,18 +197,9 @@ test("hosted platform routes use only the operator cookie and customer-managed r
 
     const started = await hosted.inject({ method: "GET", url: "/v1/platform/auth/login?return=%2Fplatform", headers: baseHeaders });
     assert.equal(started.statusCode, 302);
-    assert.match(String(started.headers["set-cookie"]), /oc_platform_oidc_state/);
+    assert.equal(started.headers.location, "/platform/sign-in?return=%2Fplatform");
     assert.deepEqual(calls[0], { method: "begin", input: "/platform" });
-
-    const callback = await hosted.inject({
-      method: "GET",
-      url: "/v1/platform/auth/callback?state=opaque&code=authorization-code",
-      headers: { ...baseHeaders, cookie: "oc_platform_oidc_state=opaque" },
-    });
-    assert.equal(callback.statusCode, 303);
-    assert.equal(callback.headers.location, "/platform");
-    assert.match(String(callback.headers["set-cookie"]), /oc_platform_session=valid/);
-    assert.equal(calls.some((call) => call.method === "complete"), true);
+    assert.equal(hosted.hasRoute({ method: "GET", url: "/v1/platform/auth/callback" }), false);
 
     const customerDenied = await hosted.inject({
       method: "GET",
@@ -248,16 +222,9 @@ test("hosted platform routes use only the operator cookie and customer-managed r
       headers: { ...baseHeaders, cookie: "oc_platform_session=valid" },
     });
     assert.equal(stepUp.statusCode, 302);
-    assert.match(String(stepUp.headers["set-cookie"]), /oc_platform_step_up_state/);
+    assert.equal(stepUp.headers.location, "/platform/sign-in?stepUp=1&return=%2Fplatform");
     assert.equal(calls.some((call) => call.method === "beginStepUp"), true);
-    const stepUpCallback = await hosted.inject({
-      method: "GET",
-      url: "/v1/platform/auth/step-up/callback?state=opaque&code=authorization-code",
-      headers: { ...baseHeaders, cookie: "oc_platform_session=valid; oc_platform_step_up_state=opaque" },
-    });
-    assert.equal(stepUpCallback.statusCode, 303);
-    assert.equal(stepUpCallback.headers.location, "/platform");
-    assert.equal(calls.some((call) => call.method === "completeStepUp"), true);
+    assert.equal(hosted.hasRoute({ method: "GET", url: "/v1/platform/auth/step-up/callback" }), false);
     const operatorUi = await hosted.inject({
       method: "GET",
       url: "/v1/platform/ui",
@@ -266,7 +233,7 @@ test("hosted platform routes use only the operator cookie and customer-managed r
     assert.equal(operatorUi.statusCode, 200);
     assert.match(operatorUi.headers["content-type"] ?? "", /text\/html/);
     assert.match(operatorUi.body, /Platform operations/);
-    assert.match(operatorUi.body, /Workforce operator realm/);
+    assert.match(operatorUi.body, /Platform passkey realm/);
     assert.doesNotMatch(operatorUi.body, /customer_session=valid|tenant-administrator/);
 
     const roleDeniedApproval = await hosted.inject({

@@ -54,10 +54,7 @@ const scopedAdministrator: SessionPrincipal = {
 };
 
 const authentication = (actor: SessionPrincipal) => ({
-  begin: async () => ({ location: "https://login.example.test", cookie: "state=opaque" }),
-  complete: async () => { throw new Error("unused"); },
-  authenticate: async () => actor,
-  logout: async () => "",
+  resolve: async () => ({ status: "authorized" as const, principal: actor }),
 });
 
 const protectedWorkspacePolicy = {
@@ -197,7 +194,7 @@ const appFor = async (
     undefined,
     {},
     {
-      authentication: authentication(actor),
+      customerProductAuthentication: authentication(actor),
       identityPolicyStore,
       protectedWorkspacePolicy,
       connectorRegistryStore: registry,

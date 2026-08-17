@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentChatEvent, ChatUiMessage, IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
 import {
+  MemoryChatStore,
   MemoryWorkspaceStore,
   agentInstanceIdentityState,
   type AgentInstanceLocator,
@@ -12,6 +13,7 @@ import {
   type IdentityPolicyStore,
   type WorkspaceRecord,
 } from "@lemmacomputer/workspace-store";
+import { MemoryArtifactStore } from "@lemmacomputer/artifact-store";
 import type { AgentChatAccess, AgentChatClient, AgentChatSessionPage } from "../apps/control-api/src/agent-chat.js";
 import {
   AgentProcessLifecycleService,
@@ -240,6 +242,16 @@ test("the browser chat route binds the trusted instance before one real Claude s
     },
   };
   const proxyToken = "agent-instance-proxy-token-at-least-24-characters";
+  const chatStore = new MemoryChatStore(() => ({
+    workspaceNodeId: owned.workspaceNodeId ?? null,
+    accessGeneration: owned.accessGeneration,
+  }));
+  const conversation = await chatStore.createConversation({
+    identity,
+    workspaceId: owned.id,
+    defaultAgentCatalogId: "claude-cli",
+    requestedServiceClass: "balanced",
+  });
   const app = createControlServer(
     workspaces,
     {} as ControllerClient,
@@ -252,6 +264,8 @@ test("the browser chat route binds the trusted instance before one real Claude s
       identityPolicyStore: identityPolicies,
       agentChatSecret: "agent-instance-chat-secret-at-least-32-characters",
       agentChatClient: agentChat,
+      chatStore,
+      artifactStore: new MemoryArtifactStore(),
       agentInstanceStore: instances,
     },
   );
@@ -276,7 +290,7 @@ test("the browser chat route binds the trusted instance before one real Claude s
   try {
     const response = await app.inject({
       method: "POST",
-      url: `/v1/workspaces/${owned.id}/chat/agents/claude-cli/sessions/session-1/messages`,
+      url: `/v1/workspaces/${owned.id}/chat/agents/claude-cli/sessions/${conversation.id}/messages`,
       headers,
       payload,
     });
@@ -289,7 +303,7 @@ test("the browser chat route binds the trusted instance before one real Claude s
 
     const rejected = await app.inject({
       method: "POST",
-      url: `/v1/workspaces/${owned.id}/chat/agents/claude-cli/sessions/session-1/messages`,
+      url: `/v1/workspaces/${owned.id}/chat/agents/claude-cli/sessions/${conversation.id}/messages`,
       headers: { ...headers, "idempotency-key": "browser-chat-launch-0002" },
       payload: { ...payload, agentInstanceId: crypto.randomUUID() },
     });

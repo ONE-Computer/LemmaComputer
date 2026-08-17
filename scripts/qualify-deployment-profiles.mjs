@@ -34,12 +34,7 @@ const environmentFor = (profile) => {
     ...sharedImages,
   };
   if (profile === "customer-managed") {
-    return {
-      ...values,
-      LEMMACOMPUTER_ENTRA_TENANT_ID: "profile-smoke-customer-directory",
-      LEMMACOMPUTER_ENTRA_CLIENT_ID: "profile-smoke-customer-client",
-      LEMMACOMPUTER_ENTRA_CLIENT_SECRET: "profile-smoke-customer-secret",
-    };
+    return values;
   }
   return {
     ...values,
@@ -49,16 +44,13 @@ const environmentFor = (profile) => {
     LEMMACOMPUTER_POSTMARK_SERVER_TOKEN: "profile-smoke-postmark-token",
     LEMMACOMPUTER_POSTMARK_FROM: "login@profile-smoke.example.test",
     LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
+    LEMMACOMPUTER_ARTIFACT_STORE_BACKEND: "s3",
+    LEMMACOMPUTER_ARTIFACT_S3_BUCKET: "profile-smoke-artifacts",
+    LEMMACOMPUTER_ARTIFACT_S3_REGION: "ap-southeast-1",
+    LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT: "",
+    LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID: "",
     LEMMACOMPUTER_PUBLIC_WEB_URL: "https://profile-smoke.example.test",
-    LEMMACOMPUTER_EXTERNAL_ID_TENANT_ID: "profile-smoke-external-directory",
-    LEMMACOMPUTER_EXTERNAL_ID_TENANT_SUBDOMAIN: "profile-smoke",
-    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_ID: "profile-smoke-external-client",
-    LEMMACOMPUTER_EXTERNAL_ID_CLIENT_SECRET: "profile-smoke-external-secret",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_TENANT_ID: "profile-smoke-workforce-directory",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_ID: "profile-smoke-platform-client",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_ENTRA_CLIENT_SECRET: "profile-smoke-platform-secret",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_SESSION_SECRET: "profile-smoke-platform-session-secret-0001",
-    LEMMACOMPUTER_PLATFORM_OPERATOR_STEP_UP_AUTH_CONTEXT: "c1",
+    LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL: "operator@profile-smoke.example.test",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL: "https://security-alerts.profile-smoke.example.test/lemma",
     LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET: "profile-smoke-security-alert-webhook-secret-0001",
     LEMMACOMPUTER_WORKSPACE_NODE_TOPOLOGY: "remote",

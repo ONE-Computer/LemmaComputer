@@ -7,6 +7,7 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { fromNodeHeaders } from "better-auth/node";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import pg from "pg";
+import { z } from "zod";
 
 import type { PlatformOperatorAuthenticationBoundary } from "./platform-operator-routes.js";
 
@@ -14,8 +15,6 @@ export const platformAuthenticationBasePath = "/api/v1/auth/platform";
 export const platformAuthenticationControlPath = "/v1/auth/platform";
 const platformIssuer = "urn:lemmacomputer:platform-better-auth";
 const platformRealm = "lemmacomputer-platform";
-const developmentOperatorEmail = "platform-admin@worktree.invalid";
-const developmentOperatorName = "Local platform administrator";
 
 type PlatformBetterAuthSession = {
   session: { id: string; createdAt: Date | string; expiresAt: Date | string };
@@ -30,6 +29,20 @@ export type PlatformAuthenticationOptions = {
   installationKind: "customer-managed" | "hosted" | "worktree";
   passkey: { rpId: string; origin: string };
 };
+
+export type PlatformOperatorBootstrap = {
+  mode: "worktree" | "hosted";
+  email: string;
+  displayName: string;
+  secret?: string;
+};
+
+export const worktreePlatformOperatorBootstrap = (secret: string): PlatformOperatorBootstrap => ({
+  mode: "worktree",
+  email: "platform-admin@worktree.invalid",
+  displayName: "Local platform administrator",
+  secret,
+});
 
 const exactOrigin = (value: string, label: string) => {
   const parsed = new URL(value);
@@ -90,7 +103,10 @@ export const createPlatformAuthentication = (options: PlatformAuthenticationOpti
       },
     },
     emailAndPassword: {
-      enabled: options.installationKind === "worktree",
+      // Credential routes are never exposed by registerPlatformAuthenticationRoutes.
+      // A credential exists only long enough to authorize the first passkey
+      // enrollment and is permanently removed by finalizeBootstrap().
+      enabled: options.installationKind !== "customer-managed",
       minPasswordLength: 32,
       maxPasswordLength: 256,
       requireEmailVerification: false,
@@ -117,6 +133,7 @@ export const createPlatformAuthentication = (options: PlatformAuthenticationOpti
       window: 60,
       max: 30,
       customRules: {
+        "/sign-in/email": { window: 60, max: 5 },
         "/sign-in/passkey": { window: 60, max: 5 },
         "/passkey/*": { window: 60, max: 10 },
       },
@@ -179,39 +196,39 @@ export class BetterAuthPlatformOperatorAuthenticationService implements Platform
     private readonly authenticationPool: pg.Pool,
     private readonly store: PostgresPlatformOperatorStore,
     private readonly baseUrl: string,
-    private readonly installationKind: "customer-managed" | "hosted" | "worktree",
-    private readonly developmentBootstrapSecret?: string,
+    private readonly bootstrap: PlatformOperatorBootstrap,
   ) {}
 
-  async initializeDevelopmentOperator() {
-    if (this.installationKind !== "worktree") return;
-    if (!this.developmentBootstrapSecret || this.developmentBootstrapSecret.length < 32) {
-      throw new Error("Worktree platform authentication requires a strong development bootstrap secret");
-    }
+  async initializeBootstrapOperator() {
     let account = await this.authenticationPool.query(
       `SELECT "id","email","name" FROM "user" WHERE lower("email")=lower($1)`,
-      [developmentOperatorEmail],
+      [this.bootstrap.email],
     );
     if (!account.rowCount) {
+      if (!this.bootstrap.secret || this.bootstrap.secret.length < 32) {
+        throw new Error("Initial platform enrollment requires a one-time bootstrap secret with at least 32 characters");
+      }
       const response = await this.authentication.handler(new Request(
         `${this.baseUrl}${platformAuthenticationBasePath}/sign-up/email`,
         {
           method: "POST",
           headers: { origin: this.baseUrl, "content-type": "application/json" },
           body: JSON.stringify({
-            email: developmentOperatorEmail,
-            name: developmentOperatorName,
-            password: this.developmentBootstrapSecret,
+            email: this.bootstrap.email,
+            name: this.bootstrap.displayName,
+            password: this.bootstrap.secret,
           }),
         },
       ));
-      if (!response.ok) throw new Error(`Local platform operator bootstrap failed with ${response.status}`);
+      if (!response.ok && response.status !== 422) {
+        throw new Error(`Platform operator bootstrap initialization failed with ${response.status}`);
+      }
       account = await this.authenticationPool.query(
         `SELECT "id","email","name" FROM "user" WHERE lower("email")=lower($1)`,
-        [developmentOperatorEmail],
+        [this.bootstrap.email],
       );
     }
-    if (!account.rowCount) throw new Error("Local platform operator account was not created");
+    if (!account.rowCount) throw new Error("Platform operator bootstrap account was not created");
     const user = account.rows[0];
     await this.store.provisionOperator({
       issuer: platformIssuer,
@@ -223,42 +240,57 @@ export class BetterAuthPlatformOperatorAuthenticationService implements Platform
     });
   }
 
-  async developmentBootstrap() {
-    if (this.installationKind !== "worktree" || !this.developmentBootstrapSecret) {
-      throw new LemmaComputerError("PLATFORM_DEVELOPMENT_BOOTSTRAP_UNAVAILABLE", "Development platform bootstrap is unavailable", 404);
-    }
+  async bootstrapCapability() {
     const account = await this.authenticationPool.query(
       `SELECT "id" FROM "user" WHERE lower("email")=lower($1)`,
-      [developmentOperatorEmail],
+      [this.bootstrap.email],
     );
-    if (!account.rowCount) throw new LemmaComputerError("PLATFORM_OPERATOR_NOT_PROVISIONED", "The local platform operator is unavailable", 503, true);
+    if (!account.rowCount) return null;
     const state = await this.authenticationState(String(account.rows[0].id));
-    if (state.enrolled) return { enrolled: true, cookies: [] as string[] };
+    return state.enrolled ? null : { mode: this.bootstrap.mode };
+  }
+
+  async beginBootstrap(input: { secret?: string; headers?: Record<string, string | string[] | undefined> }) {
+    const account = await this.authenticationPool.query(
+      `SELECT "id" FROM "user" WHERE lower("email")=lower($1)`,
+      [this.bootstrap.email],
+    );
+    if (!account.rowCount) throw new LemmaComputerError("PLATFORM_OPERATOR_NOT_PROVISIONED", "Platform enrollment is unavailable", 503, true);
+    const state = await this.authenticationState(String(account.rows[0].id));
+    if (state.enrolled) {
+      throw new LemmaComputerError("PLATFORM_BOOTSTRAP_UNAVAILABLE", "Platform enrollment is no longer available", 404);
+    }
+    const suppliedSecret = this.bootstrap.mode === "worktree" ? this.bootstrap.secret : input.secret;
+    if (!suppliedSecret) {
+      throw new LemmaComputerError("PLATFORM_BOOTSTRAP_REJECTED", "Platform enrollment was not authorized", 401);
+    }
+    const headers = requestHeaders(input.headers ?? {});
+    headers.set("origin", this.baseUrl);
+    headers.set("content-type", "application/json");
     const response = await this.authentication.handler(new Request(
       `${this.baseUrl}${platformAuthenticationBasePath}/sign-in/email`,
       {
         method: "POST",
-        headers: { origin: this.baseUrl, "content-type": "application/json" },
-        body: JSON.stringify({ email: developmentOperatorEmail, password: this.developmentBootstrapSecret }),
+        headers,
+        body: JSON.stringify({ email: this.bootstrap.email, password: suppliedSecret }),
       },
     ));
-    if (!response.ok) throw new LemmaComputerError("PLATFORM_DEVELOPMENT_BOOTSTRAP_FAILED", "Local platform enrollment could not begin", 503, true);
-    return { enrolled: false, cookies: responseCookies(response) };
+    if (!response.ok) {
+      throw new LemmaComputerError("PLATFORM_BOOTSTRAP_REJECTED", "Platform enrollment was not authorized", 401);
+    }
+    return { cookies: responseCookies(response) };
   }
 
-  assertDevelopmentOrigin(origin: string | undefined) {
-    if (this.installationKind !== "worktree" || origin !== this.baseUrl) {
-      throw new LemmaComputerError("PLATFORM_DEVELOPMENT_BOOTSTRAP_FORBIDDEN", "Development platform bootstrap requires the worktree origin", 403);
+  assertBootstrapOrigin(origin: string | undefined) {
+    if (origin !== this.baseUrl) {
+      throw new LemmaComputerError("PLATFORM_BOOTSTRAP_FORBIDDEN", "Platform enrollment requires the configured platform origin", 403);
     }
   }
 
-  async finalizeDevelopmentBootstrap(cookieHeader: string | undefined) {
-    if (this.installationKind !== "worktree") {
-      throw new LemmaComputerError("PLATFORM_DEVELOPMENT_BOOTSTRAP_UNAVAILABLE", "Development platform bootstrap is unavailable", 404);
-    }
+  async finalizeBootstrap(cookieHeader: string | undefined) {
     const current = await this.betterAuthSession(cookieHeader);
-    if (!current || current.user.email.toLowerCase() !== developmentOperatorEmail) {
-      throw new LemmaComputerError("PLATFORM_UNAUTHENTICATED", "Local platform enrollment requires its temporary session", 401);
+    if (!current || current.user.email.toLowerCase() !== this.bootstrap.email.toLowerCase()) {
+      throw new LemmaComputerError("PLATFORM_UNAUTHENTICATED", "Platform enrollment requires its temporary session", 401);
     }
     const state = await this.authenticationState(current.user.id);
     if (state.passkeys < 1) {
@@ -297,14 +329,6 @@ export class BetterAuthPlatformOperatorAuthenticationService implements Platform
       location: `/platform/sign-in?mode=step-up&return=${encodeURIComponent(validReturnPath(returnPath))}`,
       cookie: "oc_platform_step_up=; Path=/api/v1/platform; HttpOnly; SameSite=Strict; Max-Age=0",
     };
-  }
-
-  async complete(): Promise<never> {
-    throw new LemmaComputerError("PLATFORM_OIDC_CALLBACK_INVALID", "This platform realm uses passkey authentication", 400);
-  }
-
-  async completeStepUp(): Promise<never> {
-    throw new LemmaComputerError("PLATFORM_STEP_UP_CALLBACK_INVALID", "This platform realm uses passkey authentication", 400);
   }
 
   async authenticate(cookieHeader: string | undefined) {
@@ -386,19 +410,23 @@ export const registerPlatformAuthenticationRoutes = (
   service: BetterAuthPlatformOperatorAuthenticationService,
   installationKind: "customer-managed" | "hosted" | "worktree",
 ) => {
-  app.get(`${platformAuthenticationControlPath}/capabilities`, async () => ({
+  app.get(`${platformAuthenticationControlPath}/capabilities`, async (_request, reply) => reply.header("cache-control", "no-store").send({
     passkey: true,
-    developmentBootstrap: installationKind === "worktree",
+    bootstrap: await service.bootstrapCapability(),
   }));
-  app.post(`${platformAuthenticationControlPath}/development-bootstrap`, async (request, reply) => {
-    service.assertDevelopmentOrigin(request.headers.origin);
-    const result = await service.developmentBootstrap();
+  app.post(`${platformAuthenticationControlPath}/bootstrap`, async (request, reply) => {
+    service.assertBootstrapOrigin(request.headers.origin);
+    const body = z.strictObject({ secret: z.string().min(32).max(512).optional() }).parse(request.body ?? {});
+    if (installationKind === "hosted" && !body.secret) {
+      throw new LemmaComputerError("PLATFORM_BOOTSTRAP_REJECTED", "Platform enrollment was not authorized", 401);
+    }
+    const result = await service.beginBootstrap({ secret: body.secret, headers: request.raw.headers });
     if (result.cookies.length) reply.header("set-cookie", result.cookies);
-    return reply.header("cache-control", "no-store").send({ enrolled: result.enrolled });
+    return reply.header("cache-control", "no-store").send({ ready: true });
   });
-  app.post(`${platformAuthenticationControlPath}/development-bootstrap/finalize`, async (request, reply) => {
-    service.assertDevelopmentOrigin(request.headers.origin);
-    const result = await service.finalizeDevelopmentBootstrap(request.headers.cookie);
+  app.post(`${platformAuthenticationControlPath}/bootstrap/finalize`, async (request, reply) => {
+    service.assertBootstrapOrigin(request.headers.origin);
+    const result = await service.finalizeBootstrap(request.headers.cookie);
     return reply
       .header("cache-control", "no-store")
       .header("set-cookie", "lemmacomputer-platform.session_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")

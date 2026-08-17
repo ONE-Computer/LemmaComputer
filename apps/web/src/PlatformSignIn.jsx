@@ -20,6 +20,7 @@ export function PlatformSignIn() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [bootstrapSecret, setBootstrapSecret] = useState("");
 
   useEffect(() => {
     platformPasskeyApi.capabilities().then(setCapabilities).catch((failure) => setError(failure.message));
@@ -43,19 +44,19 @@ export function PlatformSignIn() {
     setBusy("bootstrap");
     setError("");
     try {
-      setStatus("Preparing the isolated local operator account…");
-      const state = await platformPasskeyApi.beginDevelopmentBootstrap();
-      if (!state.enrolled) {
-        setStatus("Register your platform security key…");
-        await platformPasskeyApi.add();
-        setStatus("Removing the temporary bootstrap credential…");
-        await platformPasskeyApi.finalizeDevelopmentBootstrap();
-      }
+      setStatus(capabilities.bootstrap.mode === "hosted"
+        ? "Verifying the one-time enrollment secret…"
+        : "Preparing the isolated local operator account…");
+      await platformPasskeyApi.beginBootstrap(bootstrapSecret);
+      setStatus("Register your platform security key…");
+      await platformPasskeyApi.add();
+      setStatus("Permanently removing the bootstrap credential…");
+      await platformPasskeyApi.finalizeBootstrap();
       setStatus("Verify the enrolled security key to enter platform operations…");
       await platformPasskeyApi.signIn();
       window.location.assign(returnPath);
     } catch (failure) {
-      setError(failure.message ?? "Local platform enrollment was not completed.");
+      setError(failure.message ?? "Platform enrollment was not completed.");
       setStatus("");
       setBusy("");
     }
@@ -74,10 +75,13 @@ export function PlatformSignIn() {
       <button className="primary-button signin-button" type="button" disabled={Boolean(busy) || !capabilities} onClick={signIn}>
         {busy === "signin" ? "Verifying security key…" : "Sign in with a security key"}
       </button>
-      {capabilities?.developmentBootstrap && !stepUp && <button className="secondary-button signin-button" type="button" disabled={Boolean(busy)} onClick={bootstrap}>
-        {busy === "bootstrap" ? "Setting up local access…" : "Set up local platform access"}
+      {capabilities?.bootstrap?.mode === "hosted" && !stepUp && <label className="signin-bootstrap-secret">One-time enrollment secret<input type="password" autoComplete="one-time-code" minLength="32" maxLength="512" required value={bootstrapSecret} onChange={(event) => setBootstrapSecret(event.target.value)} /></label>}
+      {capabilities?.bootstrap && !stepUp && <button className="secondary-button signin-button" type="button" disabled={Boolean(busy) || (capabilities.bootstrap.mode === "hosted" && bootstrapSecret.length < 32)} onClick={bootstrap}>
+        {busy === "bootstrap" ? "Setting up platform access…" : "Set up platform access"}
       </button>}
-      {capabilities?.developmentBootstrap && !stepUp && <small>Development only: the temporary bootstrap credential is removed after the first passkey is registered.</small>}
+      {capabilities?.bootstrap && !stepUp && <small>{capabilities.bootstrap.mode === "hosted"
+        ? "One-time enrollment: the bootstrap credential is permanently removed after the first passkey is registered."
+        : "Development only: the temporary bootstrap credential is removed after the first passkey is registered."}</small>}
     </section>
   </main>;
 }

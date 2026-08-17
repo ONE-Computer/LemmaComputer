@@ -146,13 +146,9 @@ including scheme, authority, and path:
 https://<lemmacomputer-origin>/oauth/mcp/callback
 ```
 
-The product sign-in callback is different and remains:
-
-```text
-https://<lemmacomputer-origin>/api/v1/auth/callback
-```
-
-Changing `LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating both registrations.
+Customer OAuth and company SSO callbacks are managed by the embedded Better
+Auth routes and their configured providers. Changing
+`LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating every enabled registration.
 Old direct callbacks such as `http://localhost:4000/callback` and
 `https://<origin>/callback` should be removed after the new route is verified
 and any rollback window closes.

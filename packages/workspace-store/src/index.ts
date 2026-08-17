@@ -21,6 +21,8 @@ export * from "./routing.js";
 export * from "./platform-operator.js";
 export * from "./protected-workspace-policy.js";
 export * from "./tool-audit.js";
+export * from "./chat.js";
+export * from "./chat-memory.js";
 
 export type WorkspaceRecord = {
   id: string;
@@ -32,6 +34,7 @@ export type WorkspaceRecord = {
   failureCode: string | null;
   operationToken: string | null;
   accessGeneration: number;
+  workspaceNodeId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -505,6 +508,7 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   failureCode: row.failure_code ? String(row.failure_code) : null,
   operationToken: row.operation_token ? String(row.operation_token) : null,
   accessGeneration: Number(row.access_generation ?? 1),
+  workspaceNodeId: row.workspace_node_id == null ? null : String(row.workspace_node_id),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });

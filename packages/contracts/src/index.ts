@@ -1180,10 +1180,12 @@ export type ChatFilePart = z.infer<typeof chatFilePartSchema>;
 export const chatFileReferenceDataSchema = z.object({
   mediaType: z.enum(chatAttachmentMediaTypes),
   filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
-  storage: z.literal("workspace"),
+  storage: z.literal("control"),
+  revisionId: z.string().regex(/^revision-[a-f0-9]{32}$/),
 }).strict();
 export const chatArtifactSchema = z.object({
   artifactId: z.string().regex(/^artifact-[a-f0-9]{32}$/),
+  revisionId: z.string().regex(/^revision-[a-f0-9]{32}$/),
   mediaType: z.enum(chatAttachmentMediaTypes),
   filename: z.string().trim().min(1).max(180).regex(/^[^\u0000-\u001f/\\]+$/),
   byteLength: z.number().int().min(1).max(channelArtifactMaxBytes),
@@ -1639,6 +1641,7 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
   agentChatEventBaseSchema.extend({
     type: z.literal("artifact"),
     artifactId: chatArtifactSchema.shape.artifactId,
+    revisionId: chatArtifactSchema.shape.revisionId.optional(),
     mediaType: chatArtifactSchema.shape.mediaType,
     filename: chatArtifactSchema.shape.filename,
     byteLength: chatArtifactSchema.shape.byteLength,
@@ -1693,6 +1696,7 @@ export const agentChatEventSchema = z.discriminatedUnion("type", [
     type: z.literal("turn-finish"),
     state: chatTurnStateSchema.exclude(["streaming"]),
     message: z.string().trim().min(1).max(500).optional(),
+    vendorSessionId: z.string().min(1).max(512).optional(),
     completedAt: z.iso.datetime(),
   }).strict(),
 ]);

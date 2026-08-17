@@ -43,7 +43,6 @@ const workspaceProviderPolicy = (value) => Object.freeze({
 const profile = (value) => Object.freeze({
   ...value,
   allowedSignInProviders: Object.freeze([...value.allowedSignInProviders]),
-  transitionalCustomerAdapters: Object.freeze([...value.transitionalCustomerAdapters]),
   customerAuthentication: Object.freeze({
     ...value.customerAuthentication,
     allowedMethods: Object.freeze([...value.customerAuthentication.allowedMethods]),
@@ -57,7 +56,7 @@ const profile = (value) => Object.freeze({
  * but do not redefine its security properties.
  */
 export const deploymentProfileCapabilityMatrix = Object.freeze({
-  schemaVersion: 3,
+  schemaVersion: 4,
   profiles: Object.freeze({
     "customer-managed": profile({
       id: "customer-managed",
@@ -65,8 +64,7 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "customer",
       organizationCardinality: "exactly-one",
       maximumOrganizations: 1,
-      allowedSignInProviders: ["better-auth-customer", "workforce-entra"],
-      transitionalCustomerAdapters: ["workforce-entra"],
+      allowedSignInProviders: ["better-auth-customer"],
       customerAuthentication: {
         framework: "better-auth",
         databaseScope: "installation-local",
@@ -94,15 +92,14 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "lemmacomputer",
       organizationCardinality: "multiple",
       maximumOrganizations: null,
-      allowedSignInProviders: ["better-auth-customer", "external-id", "enterprise-entra"],
-      transitionalCustomerAdapters: ["external-id", "enterprise-entra"],
+      allowedSignInProviders: ["better-auth-customer"],
       customerAuthentication: {
         framework: "better-auth",
         databaseScope: "pooled-control-plane",
         requiredLemmaHostedDependency: false,
         allowedMethods: customerAuthenticationMethods,
       },
-      platformOperatorRealm: "separate-workforce",
+      platformOperatorRealm: "separate-passkey",
       identityConfigurationCustody: "lemmacomputer",
       secretCustody: "lemmacomputer",
       workspaceProviderPolicy: {
@@ -123,15 +120,14 @@ export const deploymentProfileCapabilityMatrix = Object.freeze({
       operator: "developer",
       organizationCardinality: "development",
       maximumOrganizations: null,
-      allowedSignInProviders: ["development-fixture", "better-auth-customer", "workforce-entra", "external-id", "enterprise-entra"],
-      transitionalCustomerAdapters: ["workforce-entra", "external-id", "enterprise-entra"],
+      allowedSignInProviders: ["better-auth-customer"],
       customerAuthentication: {
         framework: "better-auth",
         databaseScope: "development-isolated",
         requiredLemmaHostedDependency: false,
         allowedMethods: customerAuthenticationMethods,
       },
-      platformOperatorRealm: "development-fixture",
+      platformOperatorRealm: "separate-passkey",
       identityConfigurationCustody: "developer",
       secretCustody: "developer",
       workspaceProviderPolicy: {

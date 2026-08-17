@@ -119,9 +119,7 @@ The notable unauthenticated or separately authenticated endpoints are:
 
 - `/v1/auth/customer/*` for embedded Better Auth customer signup, sign-in,
   verification, recovery, passkeys, social providers, and company SSO;
-- `/v1/auth/login` and `/v1/auth/callback` for customer-managed workforce Entra;
-- `/v1/auth/external-id/login` and `/v1/auth/external-id/callback` for hosted,
-  invitation-bound transitional External ID;
+- `/v1/auth/platform/*` for the isolated hosted/worktree platform passkey realm;
 - `/v1/openvtc/inbox` and `/trust-tasks` for OpenVTC transport-token access;
 - `/healthz`.
 

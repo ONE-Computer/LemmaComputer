@@ -87,7 +87,7 @@ test("ADR 0004 records the complete issue #51 threat and operability decision", 
     "## Threat model",
     "## Recovery, linking, and elevation",
     "## Failure and incident response",
-    "## Expand, migrate, contract",
+    "## Completed contraction",
     "## Qualification and evidence",
   ]) {
     assert.match(adr, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

@@ -205,12 +205,22 @@ const signInErrorByReason = {
   OIDC_STATE_INVALID: "The saved sign-in state could not be decrypted.",
   SOCIAL_SIGNIN_FAILED: "The provider authenticated this account, but LemmaComputer could not finish sign-in. If your email still needs verification, try the provider again and resend the verification email.",
   INVITATION_SIGNIN_FAILED: "This invitation cannot be used. Ask your organization administrator for a new invitation.",
-  EXTERNAL_ID_SIGNIN_FAILED: "Microsoft could not complete this sign-in. Check the account or ask your organization administrator for a new invitation.",
   OIDC_FAILED: "LemmaComputer could not finish the sign-in bootstrap.",
 };
 const socialProviderNameById = {
   google: "Google",
   microsoft: "Microsoft",
+};
+
+const safeAuthenticationReturnPath = (value) => {
+  if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(value)) return "/";
+  try {
+    const base = new URL(window.location.origin);
+    const parsed = new URL(value, base);
+    return parsed.origin === base.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/";
+  } catch {
+    return "/";
+  }
 };
 const socialSignInErrorMessage = (error, provider) => {
   if (error !== "account_not_linked") return null;
@@ -745,7 +755,7 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
   </div>;
 }
 
-function SignInScreen({ error, invitationActive = false, invitationBusy = false, invitationError = "", invitationContext = null, invitationVerified = false, onSignedIn }) {
+function SignInScreen({ error, invitationActive = false, invitationBusy = false, invitationError = "", invitationContext = null, invitationVerified = false, returnPath = "/", onSignedIn }) {
   const invited = invitationActive;
   const [capabilities, setCapabilities] = useState(null);
   const [mode, setMode] = useState(() => window.location.pathname === "/reset-password"
@@ -786,7 +796,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setStatus("");
     try {
       if (mode === "signup") {
-        const callbackURL = new URL(invited ? "/invite?verified=1" : "/", window.location.origin).toString();
+        const callbackURL = new URL(invited ? "/invite?verified=1" : returnPath, window.location.origin).toString();
         await authApi.signUpWithEmail({
           name,
           email,
@@ -827,7 +837,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setFormError("");
     setStatus("");
     try {
-      await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : "/");
+      await authApi.sendVerificationEmail(verificationRecipient, invited ? "/invite?verified=1" : returnPath);
       setStatus(capabilities?.developmentEmailCapture
         ? "A new local verification email was captured. Open it below."
         : "Verification email sent. Check your inbox and junk folder, then open the link to continue.");
@@ -844,7 +854,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setFormError("");
     try {
       if (!verificationRecipient) {
-        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : "/");
+        await authApi.sendVerificationEmail(recipient, invited ? "/invite?verified=1" : returnPath);
       }
       const captured = await authApi.takeDevelopmentEmail(recipient, "email-verification");
       if (!captured?.url) throw new Error("The captured verification email is unavailable.");
@@ -859,7 +869,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setBusy(true);
     setFormError("");
     try {
-      const started = await authApi.signInWithSocialProvider(provider, invited ? "/invite" : "/");
+      const started = await authApi.signInWithSocialProvider(provider, invited ? "/invite" : returnPath);
       if (!started?.url) throw new Error("This sign-in method could not be started.");
       window.location.assign(started.url);
     } catch (socialError) {
@@ -875,7 +885,7 @@ function SignInScreen({ error, invitationActive = false, invitationBusy = false,
     setBusy(true);
     setFormError("");
     try {
-      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : "/");
+      const started = await authApi.signInWithCompanySso(requestedEmail, invited ? "/invite" : returnPath);
       if (!started?.location) throw new Error("Company SSO could not be started.");
       window.location.assign(started.location);
     } catch (companyError) {
@@ -4479,14 +4489,15 @@ function ChatPart({ part, markdown = false }) {
   if (part.type === "file" || part.type === "data-file-reference") {
     const file = part.type === "file" ? part : part.data;
     const image = part.type === "file" && file.mediaType.startsWith("image/");
-    return (
-      <div className={`chat-file-part${image ? " image" : ""}`}>
+    const content = <>
         {image
           ? <img src={part.url} alt={file.filename || "Attached image"} />
           : <Document24Regular aria-hidden="true" />}
         <span>{file.filename || "Attached file"}</span>
-      </div>
-    );
+      </>;
+    return part.type === "data-file-reference"
+      ? <a className="chat-file-part" href={chatApi.artifactUrl(part.id, file.revisionId)} download>{content}</a>
+      : <div className={`chat-file-part${image ? " image" : ""}`}>{content}</div>;
   }
   if (part.type === "data-progress") {
     return (
@@ -4544,6 +4555,9 @@ function ChatConversation({
   historyHasMore = false,
   historyLoadingMore = false,
   onLoadOlder,
+  runtimeAvailable = true,
+  availableAgents = [],
+  onFork,
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -4754,7 +4768,7 @@ function ChatConversation({
   const submit = async (event) => {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && !attachments.length) || turnBusy || attachmentBusy || !requestedServiceClassAvailable) return;
+    if (!runtimeAvailable || (!text && !attachments.length) || turnBusy || attachmentBusy || !requestedServiceClassAvailable) return;
     clearError();
     let sessionId = sessionRef.current;
     if (!sessionId) {
@@ -4850,7 +4864,7 @@ function ChatConversation({
         placeholder={needsInput ? `Reply to ${agentName}` : `Message ${agentName}`}
         rows="1"
         maxLength="16000"
-        disabled={restoredTurnActive || historyState === "loading"}
+        disabled={!runtimeAvailable || restoredTurnActive || historyState === "loading"}
       />
     </>
   );
@@ -4905,6 +4919,16 @@ function ChatConversation({
                 />
               ))}
             </div>
+            {message.role === "assistant" && sessionId && message.metadata?.state !== "streaming" && availableAgents.length > 1 && (
+              <div className="chat-fork-actions" aria-label="Continue this conversation with another agent">
+                <span>Continue from here</span>
+                {availableAgents.filter((agent) => agent.catalogId !== agentId).map((agent) => (
+                  <button type="button" key={agent.catalogId} onClick={() => onFork?.(message.id, agent.catalogId)}>
+                    {agent.displayName}
+                  </button>
+                ))}
+              </div>
+            )}
           </article>
         ))}
         {awaitingAssistant && (
@@ -4928,6 +4952,7 @@ function ChatConversation({
           )}
         </div>
       )}
+      {!runtimeAvailable && <div className="chat-history-offline" role="status">Saved history and files remain available. Start the workspace to continue this conversation.</div>}
       <form className={`chat-composer${companionComposer ? " companion-chat-composer" : ""}`} onSubmit={submit}>
         {attachments.length > 0 && (
           <div className="chat-attachment-list" aria-label="Attachments">
@@ -4965,7 +4990,7 @@ function ChatConversation({
                 aria-label="Chat actions"
                 aria-expanded={chatActionsOpen}
                 aria-controls="companion-chat-actions"
-                disabled={turnBusy || attachmentBusy || historyState === "loading"}
+                disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
                 onClick={() => {
                   setChatActionsOpen((open) => !open);
                   setContextOpen(false);
@@ -5049,7 +5074,7 @@ function ChatConversation({
             {turnBusy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </div>
         ) : (
@@ -5059,7 +5084,7 @@ function ChatConversation({
               type="button"
               aria-label="Attach files"
               title="Attach files"
-              disabled={turnBusy || attachmentBusy || historyState === "loading"}
+              disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
               onClick={() => fileInputRef.current?.click()}
             >
               <Attach24Regular aria-hidden="true" />
@@ -5068,7 +5093,7 @@ function ChatConversation({
             {turnBusy ? (
               <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
             ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
+              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
             )}
           </>
         )}
@@ -5237,7 +5262,7 @@ export function ChatScreen({
     setThreadBusy({});
     setThreadServiceClasses({});
     setThreadReasoningEfforts({});
-    if (!workspace || !["ready", "open"].includes(workspaceState)) {
+    if (!workspace) {
       setStatus("offline");
       setReasonCode("WORKSPACE_NOT_READY");
       return () => { active = false; };
@@ -5269,7 +5294,7 @@ export function ChatScreen({
   }, [workspace?.id, workspaceState, reload]);
 
   useEffect(() => {
-    if (!workspace || !activeAgentId || !["ready", "open"].includes(workspaceState)) return undefined;
+    if (!workspace || !activeAgentId) return undefined;
     let active = true;
     setStatus("loading");
     setError("");
@@ -5286,9 +5311,7 @@ export function ChatScreen({
         if (!active) return;
         setStatus(nextStatus.state);
         setReasonCode(nextStatus.reasonCode);
-        if (nextStatus.state === "ready") {
-          await loadSessionPage();
-        }
+        await loadSessionPage();
       })
       .catch((requestError) => {
         if (!active) return;
@@ -5301,12 +5324,18 @@ export function ChatScreen({
   useEffect(() => {
     if (historyLoadRequest === handledHistoryLoadRequest.current) return;
     handledHistoryLoadRequest.current = historyLoadRequest;
-    if (status !== "ready" || !sessionNextCursor || sessionLoadingMore) return;
+    if (!sessionNextCursor || sessionLoadingMore) return;
     void loadSessionPage(sessionNextCursor, true);
   }, [historyLoadRequest, sessionNextCursor, sessionLoadingMore, status]);
 
   useEffect(() => {
-    if (status !== "ready" || !activeSessionId) return;
+    if (!activeSessionId || !["ready", "offline"].includes(status)) return;
+    const selected = sessions.find((session) => session.id === activeSessionId);
+    if (selected?.agentCatalogId && selected.agentCatalogId !== activeAgentId) {
+      setActiveAgentId(selected.agentCatalogId);
+      onAgentChange?.(workspace?.id, selected.agentCatalogId);
+      return;
+    }
     const existing = threads.find((thread) => thread.sessionId === activeSessionId);
     if (!existing) {
       setThreads((current) => [...current, { id: activeSessionId, sessionId: activeSessionId }]);
@@ -5314,7 +5343,7 @@ export function ChatScreen({
       return;
     }
     if (activeThreadId !== existing.id) setActiveThreadId(existing.id);
-  }, [activeSessionId, activeThreadId, status, threads]);
+  }, [activeSessionId, activeThreadId, activeAgentId, status, threads, sessions]);
 
   useEffect(() => {
     if (status !== "ready" || activeSessionId || threads.length || activeThreadId) return;
@@ -5360,6 +5389,25 @@ export function ChatScreen({
     onSessionChange("");
     setActiveAgentId(catalogId);
     onAgentChange?.(workspace?.id, catalogId);
+  };
+  const forkThread = async (fromMessageId, catalogId) => {
+    if (!workspace || !selectedSessionId) return;
+    try {
+      const created = await chatApi.fork(
+        workspace.id,
+        selectedSessionId,
+        fromMessageId,
+        catalogId,
+        activeRequestedServiceClass,
+        activeReasoningEffort,
+      );
+      onSessionsChange((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+      setActiveAgentId(catalogId);
+      onAgentChange?.(workspace.id, catalogId);
+      onSessionChange(created.id);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
   };
   const selectRequestedServiceClass = (serviceClass) => {
     if (!activeThread || !readyServiceClassValues.has(serviceClass)) return;
@@ -5434,7 +5482,7 @@ export function ChatScreen({
       {contextControls}
     </div>
   ) : null;
-  if (status !== "ready") {
+  if (!workspace || (status !== "ready" && !selectedSessionId)) {
     const workspaceCanRetry = workspace && ["ready", "open"].includes(workspaceState);
     const workspaceBusy = ["loading", "provisioning", "restarting", "stopping"].includes(workspaceState);
     const restartRequired = offline && reasonCode === "CHAT_RUNTIME_UNAVAILABLE" && workspaceCanRetry;
@@ -5518,6 +5566,9 @@ export function ChatScreen({
               historyHasMore={historyHasMore}
               historyLoadingMore={historyLoadingMore}
               onLoadOlder={onLoadOlder}
+              runtimeAvailable={status === "ready"}
+              availableAgents={agents}
+              onFork={forkThread}
             />
           </div>;
         })}
@@ -5538,6 +5589,9 @@ export function App() {
   const [invitationAcceptable, setInvitationAcceptable] = useState(false);
   const [invitationError, setInvitationError] = useState("");
   const [session, setSession] = useState(null);
+  const [authenticationReturnPath] = useState(() => safeAuthenticationReturnPath(
+    new URLSearchParams(window.location.search).get("return"),
+  ));
   const [customerSession, setCustomerSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
@@ -5667,6 +5721,12 @@ export function App() {
   }[tab.id]));
 
   useDismissOnOutside(profileOpen, () => setProfileOpen(false), profilePopoverRefs);
+
+  useEffect(() => {
+    if (session && !invitationActive && authenticationReturnPath !== "/") {
+      window.location.replace(authenticationReturnPath);
+    }
+  }, [authenticationReturnPath, invitationActive, session]);
 
   const requestConfirmation = (options) => new Promise((resolve) => {
     setConfirmation({ ...options, resolve });
@@ -7475,6 +7535,7 @@ export function App() {
       invitationError={invitationError}
       invitationContext={invitationContext}
       invitationVerified={invitationVerified}
+      returnPath={`${window.location.pathname}${window.location.search}`}
       onSignedIn={() => refreshAuthentication(invitationAcceptable)}
     />;
   }
@@ -7500,7 +7561,7 @@ export function App() {
             {chatSessions.length === 0
               ? <p>No recent chats</p>
               : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>
-                <span>{item.title || `Conversation ${chatSessions.length - index}`}</span>
+                <span>{item.title || `Conversation ${chatSessions.length - index}`}<small>{protectedPolicyAgentNames[item.agentCatalogId] || item.agentCatalogId}</small></span>
                 {runningChatSessionIds.includes(item.id) && <span className="sidebar-chat-running" aria-hidden="true" />}
               </button>)}
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}

@@ -12,6 +12,7 @@
   "dependencies": {
     "@better-auth/passkey": "1.6.26",
     "@better-auth/sso": "1.6.26",
+    "@lemmacomputer/artifact-store": "*",
     "@lemmacomputer/auth-store": "*",
     "@lemmacomputer/contracts": "*",
     "@lemmacomputer/egress-policy": "*",

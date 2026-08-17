@@ -342,6 +342,22 @@ services:
       platform-auth-db-init:
         condition: service_completed_successfully
 
+  artifact-data-init:
+    <<: [*control-runtime, *hardened]
+    user: root
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        chown node:node /var/lib/lemmacomputer/artifacts
+        chmod 0700 /var/lib/lemmacomputer/artifacts
+    network_mode: none
+    cap_add:
+      - CHOWN
+      - FOWNER
+    restart: "no"
+    volumes:
+      - artifact-data:/var/lib/lemmacomputer/artifacts
+
   control-api:
     <<: [*control-runtime, *hardened]
     container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?set LEMMACOMPUTER_CONTROL_CONTAINER in .env}
@@ -350,6 +366,8 @@ services:
     env_file:
       - path: .runtime-env/control-api.env
         format: raw
+    volumes:
+      - artifact-data:/var/lib/lemmacomputer/artifacts
     networks:
       - web-edge
       - control-private
@@ -359,6 +377,8 @@ services:
       - mcp-egress-private
       - identity-egress
     depends_on:
+      artifact-data-init:
+        condition: service_completed_successfully
       db-migrate:
         condition: service_completed_successfully
       auth-db-migrate:
@@ -529,3 +549,4 @@ networks:
 volumes:
   control-data:
   gateway-data:
+  artifact-data:
