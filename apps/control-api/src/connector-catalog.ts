@@ -66,13 +66,19 @@ const GOOGLE_CALENDAR_SCOPES = [
   "https://www.googleapis.com/auth/calendar.readonly",
 ];
 
-const googleWorkspaceSetup = (api: string, scopes: string[]): ConnectorCredentialSetup => ({
+// The service a Google connector calls is its own MCP endpoint, not the
+// underlying product API: Gmail's connector talks to gmailmcp.googleapis.com,
+// not gmail.googleapis.com. Enabling the wrong one leaves the connector
+// authorized and still refused. These endpoints serve their tool catalogue to
+// an anonymous caller but check the project behind a real access token, so the
+// failure appears only after a successful connection, as an empty toolset.
+const googleWorkspaceSetup = (service: string, scopes: string[]): ConnectorCredentialSetup => ({
   console: "Google Cloud console",
   consoleUrl: "https://console.cloud.google.com/auth/clients",
   clientType: "Web application",
   steps: [
     "Select or create a project in the Google Cloud console.",
-    `Enable the ${api} for that project.`,
+    `Enable ${service} for that project, under APIs & Services then Library. This is the connector's own MCP service; enabling only the underlying product API is not enough.`,
     "Open Google Auth Platform and set Audience. Choose Internal if the project belongs to your Google Workspace organization: an internal application skips Google's verification review, including the security assessment that the broader permissions below would otherwise require. External needs every person added as a test user while the application is unpublished, and its sign-ins stop working after seven days.",
     "Under Data Access, add the scopes listed below.",
     "Under Clients, create an OAuth client of type Web application and add the redirect URI shown below exactly, with no trailing slash.",
@@ -186,7 +192,7 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "gmail",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Gmail API", GMAIL_SCOPES),
+    credentialSetup: googleWorkspaceSetup("gmailmcp.googleapis.com", GMAIL_SCOPES),
     serverId: "lemmacomputer_gmail",
     serverName: "lemmacomputer_gmail",
     name: "Gmail",
@@ -202,7 +208,7 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "google-drive",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Google Drive API", GOOGLE_DRIVE_SCOPES),
+    credentialSetup: googleWorkspaceSetup("drivemcp.googleapis.com", GOOGLE_DRIVE_SCOPES),
     serverId: "lemmacomputer_google_drive",
     serverName: "lemmacomputer_google_drive",
     name: "Google Drive",
@@ -218,7 +224,7 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "google-calendar",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Google Calendar API", GOOGLE_CALENDAR_SCOPES),
+    credentialSetup: googleWorkspaceSetup("calendarmcp.googleapis.com", GOOGLE_CALENDAR_SCOPES),
     serverId: "lemmacomputer_google_calendar",
     serverName: "lemmacomputer_google_calendar",
     name: "Google Calendar",
