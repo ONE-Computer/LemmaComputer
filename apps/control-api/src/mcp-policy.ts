@@ -2,17 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   LemmaComputerError,
   canonicalJson,
-  isWorkspaceSelectableAgentCatalogId,
   m365ToolCatalog,
-  ownedAgentCatalog,
   type IdentityContext,
   type McpPolicyDecision,
   type McpPolicyRequest,
   type OwnedJson,
+  type RuntimePolicy,
 } from "@lemmacomputer/contracts";
 import {
-  runtimePolicyFor,
-  type EffectivePolicy,
   type GovernanceStore,
   type IdentityPolicyStore,
   type SessionPrincipal,
@@ -231,7 +228,7 @@ export type HostedToolPolicy = {
   decision: "allow" | "approval_required" | "deny";
 };
 
-export type McpEffectivePolicyResolver = (principal: SessionPrincipal) => Promise<EffectivePolicy | null>;
+export type McpRuntimePolicyResolver = (principal: SessionPrincipal, grantId: string) => Promise<RuntimePolicy | null>;
 
 const definition = (
   capabilityId: string,
@@ -412,7 +409,7 @@ export class McpPolicyService {
     private readonly identityPolicies: IdentityPolicyStore,
     private readonly governance: WorkspaceStore & GovernanceStore,
     private readonly operations: GovernedOperationService,
-    private readonly resolveEffectivePolicy: McpEffectivePolicyResolver,
+    private readonly resolveRuntimePolicy: McpRuntimePolicyResolver,
     private readonly hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
   ) {}
 
@@ -434,25 +431,28 @@ export class McpPolicyService {
       this.governance.getOwned(identity, request.workspaceId),
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return denied("MCP_IDENTITY_MISMATCH", capability);
-    const effectivePolicy = await this.resolveEffectivePolicy(principal);
-    if (!effectivePolicy || !workspace) return denied("MCP_POLICY_NOT_ASSIGNED", capability);
+    if (!workspace) return denied("MCP_POLICY_NOT_ASSIGNED", capability);
     // The policy callback is a privileged boundary in its own right. A token
     // projected into a sandbox must not be able to authorize MCP work while
     // that exact workspace is stopped, restarting, or has otherwise ceased to
     // be an active instance.
     if (!["ready", "open"].includes(workspace.state)) return denied("MCP_WORKSPACE_NOT_READY", capability);
+    const runtime = await this.resolveRuntimePolicy(principal, workspace.grantId);
+    if (!runtime) return denied("MCP_POLICY_NOT_ASSIGNED", capability);
 
-    const runtime = runtimePolicyFor(effectivePolicy);
-    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId));
-    const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
-    // Connector credentials and the composed effective member policy are
-    // user-scoped. Workspace isolation comes from the exact owned lookup above
-    // and from the workspace/agent/policy metadata on the LiteLLM grant.
+    const selectedAgent = runtime.agents?.find((agent) => agent.agentId === request.agentId);
+    const allowedAgentIds = new Set([runtime.agentId, ...(runtime.agents?.map((agent) => agent.agentId) ?? [])]);
+    const assignedMcpServer = selectedAgent?.mcpServer ?? runtime.mcpServer;
+    const assignedTools = selectedAgent?.allowedTools ?? runtime.allowedTools;
+    const assignedToolPolicies = selectedAgent?.toolPolicies ?? runtime.toolPolicies;
+    // The runtime resolver projects the same organization-composed member
+    // policy and saved workspace selection used to issue the LiteLLM grant.
+    // Hosted connector registry/tool policy remains separate in authorizeHosted.
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId
       && runtime.policyHash === request.policyHash
-      && runtime.mcpServer === request.serverName
-      && runtime.allowedTools.includes(request.toolName);
+      && assignedMcpServer === request.serverName
+      && assignedTools.includes(request.toolName);
     const isExecution = Boolean(request.operationId || request.operationDigest || request.leaseId);
     if (!bindingMatches && !isExecution) return denied("MCP_POLICY_BINDING_MISMATCH", capability);
 
@@ -500,7 +500,7 @@ export class McpPolicyService {
       return invalidArguments(error, capability);
     }
 
-    const policyDecision = runtime.toolPolicies[request.toolName];
+    const policyDecision = assignedToolPolicies[request.toolName];
     if (!policyDecision) return denied("MCP_TOOL_NOT_ASSIGNED", capability);
     if (policyDecision === "deny") return denied("MCP_TOOL_BLOCKED_BY_POLICY", capability);
     if (policyDecision === "allow") return {
@@ -590,12 +590,11 @@ export class McpPolicyService {
       this.governance.getOwned(identity, request.workspaceId),
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return genericDecision("deny", "MCP_IDENTITY_MISMATCH");
-    const effectivePolicy = await this.resolveEffectivePolicy(principal);
-    if (!effectivePolicy || !workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
+    if (!workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
     if (!["ready", "open"].includes(workspace.state)) return genericDecision("deny", "MCP_WORKSPACE_NOT_READY");
-    const runtime = runtimePolicyFor(effectivePolicy);
-    const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId));
-    const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
+    const runtime = await this.resolveRuntimePolicy(principal, workspace.grantId);
+    if (!runtime) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
+    const allowedAgentIds = new Set([runtime.agentId, ...(runtime.agents?.map((agent) => agent.agentId) ?? [])]);
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId
       && runtime.policyHash === request.policyHash;

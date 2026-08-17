@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest } from "@lemmacomputer/contracts";
+import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type { GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
-import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
-import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy, type McpEffectivePolicyResolver } from "../apps/control-api/src/mcp-policy.js";
+import { MemoryWorkspaceStore, runtimePolicyFor, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
+import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy, type McpRuntimePolicyResolver } from "../apps/control-api/src/mcp-policy.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
@@ -14,7 +14,7 @@ const policyHash = "a".repeat(64);
 
 const setup = async (
   hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
-  composeEffectivePolicy?: (assigned: EffectivePolicy) => EffectivePolicy | null,
+  projectRuntimePolicy?: (assigned: EffectivePolicy, grantId: string) => RuntimePolicy | null,
 ) => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());
@@ -55,16 +55,16 @@ const setup = async (
   } as unknown as IdentityPolicyStore;
   const executor = { executeGovernedTool: async () => ({ upstreamReference: "unused", resultSummary: "unused", result: {} }) } as GovernedToolExecutor;
   const operations = new GovernedOperationService(store, executor, new FixtureApprovalAuthority("mcp-policy-fixture-secret-at-least-32-characters"));
-  const resolveEffectivePolicy: McpEffectivePolicyResolver = async (actor) => (
+  const resolveRuntimePolicy: McpRuntimePolicyResolver = async (actor, grantId) => (
     actor.userId === principal.userId
-      ? composeEffectivePolicy ? composeEffectivePolicy(effective) : effective
+      ? projectRuntimePolicy ? projectRuntimePolicy(effective, grantId) : runtimePolicyFor(effective)
       : null
   );
   const policy = new McpPolicyService(
     identityPolicies,
     store,
     operations,
-    resolveEffectivePolicy,
+    resolveRuntimePolicy,
     hostedToolPolicy,
   );
   const base: McpPolicyRequest = {
@@ -126,9 +126,10 @@ test("hosted connector policy defaults can allow, block, or hold an exact tool f
   assert.equal((await policy.authorize({ ...request, serverId: "another_server" }, "hosted-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
 });
 
-test("MCP authorization uses the organization-composed effective member policy binding", async () => {
+test("MCP authorization uses the organization-composed grant policy for a non-default selected agent", async () => {
   const composedPolicyVersionId = randomUUID();
   const composedPolicyHash = "c".repeat(64);
+  const selectedAgentId = `${agentId}:hermes-claw`;
   const hosted = async (_identity: IdentityContext, serverName: string, toolName: string): Promise<HostedToolPolicy | null> => (
     serverName === "lemmacomputer_linear" ? {
       connectorId: "linear",
@@ -140,25 +141,44 @@ test("MCP authorization uses the organization-composed effective member policy b
       decision: "allow",
     } : null
   );
-  const { policy, base } = await setup(hosted, (assigned) => ({
-    ...assigned,
-    policyVersionId: composedPolicyVersionId,
-    version: assigned.version + 1,
-    documentHash: composedPolicyHash,
-  }));
+  const { policy, base } = await setup(hosted, (assigned, grantId) => {
+    assert.equal(grantId, "personal");
+    const composed = {
+      ...assigned,
+      policyVersionId: composedPolicyVersionId,
+      version: assigned.version + 1,
+      documentHash: composedPolicyHash,
+      document: {
+        ...assigned.document,
+        workspaceProfiles: ["kasm-persistent-standard"],
+        agents: ["claude-cli", "hermes-claw"],
+        defaultAgents: ["claude-cli"],
+        applications: ["firefox"],
+        defaultApplications: ["firefox"],
+      },
+    } satisfies EffectivePolicy;
+    return runtimePolicyFor(
+      composed,
+      "lemmacomputer-assistant",
+      "kasm-persistent-standard",
+      ["hermes-claw"],
+      ["firefox"],
+    );
+  });
 
-  assert.equal((await policy.authorize(base, "assigned-binding-built-in")).code, "MCP_POLICY_BINDING_MISMATCH");
+  const selectedAgentRequest = { ...base, agentId: selectedAgentId };
+  assert.equal((await policy.authorize(selectedAgentRequest, "assigned-binding-built-in")).code, "MCP_POLICY_BINDING_MISMATCH");
   const composedBinding = {
     policyVersionId: composedPolicyVersionId,
     policyHash: composedPolicyHash,
   };
   assert.equal((await policy.authorize({
-    ...base,
+    ...selectedAgentRequest,
     ...composedBinding,
   }, "composed-binding-built-in")).decision, "allow");
 
   const hostedRequest: McpPolicyRequest = {
-    ...base,
+    ...selectedAgentRequest,
     serverId: "lemmacomputer_linear",
     serverName: "lemmacomputer_linear",
     toolName: "list_issues",

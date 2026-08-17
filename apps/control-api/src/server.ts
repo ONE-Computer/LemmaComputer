@@ -1028,9 +1028,10 @@ export function createControlServer(
     security.identityPolicyStore,
     store,
     operations,
-    async (actor) => {
+    async (actor, grantId) => {
       const assigned = await security.identityPolicyStore!.getEffectivePolicy(actor.userId);
-      return (await effectivePolicyFor(actor, assigned)).effective;
+      const effective = (await effectivePolicyFor(actor, assigned)).effective;
+      return effective ? (await policyForGrant(actor, effective, grantId)).policy : null;
     },
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
   ) : undefined;
