@@ -553,6 +553,8 @@ test("Artifacts is a dedicated primary destination while Chat keeps only recent 
   assert.match(artifactScreen, /Load more/);
   assert.match(artifactScreen, /onOpenConversation\(artifact\.conversationId\)/);
   assert.match(artifactScreen, /chatApi\.artifactUrl/);
+  assert.match(styles, /\.artifacts-screen\s*\{[^}]*display:\s*grid;[^}]*gap:\s*24px;/s);
+  assert.match(styles, /\.artifact-list\s*\{\s*display:\s*grid;\s*\}/s);
   assert.match(chatScreen, /Saved from \{sourceWorkspaceName/);
   assert.match(chatScreen, /Continue with \{agent\.displayName\}/);
   assert.match(chatScreen, /selected workspace model does not support image input/);

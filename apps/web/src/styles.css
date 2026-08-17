@@ -7497,7 +7497,7 @@ a.chat-file-part:hover {
 .sites-empty { min-height: 280px; }
 
 /* Durable artifact library */
-.artifacts-screen { gap: 24px; }
+.artifacts-screen { display: grid; gap: 24px; }
 .artifacts-heading > div { display: grid; gap: 4px; }
 .artifact-search { display: flex; align-items: center; gap: 10px; }
 .artifact-search > div { display: grid; min-width: min(520px, 100%); grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border: 1px solid #cfd6df; border-radius: 8px; background: #fff; }
@@ -7506,7 +7506,7 @@ a.chat-file-part:hover {
 .artifact-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; }
 .artifact-search .secondary-button { width: auto; min-width: 86px; }
 .artifact-search .text-button { margin: 0; }
-.artifact-list { display: grid; border-top: 1px solid #dfe4e9; }
+.artifact-list { display: grid; }
 .artifact-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 19px 4px; border-bottom: 1px solid #dfe4e9; }
 .artifact-row-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 9px; background: #f0f4f8; color: #244a7c; }
 .artifact-row-icon svg { width: 22px; height: 22px; }
