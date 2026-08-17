@@ -5864,9 +5864,6 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     artifactStore = new FilesystemArtifactStore(env.ARTIFACT_FILESYSTEM_ROOT);
   } else {
     if (!env.ARTIFACT_S3_BUCKET || !env.ARTIFACT_S3_REGION) throw new Error("S3 artifact storage requires bucket and region");
-    if (env.LEMMACOMPUTER_INSTALLATION_KIND === "hosted" && !env.ARTIFACT_S3_KMS_KEY_ID) {
-      throw new Error("Hosted S3 artifact storage requires an explicit KMS key ID");
-    }
     artifactStore = new S3ArtifactStore({
       bucket: env.ARTIFACT_S3_BUCKET,
       region: env.ARTIFACT_S3_REGION,

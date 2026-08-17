@@ -22,7 +22,9 @@ The first command starts its own temporary MinIO container. The ordinary worktre
 - `LEMMACOMPUTER_ARTIFACT_STORE_BACKEND`: `filesystem` or `s3`.
 - `LEMMACOMPUTER_ARTIFACT_FILESYSTEM_ROOT`: absolute Control-owned filesystem root.
 - `LEMMACOMPUTER_ARTIFACT_S3_BUCKET` and `LEMMACOMPUTER_ARTIFACT_S3_REGION`: S3 destination.
-- `LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID`: required for hosted deployments.
+- `LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID`: optional SSE-KMS override. When blank, Control explicitly requests SSE-S3 (`AES256`) for every staged and finalized object.
 - `LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT` and `LEMMACOMPUTER_ARTIFACT_S3_FORCE_PATH_STYLE`: local S3-compatible qualification only; a hosted custom endpoint is rejected.
+
+Bucket and region values are inert while `LEMMACOMPUTER_ARTIFACT_STORE_BACKEND=filesystem`, so an operator may record the hosted destination in a local environment without switching the local artifact store. On the hosted Control deployment, set the backend to `s3`; AWS SDK credential resolution then uses the EC2 instance role or other workload identity without static access keys in `.env`.
 
 Do not grant workspace nodes direct bucket credentials. Nodes return bounded artifact bytes to Control, and Control verifies persisted node placement and generation before committing them.

@@ -245,7 +245,7 @@ export class S3ArtifactStore implements ArtifactStore {
   private encryption() {
     return this.options.kmsKeyId
       ? { ServerSideEncryption: "aws:kms" as const, SSEKMSKeyId: this.options.kmsKeyId }
-      : {};
+      : { ServerSideEncryption: "AES256" as const };
   }
 
   async stage(input: StageArtifactInput) {

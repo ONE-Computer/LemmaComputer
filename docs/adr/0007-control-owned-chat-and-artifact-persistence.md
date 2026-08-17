@@ -25,9 +25,9 @@ Artifact ingestion is stage, verify, finalize, then metadata commit. Before obje
 ## Security and operations
 
 - Every customer-owned row carries `tenant_id`; user reads also require the owning subject.
-- Hosted storage requires S3 and an explicit KMS key. A custom S3 endpoint is rejected in hosted configuration.
+- Hosted storage requires S3 with explicit server-side encryption on every write: SSE-S3 by default or SSE-KMS when a KMS key ID is configured. A custom S3 endpoint is rejected in hosted configuration.
 - Filesystem storage rejects traversal and symlink targets, opens files without following symlinks, and atomically finalizes staged files.
-- S3 writes carry checksum metadata and use server-side KMS encryption when configured.
+- S3 writes carry checksum metadata and explicitly use SSE-S3, or SSE-KMS when configured.
 - Retention state is explicit (`saved`, `temporary`, `legal_hold`, `export`, `staged_delete`, or `purged`). This change creates the lifecycle boundary but does not invent a legal retention duration.
 - PostgreSQL and the artifact store must be backed up and restored to a mutually consistent point. Restored metadata without matching bytes, or bytes without committed metadata, fails closed.
 
@@ -37,4 +37,4 @@ There is no legacy importer and no dual-write period. Existing `structured-sessi
 
 ## Qualification
 
-Run `npm run qualify:artifact-store`. It exercises a temporary filesystem root and a disposable, digest-pinned MinIO container with a unique bucket; it does not need AWS credentials or a shared test bucket. Hosted production qualification must separately prove the real bucket policy, KMS permissions, backup/restore, lifecycle, and alarms.
+Run `npm run qualify:artifact-store`. It exercises a temporary filesystem root and a disposable, digest-pinned MinIO container with a unique bucket; it does not need AWS credentials or a shared test bucket. Hosted production qualification must separately prove the real bucket policy, workload-role permissions, configured server-side encryption, backup/restore, lifecycle, and alarms.

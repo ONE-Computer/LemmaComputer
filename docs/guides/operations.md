@@ -866,12 +866,14 @@ reference worktree and customer-managed stack mounts the separate
 a workspace home and must be included in backup and restore operations.
 
 Hosted deployments must set `LEMMACOMPUTER_ARTIFACT_STORE_BACKEND=s3` plus the
-bucket, region, and KMS key settings documented in
+bucket and region settings documented in
 [Durable chat and artifacts](../product/durable-chat-and-artifacts.md). Grant
-bucket access only to Control. Coordinate PostgreSQL and object-store recovery,
-monitor failed/stale staging uploads, and prove restore integrity before
-release. `npm run qualify:artifact-store` is the local adapter check, not hosted
-cloud qualification.
+bucket access only to Control. Control explicitly requests SSE-S3 (`AES256`)
+unless `LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID` selects SSE-KMS. In AWS, prefer
+an EC2 instance role or task role over static credentials. Coordinate PostgreSQL
+and object-store recovery, monitor failed/stale staging uploads, and prove
+restore integrity before release. `npm run qualify:artifact-store` is the local
+adapter check, not hosted cloud qualification.
 
 Control records the intended final object locator before promotion. Its staging
 reconciler marks an expired upload abandoned only after both the staging object

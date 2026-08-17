@@ -78,7 +78,7 @@ const sections = [
     variable("LEMMACOMPUTER_ARTIFACT_S3_REGION", "", "Artifact bucket AWS region.", { optional: true, requiredWhen: "The s3 backend is selected." }),
     variable("LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT", "", "Optional S3-compatible endpoint used by local qualification only.", { kind: "url", optional: true }),
     variable("LEMMACOMPUTER_ARTIFACT_S3_FORCE_PATH_STYLE", "false", "Use path-style S3 addressing for local S3-compatible qualification.", { kind: "boolean" }),
-    variable("LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID", "", "KMS key ID used for hosted artifact object encryption.", { optional: true, requiredWhen: "The hosted profile is selected." }),
+    variable("LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID", "", "Optional KMS key ID for SSE-KMS artifact encryption; when blank, S3 writes use SSE-S3 (AES256).", { optional: true }),
   ]),
   section("Generated service, encryption, and internal-authentication secrets", "npm run env:init replaces every generated-by-env-init value with a distinct local secret. Production secrets belong in a secret manager.", [
     variable("LEMMACOMPUTER_WEB_PROXY_TOKEN", generated, "Web-to-Control proxy bearer token.", { secret: true, generated: "random" }),
@@ -487,7 +487,6 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   }
   if (values.LEMMACOMPUTER_INSTALLATION_KIND === "hosted") {
     if (values.LEMMACOMPUTER_ARTIFACT_STORE_BACKEND !== "s3") errors.push("Hosted deployments require s3 artifact storage");
-    if (!hasValue(values.LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID)) errors.push("Hosted artifact storage requires an explicit KMS key ID");
     if (hasValue(values.LEMMACOMPUTER_ARTIFACT_S3_ENDPOINT)) errors.push("Hosted artifact storage must use the AWS S3 regional endpoint");
   }
   if (values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT === "postmark") {

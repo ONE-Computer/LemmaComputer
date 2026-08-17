@@ -250,6 +250,15 @@ test("a complete hosted configuration passes the shared profile validation", () 
   }));
 });
 
+test("hosted artifact storage accepts SSE-S3 without a KMS key override", () => {
+  const values = validHostedEnvironment();
+  values.LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID = "";
+  assert.doesNotThrow(() => validateDeploymentEnvironment(values, {
+    profile: "hosted",
+    strict: true,
+  }));
+});
+
 test("hosted Cowork projects KVM only with the required remote node topology", () => {
   const values = validHostedEnvironment();
   const services = projectServiceEnvironment(values);

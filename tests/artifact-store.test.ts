@@ -77,7 +77,7 @@ test("FilesystemArtifactStore rejects symlinks in every locator directory", asyn
   }
 });
 
-test("S3ArtifactStore performs staged copy with checksum metadata and KMS", async () => {
+test("S3ArtifactStore performs staged copy with checksum metadata and explicit server-side encryption", async () => {
   const objects = new Map<string, Buffer>();
   const inputs: Array<Record<string, unknown>> = [];
   const client = {
@@ -108,9 +108,15 @@ test("S3ArtifactStore performs staged copy with checksum metadata and KMS", asyn
     },
   };
   await exercise(new S3ArtifactStore({ bucket: "artifacts", region: "ap-southeast-1", kmsKeyId: "alias/artifacts", client: client as never }));
-  const writes = inputs.filter((input) => input.command === "PutObjectCommand" || input.command === "CopyObjectCommand");
+  let writes = inputs.filter((input) => input.command === "PutObjectCommand" || input.command === "CopyObjectCommand");
   assert.equal(writes.every((input) => input.ServerSideEncryption === "aws:kms" && input.SSEKMSKeyId === "alias/artifacts"), true);
   assert.equal(inputs.some((input) => input.command === "PutObjectCommand" && input.ChecksumSHA256 === Buffer.from(sha256, "hex").toString("base64")), true);
+
+  objects.clear();
+  inputs.length = 0;
+  await exercise(new S3ArtifactStore({ bucket: "artifacts", region: "ap-southeast-1", client: client as never }));
+  writes = inputs.filter((input) => input.command === "PutObjectCommand" || input.command === "CopyObjectCommand");
+  assert.equal(writes.every((input) => input.ServerSideEncryption === "AES256" && input.SSEKMSKeyId === undefined), true);
 });
 
 test("expired finalizing uploads remain retryable until staging and promoted bytes are both deleted", async () => {
