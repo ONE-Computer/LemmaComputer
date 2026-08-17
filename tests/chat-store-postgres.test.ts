@@ -150,6 +150,8 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
     assert.equal(archivedArtifacts.artifacts.length, 1);
     assert.equal(archivedArtifacts.artifacts[0].artifact.id, artifactId);
     assert.ok(archivedArtifacts.artifacts[0].workspaceDeletedAt instanceof Date);
+    assert.equal((await chats.listOwnedArtifacts(identity, { limit: 20, query: "REPORT.XLSX" })).artifacts.length, 1);
+    assert.equal((await chats.listOwnedArtifacts(identity, { limit: 20, query: "missing" })).artifacts.length, 0);
 
     const recreated = await workspaces.createOrGet(identity, `grant-${suffix}`, randomUUID());
     assert.equal(recreated.id, workspace.id, "recreating the same logical workspace revives its durable history");

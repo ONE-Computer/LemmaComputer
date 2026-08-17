@@ -177,7 +177,8 @@ export class MemoryChatStore implements ChatStore {
     const values = [...this.artifacts.values()]
       .filter((saved) => saved.artifact.tenantId === identity.tenantId
         && saved.artifact.creatorSubjectId === identity.subjectId
-        && saved.artifact.state === "available")
+        && saved.artifact.state === "available"
+        && (!input.query || saved.artifact.displayName.toLocaleLowerCase().includes(input.query.trim().toLocaleLowerCase())))
       .sort((left, right) => right.artifact.updatedAt.getTime() - left.artifact.updatedAt.getTime());
     const start = input.cursor
       ? Math.max(0, values.findIndex((saved) => saved.artifact.id === input.cursor) + 1)

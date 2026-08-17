@@ -97,6 +97,7 @@ const navByView = Object.freeze({
   home: "Workspace",
   schedules: "Schedules",
   sites: "Sites",
+  artifacts: "Artifacts",
   chat: "Chat",
   trail: "Trail",
   firewall: "Network access",
@@ -827,6 +828,111 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
         </div>
       </article>)}
     </section>}
+  </div>;
+}
+
+const artifactTypeLabel = (mediaType) => ({
+  "application/pdf": "PDF",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "Excel workbook",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint presentation",
+  "text/markdown": "Markdown",
+  "text/csv": "CSV",
+  "text/plain": "Text document",
+  "application/json": "JSON",
+}[mediaType] ?? mediaType.split("/").at(-1)?.replaceAll(/[.+-]/g, " ") ?? "File");
+
+function ArtifactsScreen({ onOpenConversation }) {
+  const [artifacts, setArtifacts] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    chatApi.libraryArtifacts({ limit: 25, query })
+      .then((page) => {
+        if (!active) return;
+        setArtifacts(page.artifacts ?? []);
+        setNextCursor(page.nextCursor ?? null);
+      })
+      .catch((requestError) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [query]);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await chatApi.libraryArtifacts({ cursor: nextCursor, limit: 25, query });
+      setArtifacts((current) => [
+        ...current,
+        ...(page.artifacts ?? []).filter((artifact) => !current.some((item) => item.id === artifact.id)),
+      ]);
+      setNextCursor(page.nextCursor ?? null);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const submitSearch = (event) => {
+    event.preventDefault();
+    setQuery(search.trim());
+  };
+
+  return <div className="secondary-screen artifacts-screen">
+    <header className="page-heading artifacts-heading">
+      <div><p>Your work</p><h1>Artifacts</h1><span>Find files created across your conversations and workspaces.</span></div>
+    </header>
+    <form className="artifact-search" role="search" onSubmit={submitSearch}>
+      <label className="sr-only" htmlFor="artifact-search-input">Search artifacts</label>
+      <div><Search24Regular aria-hidden="true" /><input id="artifact-search-input" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by filename" maxLength="120" /></div>
+      <button className="secondary-button" type="submit">Search</button>
+      {query && <button className="text-button" type="button" onClick={() => { setSearch(""); setQuery(""); }}>Clear</button>}
+    </form>
+    {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Artifacts unavailable</strong>{error}</span></div>}
+    {loading ? <div className="workspace-overview-empty" role="status">Loading artifacts…</div> : artifacts.length === 0 ? (
+      <section className="workspace-overview-empty artifacts-empty">
+        <Document24Regular aria-hidden="true" />
+        <div><h2>{query ? "No matching artifacts" : "No artifacts yet"}</h2><p>{query ? "Try another filename." : "Files created by your workspace agents will appear here."}</p></div>
+      </section>
+    ) : <>
+      <section className="artifact-list" aria-label="Your artifacts">
+        {artifacts.map((artifact) => <article className="artifact-row" key={`${artifact.id}:${artifact.revisionId}`}>
+          <span className="artifact-row-icon"><Document24Regular aria-hidden="true" /></span>
+          <div className="artifact-row-copy">
+            <div className="artifact-row-heading">
+              <h2>{artifact.displayName}</h2>
+              {artifact.workspaceDeleted && <span className="artifact-archived-state">Saved</span>}
+            </div>
+            <div className="artifact-row-meta">
+              <span>{artifactTypeLabel(artifact.mediaType)}</span>
+              <span>{attachmentSize(artifact.byteLength)}</span>
+              <span>{siteUpdatedAt(artifact.createdAt)}</span>
+              <span>{protectedPolicyAgentNames[artifact.agentCatalogId] || artifact.agentCatalogId}</span>
+              <span>{workspaceName({ grantId: artifact.workspaceGrantId })}</span>
+            </div>
+            <div className="artifact-source">
+              <span>From</span>
+              <button type="button" onClick={() => onOpenConversation(artifact.conversationId)}>{artifact.conversationTitle || "Untitled conversation"}</button>
+            </div>
+          </div>
+          <a className="primary-button compact-button artifact-download" href={chatApi.artifactUrl(artifact.id, artifact.revisionId)} download>
+            Download<span className="sr-only"> {artifact.displayName}</span>
+          </a>
+        </article>)}
+      </section>
+      {nextCursor && <button className="secondary-button artifact-load-more" type="button" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "Loading more…" : "Load more"}</button>}
+    </>}
   </div>;
 }
 
@@ -5226,7 +5332,6 @@ export function ChatScreen({
   onLoadOlder,
   newThreadRequest = 0,
   onRunningSessionIdsChange,
-  onArtifactsChange,
 }) {
   const [agents, setAgents] = useState([]);
   const [serviceClassAvailability, setServiceClassAvailability] = useState([]);
@@ -5354,9 +5459,6 @@ export function ChatScreen({
     setThreadServiceClasses({});
     setThreadReasoningEfforts({});
     void loadSessionPage();
-    chatApi.libraryArtifacts({ limit: 20 })
-      .then((page) => { if (active) onArtifactsChange?.(page.artifacts ?? []); })
-      .catch(() => { if (active) onArtifactsChange?.([]); });
     if (!workspace) {
       setStatus("offline");
       setReasonCode("WORKSPACE_NOT_READY");
@@ -5745,7 +5847,6 @@ export function App() {
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState(settingsViewFromLocation);
   const [chatSessions, setChatSessions] = useState([]);
-  const [chatArtifacts, setChatArtifacts] = useState([]);
   const [aiControlPlaneView, setAiControlPlaneView] = useState(aiControlPlaneViewFromLocation);
   const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
   const [chatAgentPreferences, setChatAgentPreferences] = useState({});
@@ -7171,6 +7272,13 @@ export function App() {
     }
   };
 
+  const openArtifactConversation = (sessionId) => {
+    setActiveNav("Chat");
+    selectChatSession(sessionId);
+    setMobileNavOpen(false);
+    window.requestAnimationFrame(() => mainContentRef.current?.focus());
+  };
+
   const requestNewChat = () => {
     setNewChatRequest((current) => current + 1);
     selectChatSession("");
@@ -7678,6 +7786,7 @@ export function App() {
           <NavButton active={activeNav === "Workspace"} icon={activeNav === "Workspace" ? Home24Filled : Home24Regular} label="Workspace" onClick={() => selectNav("Workspace")} />
           <NavButton active={activeNav === "Schedules"} icon={Calendar24Regular} label="Schedules" onClick={() => selectNav("Schedules")} />
           <NavButton active={activeNav === "Sites"} icon={activeNav === "Sites" ? Apps24Filled : Apps24Regular} label="Sites" onClick={() => selectNav("Sites")} />
+          <NavButton active={activeNav === "Artifacts"} icon={Document24Regular} label="Artifacts" onClick={() => selectNav("Artifacts")} />
           <NavButton active={activeNav === "Trail"} icon={Clock24Regular} label="Trail" onClick={() => selectNav("Trail")} />
           {canManageNetworkAccess && <NavButton active={activeNav === "Network access"} icon={ShieldCheckmark24Regular} label="Network access" onClick={() => selectNav("Network access")} />}
           <NavButton active={activeNav === "Connectors"} icon={PlugConnected24Regular} label="Connectors" onClick={() => selectNav("Connectors")} />
@@ -7691,15 +7800,6 @@ export function App() {
                 {runningChatSessionIds.includes(item.id) && <span className="sidebar-chat-running" aria-hidden="true" />}
               </button>)}
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}
-            <div className="sidebar-chat-history-heading sidebar-artifact-heading"><span>Saved files</span></div>
-            {chatArtifacts.length === 0
-              ? <p>No saved files</p>
-              : <div className="sidebar-artifact-list" aria-label="Saved files">{chatArtifacts.map((artifact) => (
-                <a key={`${artifact.id}:${artifact.revisionId}`} href={chatApi.artifactUrl(artifact.id, artifact.revisionId)} download>
-                  <Document24Regular aria-hidden="true" />
-                  <span>{artifact.displayName}<small>{workspaceName({ grantId: artifact.workspaceGrantId })}</small></span>
-                </a>
-              ))}</div>}
           </div>}
         </nav>
         <div ref={profileRef} className="sidebar-account">
@@ -7790,6 +7890,7 @@ export function App() {
           busySiteId={siteBusyId}
           onDelete={deleteSite}
         />}
+        {activeNav === "Artifacts" && <ArtifactsScreen onOpenConversation={openArtifactConversation} />}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} canReadToolAudit={canReadAudit} users={adminUsers} workspaceMembers={adminWorkspaceMembers} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}
         {activeNav === "Schedules" && <SchedulesScreen
           schedules={schedules}
@@ -7820,7 +7921,6 @@ export function App() {
           historyLoadRequest={chatHistoryLoadRequest}
           newThreadRequest={newChatRequest}
           onRunningSessionIdsChange={setRunningChatSessionIds}
-          onArtifactsChange={setChatArtifacts}
           onHistoryMetadataChange={({ hasMore, loading }) => {
             setChatHistoryHasMore(hasMore);
             setChatHistoryLoadingMore(loading);

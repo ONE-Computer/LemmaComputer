@@ -297,6 +297,7 @@ export interface ChatStore {
   listOwnedArtifacts(identity: IdentityContext, input: {
     limit: number;
     cursor?: string;
+    query?: string;
   }): Promise<ArtifactLibraryPage>;
   listExpiredStaging(now: Date, limit: number): Promise<ArtifactStagingRecord[]>;
   abandonStaging(tenantId: string, uploadId: string): Promise<boolean>;
@@ -730,13 +731,15 @@ export class PostgresChatStore implements ChatStore {
     };
   }
 
-  async listOwnedArtifacts(identity: IdentityContext, input: { limit: number; cursor?: string }) {
+  async listOwnedArtifacts(identity: IdentityContext, input: { limit: number; cursor?: string; query?: string }) {
+    const query = input.query?.trim() || null;
     let before: { updatedAt: Date; id: string } | undefined;
     if (input.cursor) {
       const cursor = await this.pool.query(
         `SELECT updated_at,id FROM artifacts
-         WHERE tenant_id=$1 AND creator_subject_id=$2 AND id=$3 AND state='available'`,
-        [identity.tenantId, identity.subjectId, input.cursor],
+         WHERE tenant_id=$1 AND creator_subject_id=$2 AND id=$3 AND state='available'
+           AND ($4::text IS NULL OR position(lower($4) in lower(display_name))>0)`,
+        [identity.tenantId, identity.subjectId, input.cursor, query],
       );
       if (!cursor.rowCount) throw new LemmaComputerError("ARTIFACT_CURSOR_INVALID", "Artifact cursor not found", 400);
       before = { updatedAt: new Date(String(cursor.rows[0].updated_at)), id: String(cursor.rows[0].id) };
@@ -759,8 +762,9 @@ export class PostgresChatStore implements ChatStore {
        WHERE artifact.tenant_id=$1 AND artifact.creator_subject_id=$2 AND artifact.state='available'
          AND conversation.state='active'
          AND ($3::timestamptz IS NULL OR (artifact.updated_at,artifact.id)<($3,$4))
-       ORDER BY artifact.updated_at DESC,artifact.id DESC LIMIT $5`,
-      [identity.tenantId, identity.subjectId, before?.updatedAt ?? null, before?.id ?? null, input.limit + 1],
+         AND ($5::text IS NULL OR position(lower($5) in lower(artifact.display_name))>0)
+       ORDER BY artifact.updated_at DESC,artifact.id DESC LIMIT $6`,
+      [identity.tenantId, identity.subjectId, before?.updatedAt ?? null, before?.id ?? null, query, input.limit + 1],
     );
     const values = result.rows.map((row) => ({
       artifact: artifact(row),

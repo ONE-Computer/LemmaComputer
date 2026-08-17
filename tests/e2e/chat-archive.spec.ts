@@ -12,9 +12,7 @@ test("opens chats and artifacts from a deleted workspace and forks continuation 
   await page.goto("/?view=chat");
 
   await expect(page.getByRole("button", { name: /Project handover.*Saved from Project Workspace/ })).toBeVisible();
-  const savedFile = page.getByRole("link", { name: /project-handover\.md.*Project Workspace/ });
-  await expect(savedFile).toBeVisible();
-  await expect(savedFile).toHaveAttribute("href", /\/api\/v1\/chat\/artifacts\/artifact-1111.*revision=revision-1111/);
+  await expect(page.getByText("Saved files", { exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: /Project handover/ }).click();
   await expect(page.getByText("The project handover is saved.")).toBeVisible();

@@ -12,7 +12,7 @@ To continue from an earlier response in another workspace or with a different ag
 
 Workspace runtime deletion and durable-content retention are separate decisions. The delete dialog preserves chats and artifacts by default. If the user instead chooses to delete content, Control marks eligible conversations and artifacts for retention-controlled deletion; it does not synchronously erase canonical records or object bytes. Legal holds, exports, and artifacts referenced by protected or other-workspace conversations remain protected.
 
-Deleting a workspace tombstones its logical record after its runtime, home, routes, and schedules are removed. Preserved conversations and artifacts remain visible in Chat immediately. Recreating the same workspace grant revives that record with the same opaque workspace ID, while continuing in a different current workspace creates an explicit fork of normalized history. Neither path restores vendor-native session state.
+Deleting a workspace tombstones its logical record after its runtime, home, routes, and schedules are removed. Preserved conversations remain visible in Chat, while preserved files remain available from the top-level Artifacts library without starting a workspace. Recreating the same workspace grant revives that record with the same opaque workspace ID, while continuing in a different current workspace creates an explicit fork of normalized history. Neither path restores vendor-native session state.
 
 Physical purge, retention windows, and user-visible deletion status remain part of the retention lifecycle rather than workspace runtime deletion.
 

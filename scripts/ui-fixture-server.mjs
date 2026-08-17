@@ -1100,7 +1100,6 @@ const responses = new Map([
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
   ["GET /v1/chat/sessions", { sessions: [chatSession, archivedChatSession], nextCursor: null }],
-  ["GET /v1/chat/artifacts", { artifacts: [archivedArtifact], nextCursor: null }],
   [`GET /v1/chat/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
   [`GET /v1/chat/sessions/${archivedChatSession.id}/messages`, { messages: archivedChatMessages }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, serviceClassOptions: [{ value: "lite", available: true, reasonCode: "ready" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: true, reasonCode: "ready" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
@@ -1130,6 +1129,12 @@ const server = http.createServer((request, response) => {
   const key = `${request.method} ${url.pathname}`;
   response.setHeader("content-type", "application/json");
   response.setHeader("cache-control", "no-store");
+  if (key === "GET /v1/chat/artifacts") {
+    const query = url.searchParams.get("query")?.trim().toLocaleLowerCase() ?? "";
+    const artifacts = [archivedArtifact].filter((artifact) => !query || artifact.displayName.toLocaleLowerCase().includes(query));
+    response.end(JSON.stringify({ artifacts, nextCursor: null }));
+    return;
+  }
   if (key === "GET /v1/admin/tool-audit") {
     const outcome = url.searchParams.get("outcome");
     const subjectId = url.searchParams.get("subjectId");

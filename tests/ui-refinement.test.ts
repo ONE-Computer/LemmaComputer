@@ -516,13 +516,16 @@ test("Help is retired from navigation and routing", async () => {
   assert.doesNotMatch(app, /label="Help"/);
 });
 
-test("Chat is last in navigation, with recent threads in the sidebar and a focused composer", async () => {
+test("Artifacts is a dedicated primary destination while Chat keeps only recent threads in its sidebar", async () => {
   const [app, styles] = await Promise.all([
     source("apps/web/src/App.jsx"),
     source("apps/web/src/styles.css"),
   ]);
   const primaryNav = app.slice(app.indexOf('<nav aria-label="Primary navigation">'), app.indexOf("</nav>", app.indexOf('<nav aria-label="Primary navigation">')));
   const chatScreen = app.slice(app.indexOf("function ChatConversation"), app.indexOf("export function App"));
+  const artifactScreen = app.slice(app.indexOf("function ArtifactsScreen"), app.indexOf("function SignInScreen"));
+  assert.ok(primaryNav.indexOf('label="Artifacts"') > primaryNav.indexOf('label="Sites"'));
+  assert.ok(primaryNav.indexOf('label="Artifacts"') < primaryNav.indexOf('label="Chat"'));
   assert.ok(primaryNav.indexOf('label="Chat"') > primaryNav.indexOf('label="Connectors"'));
   assert.match(primaryNav, /sidebar-chat-history/);
   assert.match(primaryNav, /Recent chat threads/);
@@ -542,7 +545,14 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.match(chatScreen, /onPaste=/);
   assert.match(chatScreen, /item\.type\.startsWith\("image\/"\)/);
   assert.match(chatScreen, /workspace\?\.modelRoute\?\.capabilities\?\.vision === true/);
-  assert.match(primaryNav, /Saved files/);
+  assert.doesNotMatch(primaryNav, /Saved files/);
+  assert.doesNotMatch(primaryNav, /sidebar-artifact-list/);
+  assert.match(artifactScreen, /<h1>Artifacts<\/h1>/);
+  assert.match(artifactScreen, /role="search"/);
+  assert.match(artifactScreen, /Search by filename/);
+  assert.match(artifactScreen, /Load more/);
+  assert.match(artifactScreen, /onOpenConversation\(artifact\.conversationId\)/);
+  assert.match(artifactScreen, /chatApi\.artifactUrl/);
   assert.match(chatScreen, /Saved from \{sourceWorkspaceName/);
   assert.match(chatScreen, /Continue with \{agent\.displayName\}/);
   assert.match(chatScreen, /selected workspace model does not support image input/);

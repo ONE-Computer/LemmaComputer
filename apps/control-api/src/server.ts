@@ -5328,13 +5328,14 @@ export function createControlServer(
     );
     return reply.header("cache-control", "no-store").send({ messages });
   });
-  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/chat/artifacts", async (request, reply) => {
+  app.get<{ Querystring: { cursor?: string; limit?: string; query?: string } }>("/v1/chat/artifacts", async (request, reply) => {
     const owner = identity(request);
     const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
+    const query = z.string().trim().max(120).catch("").parse(request.query.query);
     const cursor = request.query.cursor
       ? z.string().regex(/^artifact-[a-f0-9]{32}$/).parse(request.query.cursor)
       : undefined;
-    const page = await requireDurableChat().store.listOwnedArtifacts(owner, { cursor, limit });
+    const page = await requireDurableChat().store.listOwnedArtifacts(owner, { cursor, limit, query });
     return reply.header("cache-control", "no-store").send({
       artifacts: page.artifacts.map((saved) => ({
         id: saved.artifact.id,

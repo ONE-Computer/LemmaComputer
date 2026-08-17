@@ -280,53 +280,6 @@ textarea:focus-visible,
   opacity: .7;
 }
 
-.sidebar-artifact-heading {
-  margin-top: 8px;
-  border-top: 1px solid #dedcd7;
-  padding-top: 8px;
-}
-
-.sidebar-artifact-list {
-  display: grid;
-  gap: 2px;
-}
-
-.sidebar-artifact-list a {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 5px 10px;
-  border-radius: 8px;
-  color: #313741;
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.sidebar-artifact-list a:hover {
-  background: #e9e8e4;
-  color: var(--navy);
-}
-
-.sidebar-artifact-list svg {
-  width: 18px;
-  height: 18px;
-}
-
-.sidebar-artifact-list span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-artifact-list small {
-  display: block;
-  color: #7a8797;
-  font-size: 10px;
-}
-
 .sidebar-profile {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 14px;
@@ -7542,6 +7495,34 @@ a.chat-file-part:hover {
 .site-row-actions .primary-button { width: auto; min-width: 92px; text-decoration: none; }
 .site-row-actions .text-button { margin-top: 0; }
 .sites-empty { min-height: 280px; }
+
+/* Durable artifact library */
+.artifacts-screen { gap: 24px; }
+.artifacts-heading > div { display: grid; gap: 4px; }
+.artifact-search { display: flex; align-items: center; gap: 10px; }
+.artifact-search > div { display: grid; min-width: min(520px, 100%); grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border: 1px solid #cfd6df; border-radius: 8px; background: #fff; }
+.artifact-search > div:focus-within { border-color: #315b96; box-shadow: 0 0 0 3px rgb(49 91 150 / 14%); }
+.artifact-search svg { width: 20px; height: 20px; color: #687482; }
+.artifact-search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; }
+.artifact-search .secondary-button { width: auto; min-width: 86px; }
+.artifact-search .text-button { margin: 0; }
+.artifact-list { display: grid; border-top: 1px solid #dfe4e9; }
+.artifact-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 19px 4px; border-bottom: 1px solid #dfe4e9; }
+.artifact-row-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 9px; background: #f0f4f8; color: #244a7c; }
+.artifact-row-icon svg { width: 22px; height: 22px; }
+.artifact-row-copy { display: grid; gap: 7px; min-width: 0; }
+.artifact-row-heading { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.artifact-row-heading h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--navy); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-archived-state { padding: 3px 7px; border-radius: 999px; background: #eef2f6; color: #526171; font-size: 11px; font-weight: 700; }
+.artifact-row-meta { display: flex; flex-wrap: wrap; align-items: center; color: #6f7984; font-size: 12px; }
+.artifact-row-meta > span + span::before { content: "·"; margin: 0 7px; color: #a2a9b0; }
+.artifact-source { display: flex; min-width: 0; align-items: center; gap: 6px; color: #76808b; font-size: 12px; }
+.artifact-source button { min-width: 0; padding: 0; overflow: hidden; border: 0; background: transparent; color: #24558e; cursor: pointer; font: inherit; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-source button:hover { text-decoration: underline; }
+.artifact-download { width: auto; min-width: 108px; text-decoration: none; }
+.artifact-load-more { width: auto; min-width: 120px; justify-self: center; }
+.artifacts-empty { min-height: 280px; }
+.artifacts-empty > svg { width: 48px; height: 48px; color: #7a8793; }
 .chat-welcome-skills { width: min(520px, 100%); margin-top: 18px; }
 .chat-welcome-skills > button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 15px; border: 1px solid #dde3ea; border-radius: 12px; color: var(--navy); background: #fff; text-align: left; cursor: pointer; }
 .chat-welcome-skills > button:hover { border-color: #aebdce; background: #f8fafc; }
@@ -7560,6 +7541,10 @@ a.chat-file-part:hover {
   .firewall-editor-advanced > div { grid-template-columns: 1fr; }
   .site-row { grid-template-columns: 1fr; gap: 16px; padding: 18px 2px; }
   .site-row-actions { justify-content: flex-start; }
+  .artifact-search { align-items: stretch; flex-wrap: wrap; }
+  .artifact-search > div { min-width: 100%; }
+  .artifact-row { grid-template-columns: 40px minmax(0, 1fr); align-items: start; }
+  .artifact-download { grid-column: 2; justify-self: start; }
 }
 
 .routing-admin-screen { gap: 22px; }

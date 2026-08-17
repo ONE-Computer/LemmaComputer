@@ -136,10 +136,11 @@ export const chatApi = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/v1/chat/sessions?${query}`);
   },
-  libraryArtifacts: ({ cursor, limit = 20 }: { cursor?: string; limit?: number } = {}) => {
-    const query = new URLSearchParams({ limit: String(limit) });
-    if (cursor) query.set("cursor", cursor);
-    return request(`/api/v1/chat/artifacts?${query}`);
+  libraryArtifacts: ({ cursor, limit = 20, query = "" }: { cursor?: string; limit?: number; query?: string } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set("cursor", cursor);
+    if (query) params.set("query", query);
+    return request(`/api/v1/chat/artifacts?${params}`);
   },
   createSession: (workspaceId: string, catalogId: string, title?: string, requestedServiceClass = "balanced", reasoningEffort?: string) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,

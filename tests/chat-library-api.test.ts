@@ -42,6 +42,43 @@ test("the account chat library exposes owned transcripts without leaking them to
     },
     parts: [{ type: "text", text: "Keep this handover." }],
   });
+  const artifactId = "artifact-11111111111111111111111111111111";
+  const revisionId = "revision-11111111111111111111111111111111";
+  await chats.createArtifactStaging({
+    id: "upload-11111111111111111111111111111111",
+    tenantId: owner.tenantId,
+    workspaceId: conversation.workspaceId,
+    conversationId: conversation.id,
+    ownerSubjectId: owner.subjectId,
+    direction: "output",
+    originalFilename: "handover-notes.md",
+    mediaType: "text/markdown",
+    expectedByteLength: 42,
+    expectedSha256: "a".repeat(64),
+    workspaceNodeId: null,
+    accessGeneration: 1,
+    storageBackend: "filesystem",
+    stagingLocator: "staging/handover-notes.md",
+    artifactId: null,
+    revisionId: null,
+    finalStorageLocator: null,
+    expiresAt: new Date("2026-08-17T00:10:00.000Z"),
+  });
+  await chats.prepareArtifactFinalization({
+    identity: owner,
+    uploadId: "upload-11111111111111111111111111111111",
+    artifactId,
+    revisionId,
+    finalStorageLocator: "artifacts/handover-notes.md",
+  });
+  await chats.commitArtifact({
+    identity: owner,
+    uploadId: "upload-11111111111111111111111111111111",
+    artifactId,
+    revisionId,
+    finalStorageLocator: "artifacts/handover-notes.md",
+    messageId: "message-retained-user",
+  });
 
   const app = createControlServer(
     new MemoryWorkspaceStore(),
@@ -73,9 +110,24 @@ test("the account chat library exposes owned transcripts without leaking them to
     assert.equal(transcript.statusCode, 200, transcript.body);
     assert.equal(transcript.json().messages[0].parts[0].text, "Keep this handover.");
 
+    const artifacts = await app.inject({
+      method: "GET",
+      url: "/v1/chat/artifacts?query=HANDOVER",
+      headers: headers(owner),
+    });
+    assert.equal(artifacts.statusCode, 200, artifacts.body);
+    assert.deepEqual(artifacts.json().artifacts.map((artifact: { id: string; displayName: string }) => ({
+      id: artifact.id,
+      displayName: artifact.displayName,
+    })), [{ id: artifactId, displayName: "handover-notes.md" }]);
+
     const outsiderLibrary = await app.inject({ method: "GET", url: "/v1/chat/sessions", headers: headers(outsider) });
     assert.equal(outsiderLibrary.statusCode, 200, outsiderLibrary.body);
     assert.deepEqual(outsiderLibrary.json().sessions, []);
+
+    const outsiderArtifacts = await app.inject({ method: "GET", url: "/v1/chat/artifacts", headers: headers(outsider) });
+    assert.equal(outsiderArtifacts.statusCode, 200, outsiderArtifacts.body);
+    assert.deepEqual(outsiderArtifacts.json().artifacts, []);
 
     const outsiderTranscript = await app.inject({
       method: "GET",
