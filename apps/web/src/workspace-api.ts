@@ -131,6 +131,16 @@ export const chatApi = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions?${query}`);
   },
+  librarySessions: ({ cursor, limit = 20 }: { cursor?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request(`/api/v1/chat/sessions?${query}`);
+  },
+  libraryArtifacts: ({ cursor, limit = 20 }: { cursor?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request(`/api/v1/chat/artifacts?${query}`);
+  },
   createSession: (workspaceId: string, catalogId: string, title?: string, requestedServiceClass = "balanced", reasoningEffort?: string) => request(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions`,
     mutation("POST", {
@@ -139,8 +149,8 @@ export const chatApi = {
       ...(reasoningEffort ? { reasoningEffort } : {}),
     }),
   ),
-  messages: (workspaceId: string, catalogId: string, sessionId: string) => request(
-    `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/chat/agents/${encodeURIComponent(catalogId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+  messages: (sessionId: string) => request(
+    `/api/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
     { cache: "no-store" },
   ),
   cancelTurn: (workspaceId: string, catalogId: string, sessionId: string) => request(

@@ -56,6 +56,19 @@ export class MemoryChatStore implements ChatStore {
     return { conversations: structuredClone(page), nextCursor: values.length > start + input.limit ? page.at(-1)!.id : null };
   }
 
+  async listOwnedConversations(identity: IdentityContext, input: Parameters<ChatStore["listOwnedConversations"]>[1]) {
+    const values = [...this.conversations.values()]
+      .filter((item) => owns(identity, item) && item.state === "active")
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
+    const start = input.cursor ? Math.max(0, values.findIndex((item) => item.id === input.cursor) + 1) : 0;
+    const page = values.slice(start, start + input.limit).map((item) => ({
+      ...item,
+      workspaceGrantId: item.workspaceId,
+      workspaceDeletedAt: null,
+    }));
+    return { conversations: structuredClone(page), nextCursor: values.length > start + input.limit ? page.at(-1)!.id : null };
+  }
+
   async getConversation(identity: IdentityContext, conversationId: string) {
     const value = this.conversations.get(key(identity.tenantId, conversationId));
     return owns(identity, value) && value?.state === "active" ? structuredClone(value) : null;
@@ -160,6 +173,27 @@ export class MemoryChatStore implements ChatStore {
     return saved && saved.artifact.creatorSubjectId === identity.subjectId
       && (!revisionId || saved.revision.id === revisionId) ? structuredClone(saved) : null;
   }
+  async listOwnedArtifacts(identity: IdentityContext, input: Parameters<ChatStore["listOwnedArtifacts"]>[1]) {
+    const values = [...this.artifacts.values()]
+      .filter((saved) => saved.artifact.tenantId === identity.tenantId
+        && saved.artifact.creatorSubjectId === identity.subjectId
+        && saved.artifact.state === "available")
+      .sort((left, right) => right.artifact.updatedAt.getTime() - left.artifact.updatedAt.getTime());
+    const start = input.cursor
+      ? Math.max(0, values.findIndex((saved) => saved.artifact.id === input.cursor) + 1)
+      : 0;
+    const page = values.slice(start, start + input.limit).map((saved) => ({
+      ...saved,
+      conversationTitle: this.conversations.get(key(identity.tenantId, saved.artifact.conversationId))?.title ?? null,
+      conversationAgentCatalogId: this.conversations.get(key(identity.tenantId, saved.artifact.conversationId))?.defaultAgentCatalogId ?? "hermes-claw" as const,
+      workspaceGrantId: saved.artifact.workspaceId,
+      workspaceDeletedAt: null,
+    }));
+    return {
+      artifacts: structuredClone(page),
+      nextCursor: values.length > start + input.limit ? page.at(-1)!.artifact.id : null,
+    };
+  }
   async listExpiredStaging(now: Date, limit: number) {
     return [...this.staging.values()].filter((item) => ["staged", "finalizing", "failed"].includes(item.state)
       && item.expiresAt <= now).slice(0, limit);
@@ -175,7 +209,7 @@ export class MemoryChatStore implements ChatStore {
     const source = await this.getConversation(input.identity, input.conversationId);
     if (!source) throw new Error("Conversation not found");
     const created = await this.createConversation({
-      identity: input.identity, workspaceId: source.workspaceId, defaultAgentCatalogId: input.defaultAgentCatalogId,
+      identity: input.identity, workspaceId: input.targetWorkspaceId, defaultAgentCatalogId: input.defaultAgentCatalogId,
       title: source.title ?? undefined, requestedServiceClass: input.requestedServiceClass, reasoningEffort: input.reasoningEffort,
     });
     const sourceMessages = await this.listMessages(input.identity, source.id);

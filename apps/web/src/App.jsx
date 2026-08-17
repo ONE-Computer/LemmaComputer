@@ -4633,6 +4633,8 @@ function ChatConversation({
   runtimeAvailable = true,
   availableAgents = [],
   onFork,
+  archived = false,
+  sourceWorkspaceName = "",
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
@@ -4743,7 +4745,7 @@ function ChatConversation({
     setHistoryError("");
     setSelectedActivityTurnId("");
     setMessages([]);
-    chatApi.messages(workspaceId, agentId, sessionId)
+    chatApi.messages(sessionId)
       .then((result) => {
         if (!active) return;
         loadedSessionRef.current = sessionId;
@@ -4765,7 +4767,7 @@ function ChatConversation({
   useEffect(() => {
     if (busy || !sessionId || (!restoredTurnActive && !pendingApprovalKey)) return undefined;
     let active = true;
-    const refresh = () => chatApi.messages(workspaceId, agentId, sessionId)
+    const refresh = () => chatApi.messages(sessionId)
       .then((result) => {
         if (active && sessionRef.current === sessionId) setMessages(result.messages);
       })
@@ -4970,7 +4972,9 @@ function ChatConversation({
         ) : visibleMessages.map((message) => (
           <article className={`chat-message ${message.role}`} key={message.id}>
             <div className="chat-message-heading">
-              <span>{message.role === "assistant" ? agentName : "You"}</span>
+              <span>{message.role === "assistant"
+                ? protectedPolicyAgentNames[message.metadata?.agentCatalogId] || agentName
+                : "You"}</span>
               {message.role === "assistant" && message.metadata?.turnId && (
                 <button
                   type="button"
@@ -4994,7 +4998,7 @@ function ChatConversation({
                 />
               ))}
             </div>
-            {message.role === "assistant" && sessionId && message.metadata?.state !== "streaming" && availableAgents.length > 1 && (
+            {!archived && message.role === "assistant" && sessionId && message.metadata?.state !== "streaming" && availableAgents.length > 1 && (
               <div className="chat-fork-actions" aria-label="Continue this conversation with another agent">
                 <span>Continue from here</span>
                 {availableAgents.filter((agent) => agent.catalogId !== agentId).map((agent) => (
@@ -5027,7 +5031,19 @@ function ChatConversation({
           )}
         </div>
       )}
-      {!runtimeAvailable && <div className="chat-history-offline" role="status">Saved history and files remain available. Start the workspace to continue this conversation.</div>}
+      {archived && visibleMessages.length > 0 && (
+        <div className="chat-history-offline chat-archive-continuation" role="status">
+          <span>Saved from {sourceWorkspaceName || "another workspace"}. Choose an agent to continue as a new conversation in the current workspace.</span>
+          <div>
+            {availableAgents.map((agent) => (
+              <button type="button" className="secondary-button" key={agent.catalogId} onClick={() => onFork?.(visibleMessages.at(-1).id, agent.catalogId)}>
+                Continue with {agent.displayName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {!archived && !runtimeAvailable && <div className="chat-history-offline" role="status">Saved history and files remain available. Start the workspace to continue this conversation.</div>}
       <form className={`chat-composer${companionComposer ? " companion-chat-composer" : ""}`} onSubmit={submit}>
         {attachments.length > 0 && (
           <div className="chat-attachment-list" aria-label="Attachments">
@@ -5210,6 +5226,7 @@ export function ChatScreen({
   onLoadOlder,
   newThreadRequest = 0,
   onRunningSessionIdsChange,
+  onArtifactsChange,
 }) {
   const [agents, setAgents] = useState([]);
   const [serviceClassAvailability, setServiceClassAvailability] = useState([]);
@@ -5261,13 +5278,12 @@ export function ChatScreen({
   };
 
   const loadSessionPage = async (cursor, append = false) => {
-    if (!workspace || !activeAgentId) return;
     if (append) {
       setSessionLoadingMore(true);
       publishHistoryMetadata(sessionNextCursor, true);
     }
     try {
-      const page = await chatApi.sessions(workspace.id, activeAgentId, { cursor });
+      const page = await chatApi.librarySessions({ cursor });
       onSessionsChange((current) => {
         const incoming = page.sessions ?? [];
         if (!append) return incoming;
@@ -5337,6 +5353,10 @@ export function ChatScreen({
     setThreadBusy({});
     setThreadServiceClasses({});
     setThreadReasoningEfforts({});
+    void loadSessionPage();
+    chatApi.libraryArtifacts({ limit: 20 })
+      .then((page) => { if (active) onArtifactsChange?.(page.artifacts ?? []); })
+      .catch(() => { if (active) onArtifactsChange?.([]); });
     if (!workspace) {
       setStatus("offline");
       setReasonCode("WORKSPACE_NOT_READY");
@@ -5373,20 +5393,16 @@ export function ChatScreen({
     let active = true;
     setStatus("loading");
     setError("");
-    onSessionsChange([]);
-    setSessionNextCursor(null);
-    onHistoryMetadataChange?.({ hasMore: false, loading: false });
     setThreads([]);
     setActiveThreadId("");
     setThreadBusy({});
     setThreadServiceClasses({});
     setThreadReasoningEfforts({});
     chatApi.status(workspace.id, activeAgentId)
-      .then(async (nextStatus) => {
+      .then((nextStatus) => {
         if (!active) return;
         setStatus(nextStatus.state);
         setReasonCode(nextStatus.reasonCode);
-        await loadSessionPage();
       })
       .catch((requestError) => {
         if (!active) return;
@@ -5404,9 +5420,9 @@ export function ChatScreen({
   }, [historyLoadRequest, sessionNextCursor, sessionLoadingMore, status]);
 
   useEffect(() => {
-    if (!activeSessionId || !["ready", "offline"].includes(status)) return;
+    if (!activeSessionId || status === "loading") return;
     const selected = sessions.find((session) => session.id === activeSessionId);
-    if (selected?.agentCatalogId && selected.agentCatalogId !== activeAgentId) {
+    if (selected?.workspaceId === workspace?.id && selected?.agentCatalogId && selected.agentCatalogId !== activeAgentId) {
       setActiveAgentId(selected.agentCatalogId);
       onAgentChange?.(workspace?.id, selected.agentCatalogId);
       return;
@@ -5557,7 +5573,7 @@ export function ChatScreen({
       {contextControls}
     </div>
   ) : null;
-  if (!workspace || (status !== "ready" && !selectedSessionId)) {
+  if ((!workspace && !selectedSessionId) || (workspace && status !== "ready" && !selectedSessionId)) {
     const workspaceCanRetry = workspace && ["ready", "open"].includes(workspaceState);
     const workspaceBusy = ["loading", "provisioning", "restarting", "stopping"].includes(workspaceState);
     const restartRequired = offline && reasonCode === "CHAT_RUNTIME_UNAVAILABLE" && workspaceCanRetry;
@@ -5602,6 +5618,9 @@ export function ChatScreen({
       {!companionComposer && contextSelector}
       <div className="chat-thread-panes">
         {threads.map((thread) => {
+          const savedSession = sessions.find((session) => session.id === thread.sessionId);
+          const archived = Boolean(savedSession
+            && (savedSession.workspaceDeleted || savedSession.workspaceId !== workspace?.id));
           const requestedServiceClass = serviceClassFor(thread);
           const reasoningEffort = reasoningEffortFor(thread);
           const qualifiedEfforts = activeAgent?.reasoningEffortsByServiceClass?.[requestedServiceClass] ?? [];
@@ -5613,13 +5632,13 @@ export function ChatScreen({
           ]
             .filter(Boolean)
             .join(" · ");
-          return <div className="chat-thread-pane" key={`${workspace.id}:${activeAgentId}:${thread.id}`} hidden={thread.id !== activeThreadId}>
+          return <div className="chat-thread-pane" key={`${workspace?.id ?? "archive"}:${activeAgentId}:${thread.id}`} hidden={thread.id !== activeThreadId}>
             <ChatConversation
               threadId={thread.id}
-              workspaceId={workspace.id}
+              workspaceId={workspace?.id ?? ""}
               agentId={activeAgentId}
               agentName={agentName}
-              supportsVision={workspace.modelRoute?.capabilities?.vision === true}
+              supportsVision={workspace?.modelRoute?.capabilities?.vision === true}
               requestedServiceClass={requestedServiceClass}
               requestedServiceClassAvailable={readyServiceClassValues.has(requestedServiceClass)}
               reasoningEffort={qualifiedEfforts.includes(reasoningEffort) ? reasoningEffort : undefined}
@@ -5641,9 +5660,11 @@ export function ChatScreen({
               historyHasMore={historyHasMore}
               historyLoadingMore={historyLoadingMore}
               onLoadOlder={onLoadOlder}
-              runtimeAvailable={status === "ready"}
+              runtimeAvailable={status === "ready" && !archived}
               availableAgents={agents}
               onFork={forkThread}
+              archived={archived}
+              sourceWorkspaceName={savedSession ? workspaceName({ grantId: savedSession.workspaceGrantId }) : ""}
             />
           </div>;
         })}
@@ -5724,6 +5745,7 @@ export function App() {
   const [connectionsView, setConnectionsView] = useState("list");
   const [settingsView, setSettingsView] = useState(settingsViewFromLocation);
   const [chatSessions, setChatSessions] = useState([]);
+  const [chatArtifacts, setChatArtifacts] = useState([]);
   const [aiControlPlaneView, setAiControlPlaneView] = useState(aiControlPlaneViewFromLocation);
   const [activeChatSessionId, setActiveChatSessionId] = useState(chatSessionFromLocation);
   const [chatAgentPreferences, setChatAgentPreferences] = useState({});
@@ -7665,10 +7687,19 @@ export function App() {
             {chatSessions.length === 0
               ? <p>No recent chats</p>
               : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>
-                <span>{item.title || `Conversation ${chatSessions.length - index}`}<small>{protectedPolicyAgentNames[item.agentCatalogId] || item.agentCatalogId}</small></span>
+                <span>{item.title || `Conversation ${chatSessions.length - index}`}<small>{protectedPolicyAgentNames[item.agentCatalogId] || item.agentCatalogId}{item.workspaceDeleted ? ` · Saved from ${workspaceName({ grantId: item.workspaceGrantId })}` : ""}</small></span>
                 {runningChatSessionIds.includes(item.id) && <span className="sidebar-chat-running" aria-hidden="true" />}
               </button>)}
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}
+            <div className="sidebar-chat-history-heading sidebar-artifact-heading"><span>Saved files</span></div>
+            {chatArtifacts.length === 0
+              ? <p>No saved files</p>
+              : <div className="sidebar-artifact-list" aria-label="Saved files">{chatArtifacts.map((artifact) => (
+                <a key={`${artifact.id}:${artifact.revisionId}`} href={chatApi.artifactUrl(artifact.id, artifact.revisionId)} download>
+                  <Document24Regular aria-hidden="true" />
+                  <span>{artifact.displayName}<small>{workspaceName({ grantId: artifact.workspaceGrantId })}</small></span>
+                </a>
+              ))}</div>}
           </div>}
         </nav>
         <div ref={profileRef} className="sidebar-account">
@@ -7789,6 +7820,7 @@ export function App() {
           historyLoadRequest={chatHistoryLoadRequest}
           newThreadRequest={newChatRequest}
           onRunningSessionIdsChange={setRunningChatSessionIds}
+          onArtifactsChange={setChatArtifacts}
           onHistoryMetadataChange={({ hasMore, loading }) => {
             setChatHistoryHasMore(hasMore);
             setChatHistoryLoadingMore(loading);

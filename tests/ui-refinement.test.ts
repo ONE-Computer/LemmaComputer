@@ -541,7 +541,10 @@ test("Chat is last in navigation, with recent threads in the sidebar and a focus
   assert.match(chatScreen, /multiple/);
   assert.match(chatScreen, /onPaste=/);
   assert.match(chatScreen, /item\.type\.startsWith\("image\/"\)/);
-  assert.match(chatScreen, /workspace\.modelRoute\?\.capabilities\?\.vision === true/);
+  assert.match(chatScreen, /workspace\?\.modelRoute\?\.capabilities\?\.vision === true/);
+  assert.match(primaryNav, /Saved files/);
+  assert.match(chatScreen, /Saved from \{sourceWorkspaceName/);
+  assert.match(chatScreen, /Continue with \{agent\.displayName\}/);
   assert.match(chatScreen, /selected workspace model does not support image input/);
   assert.match(app, /part\.type === "file"/);
   assert.match(app, /part\.type === "data-approval"/);
@@ -584,7 +587,7 @@ test("Chat keeps the selected conversation across a page refresh", async () => {
   assert.match(app, /onSessionChange=\{\(sessionId\) => selectChatSession\(sessionId, "replace"\)\}/);
   assert.match(app, /restoredTurnActive/);
   assert.match(app, /latestMessage\.metadata\?\.state === "streaming"/);
-  assert.match(app, /chatApi\.messages\(workspaceId, agentId, sessionId\)/);
+  assert.match(app, /chatApi\.messages\(sessionId\)/);
   assert.match(app, /chatApi\.cancelTurn\(workspaceId, agentId, sessionId\)/);
   assert.match(app, /onClick=\{stopTurn\}/);
   assert.match(workspaceApi, /turns\/active/);
@@ -599,7 +602,7 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
     source("apps/web/src/styles.css"),
   ]);
   const chatScreen = app.slice(app.indexOf("function ChatScreen"), app.indexOf("export function App"));
-  const nonReadyStart = chatScreen.indexOf('if (!workspace || (status !== "ready" && !selectedSessionId))');
+  const nonReadyStart = chatScreen.indexOf('if ((!workspace && !selectedSessionId) || (workspace && status !== "ready" && !selectedSessionId))');
   const nonReadyEnd = chatScreen.indexOf("\n  return (\n", nonReadyStart);
   const nonReadyBranch = chatScreen.slice(nonReadyStart, nonReadyEnd);
   assert.match(nonReadyBranch, /chat-runtime-state/);
@@ -617,6 +620,8 @@ test("Chat selects a workspace before an agent, preserves both choices, and page
   assert.match(app, /lemmacomputer\.active-chat-agent:/);
   assert.match(app, /sidebar-chat-load-more/);
   assert.match(api, /sessions: \(workspaceId: string, catalogId: string, \{ cursor, limit = 20 \}[^)]*\= \{\}\)/);
+  assert.match(api, /librarySessions:/);
+  assert.match(api, /libraryArtifacts:/);
   assert.match(api, /query\.set\("cursor", cursor\)/);
   assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex: 1;/);
   assert.match(styles, /\.sidebar-chat-history\s*\{[\s\S]*?flex-direction: column;/);

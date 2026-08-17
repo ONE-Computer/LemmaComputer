@@ -8,7 +8,7 @@ import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@l
 import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
 import { FilesystemArtifactStore, S3ArtifactStore, type ArtifactStore } from "@lemmacomputer/artifact-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatConversationRecord, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
@@ -5284,6 +5284,76 @@ export function createControlServer(
       throw error;
     }
   });
+  const chatSessionView = (session: ChatConversationRecord) => ({
+    id: session.id,
+    workspaceId: session.workspaceId,
+    title: session.title,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString(),
+    reasoningEffort: session.reasoningEffort,
+    agentCatalogId: session.defaultAgentCatalogId,
+    parentConversationId: session.parentConversationId,
+    forkedFromMessageId: session.forkedFromMessageId,
+  });
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/chat/sessions", async (request, reply) => {
+    const owner = identity(request);
+    const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
+    const cursor = request.query.cursor ? chatSessionIdSchema.parse(request.query.cursor) : undefined;
+    const page = await requireDurableChat().store.listOwnedConversations(owner, { cursor, limit });
+    return reply.header("cache-control", "no-store").send({
+      sessions: page.conversations.map((session) => ({
+        ...chatSessionView(session),
+        workspaceGrantId: session.workspaceGrantId,
+        workspaceDeleted: session.workspaceDeletedAt !== null,
+      })),
+      nextCursor: page.nextCursor,
+    });
+  });
+  app.get<{ Params: { sessionId: string } }>("/v1/chat/sessions/:sessionId/messages", async (request, reply) => {
+    const sessionId = chatSessionIdSchema.parse(request.params.sessionId);
+    const owner = identity(request);
+    const conversation = await requireDurableChat().store.getConversation(owner, sessionId);
+    if (!conversation) throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
+    const messages = await reconcileChatMessages(
+      await requireDurableChat().store.listMessages(owner, sessionId),
+      async (operationId) => {
+        try {
+          const operation = await operations.get(owner, operationId);
+          return { state: operation.state, safeSummary: operation.safeSummary };
+        } catch (error) {
+          if (error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND") return undefined;
+          throw error;
+        }
+      },
+    );
+    return reply.header("cache-control", "no-store").send({ messages });
+  });
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>("/v1/chat/artifacts", async (request, reply) => {
+    const owner = identity(request);
+    const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
+    const cursor = request.query.cursor
+      ? z.string().regex(/^artifact-[a-f0-9]{32}$/).parse(request.query.cursor)
+      : undefined;
+    const page = await requireDurableChat().store.listOwnedArtifacts(owner, { cursor, limit });
+    return reply.header("cache-control", "no-store").send({
+      artifacts: page.artifacts.map((saved) => ({
+        id: saved.artifact.id,
+        revisionId: saved.revision.id,
+        conversationId: saved.artifact.conversationId,
+        conversationTitle: saved.conversationTitle,
+        agentCatalogId: saved.conversationAgentCatalogId,
+        workspaceId: saved.artifact.workspaceId,
+        workspaceGrantId: saved.workspaceGrantId,
+        workspaceDeleted: saved.workspaceDeletedAt !== null,
+        displayName: saved.artifact.displayName,
+        mediaType: saved.revision.mediaType,
+        byteLength: saved.revision.byteLength,
+        direction: saved.artifact.direction,
+        createdAt: saved.revision.createdAt.toISOString(),
+      })),
+      nextCursor: page.nextCursor,
+    });
+  });
   app.get<{ Params: { workspaceId: string; catalogId: string }; Querystring: { cursor?: string; limit?: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
     chatAgentCatalogIdSchema.parse(request.params.catalogId);
     await requireWorkspacePolicy(request, request.params.workspaceId);
@@ -5291,14 +5361,7 @@ export function createControlServer(
     const limit = z.coerce.number().int().min(1).max(50).catch(20).parse(request.query.limit);
     const cursor = request.query.cursor ? chatSessionIdSchema.parse(request.query.cursor) : undefined;
     const page = await requireDurableChat().store.listConversations(owner, request.params.workspaceId, { cursor, limit });
-    const sessions = page.conversations.map((session) => ({
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: session.updatedAt.toISOString(),
-      reasoningEffort: session.reasoningEffort,
-      agentCatalogId: session.defaultAgentCatalogId,
-    }));
+    const sessions = page.conversations.map(chatSessionView);
     return reply.header("cache-control", "no-store").send({ sessions, nextCursor: page.nextCursor });
   });
   app.post<{ Params: { workspaceId: string; catalogId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions", async (request, reply) => {
@@ -5319,14 +5382,7 @@ export function createControlServer(
       requestedServiceClass: input.requestedServiceClass,
       reasoningEffort: input.reasoningEffort,
     });
-    return reply.code(201).header("cache-control", "no-store").send({
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: session.updatedAt.toISOString(),
-      reasoningEffort: session.reasoningEffort,
-      agentCatalogId: session.defaultAgentCatalogId,
-    });
+    return reply.code(201).header("cache-control", "no-store").send(chatSessionView(session));
   });
   app.get<{ Params: { workspaceId: string; catalogId: string; sessionId: string } }>("/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages", async (request, reply) => {
     const catalogId = chatAgentCatalogIdSchema.parse(request.params.catalogId);
@@ -5368,27 +5424,19 @@ export function createControlServer(
       await requireChatServiceClass(owner, input.requestedServiceClass);
       await requireReasoningEffort(owner, policy, input.agentCatalogId, input.requestedServiceClass, input.reasoningEffort);
       const source = await requireDurableChat().store.getConversation(owner, request.params.sessionId);
-      if (!source || source.workspaceId !== request.params.workspaceId) {
+      if (!source) {
         throw new LemmaComputerError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found", 404);
       }
       const fork = await requireDurableChat().store.forkConversation({
         identity: owner,
         conversationId: source.id,
         fromMessageId: input.fromMessageId,
+        targetWorkspaceId: request.params.workspaceId,
         defaultAgentCatalogId: input.agentCatalogId,
         requestedServiceClass: input.requestedServiceClass,
         reasoningEffort: input.reasoningEffort,
       });
-      return reply.code(201).header("cache-control", "no-store").send({
-        id: fork.id,
-        title: fork.title,
-        createdAt: fork.createdAt.toISOString(),
-        updatedAt: fork.updatedAt.toISOString(),
-        reasoningEffort: fork.reasoningEffort,
-        agentCatalogId: fork.defaultAgentCatalogId,
-        parentConversationId: fork.parentConversationId,
-        forkedFromMessageId: fork.forkedFromMessageId,
-      });
+      return reply.code(201).header("cache-control", "no-store").send(chatSessionView(fork));
     },
   );
   app.get<{ Params: { artifactId: string }; Querystring: { revision?: string } }>(

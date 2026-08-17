@@ -39,6 +39,16 @@ export type ChatConversationPage = {
   nextCursor: string | null;
 };
 
+export type ChatConversationLibraryRecord = ChatConversationRecord & {
+  workspaceGrantId: string;
+  workspaceDeletedAt: Date | null;
+};
+
+export type ChatConversationLibraryPage = {
+  conversations: ChatConversationLibraryRecord[];
+  nextCursor: string | null;
+};
+
 export type ChatRunRecord = {
   id: string;
   tenantId: string;
@@ -107,6 +117,18 @@ export type ArtifactRevisionRecord = {
 export type AuthorizedArtifactRevision = {
   artifact: ArtifactRecord;
   revision: ArtifactRevisionRecord;
+};
+
+export type ArtifactLibraryRecord = AuthorizedArtifactRevision & {
+  conversationTitle: string | null;
+  conversationAgentCatalogId: ChatAgentCatalogId;
+  workspaceGrantId: string;
+  workspaceDeletedAt: Date | null;
+};
+
+export type ArtifactLibraryPage = {
+  artifacts: ArtifactLibraryRecord[];
+  nextCursor: string | null;
 };
 
 export type WorkspaceIngestionPlacement = {
@@ -208,6 +230,10 @@ export interface ChatStore {
     cursor?: string;
     agentCatalogId?: ChatAgentCatalogId;
   }): Promise<ChatConversationPage>;
+  listOwnedConversations(identity: IdentityContext, input: {
+    limit: number;
+    cursor?: string;
+  }): Promise<ChatConversationLibraryPage>;
   getConversation(identity: IdentityContext, conversationId: string): Promise<ChatConversationRecord | null>;
   listMessages(identity: IdentityContext, conversationId: string): Promise<ChatUiMessage[]>;
   upsertMessage(identity: IdentityContext, conversationId: string, message: ChatUiMessage): Promise<void>;
@@ -268,12 +294,17 @@ export interface ChatStore {
     direction: ArtifactDirection;
   }): Promise<void>;
   getArtifact(identity: IdentityContext, artifactId: string, revisionId?: string): Promise<AuthorizedArtifactRevision | null>;
+  listOwnedArtifacts(identity: IdentityContext, input: {
+    limit: number;
+    cursor?: string;
+  }): Promise<ArtifactLibraryPage>;
   listExpiredStaging(now: Date, limit: number): Promise<ArtifactStagingRecord[]>;
   abandonStaging(tenantId: string, uploadId: string): Promise<boolean>;
   forkConversation(input: {
     identity: IdentityContext;
     conversationId: string;
     fromMessageId: string;
+    targetWorkspaceId: string;
     defaultAgentCatalogId: ChatAgentCatalogId;
     requestedServiceClass: ChatRequestedServiceClass;
     reasoningEffort?: ChatReasoningEffort;
@@ -335,6 +366,39 @@ export class PostgresChatStore implements ChatStore {
         before?.updatedAt ?? null, before?.id ?? null, input.limit + 1],
     );
     const values = result.rows.map(conversation);
+    const hasMore = values.length > input.limit;
+    if (hasMore) values.pop();
+    return { conversations: values, nextCursor: hasMore ? values.at(-1)!.id : null };
+  }
+
+  async listOwnedConversations(identity: IdentityContext, input: { limit: number; cursor?: string }) {
+    let before: { updatedAt: Date; id: string } | undefined;
+    if (input.cursor) {
+      const cursor = await this.pool.query(
+        `SELECT updated_at,id FROM chat_conversations
+         WHERE tenant_id=$1 AND owner_subject_id=$2 AND id=$3 AND state='active'`,
+        [identity.tenantId, identity.subjectId, input.cursor],
+      );
+      if (!cursor.rowCount) throw new LemmaComputerError("CHAT_CURSOR_INVALID", "Conversation cursor not found", 400);
+      before = { updatedAt: new Date(String(cursor.rows[0].updated_at)), id: String(cursor.rows[0].id) };
+    }
+    const result = await this.pool.query(
+      `SELECT conversation.*,workspace.grant_id AS workspace_grant_id,
+         workspace.deleted_at AS workspace_deleted_at
+       FROM chat_conversations conversation
+       JOIN workspaces workspace
+         ON workspace.tenant_id=conversation.tenant_id AND workspace.id=conversation.workspace_id
+       WHERE conversation.tenant_id=$1 AND conversation.owner_subject_id=$2
+         AND conversation.state='active'
+         AND ($3::timestamptz IS NULL OR (conversation.updated_at,conversation.id)<($3,$4::uuid))
+       ORDER BY conversation.updated_at DESC,conversation.id DESC LIMIT $5`,
+      [identity.tenantId, identity.subjectId, before?.updatedAt ?? null, before?.id ?? null, input.limit + 1],
+    );
+    const values = result.rows.map((row) => ({
+      ...conversation(row),
+      workspaceGrantId: String(row.workspace_grant_id),
+      workspaceDeletedAt: row.workspace_deleted_at == null ? null : new Date(String(row.workspace_deleted_at)),
+    }));
     const hasMore = values.length > input.limit;
     if (hasMore) values.pop();
     return { conversations: values, nextCursor: hasMore ? values.at(-1)!.id : null };
@@ -666,6 +730,64 @@ export class PostgresChatStore implements ChatStore {
     };
   }
 
+  async listOwnedArtifacts(identity: IdentityContext, input: { limit: number; cursor?: string }) {
+    let before: { updatedAt: Date; id: string } | undefined;
+    if (input.cursor) {
+      const cursor = await this.pool.query(
+        `SELECT updated_at,id FROM artifacts
+         WHERE tenant_id=$1 AND creator_subject_id=$2 AND id=$3 AND state='available'`,
+        [identity.tenantId, identity.subjectId, input.cursor],
+      );
+      if (!cursor.rowCount) throw new LemmaComputerError("ARTIFACT_CURSOR_INVALID", "Artifact cursor not found", 400);
+      before = { updatedAt: new Date(String(cursor.rows[0].updated_at)), id: String(cursor.rows[0].id) };
+    }
+    const result = await this.pool.query(
+      `SELECT artifact.*,revision.id AS revision_id,revision.artifact_id AS revision_artifact_id,
+         revision.revision_number,revision.base_revision_id,revision.media_type AS revision_media_type,
+         revision.byte_length AS revision_byte_length,revision.sha256 AS revision_sha256,
+         revision.storage_backend,revision.storage_locator,revision.created_by_subject_id,
+         revision.created_at AS revision_created_at,conversation.title AS conversation_title,
+         conversation.default_agent_catalog_id AS conversation_agent_catalog_id,
+         workspace.grant_id AS workspace_grant_id,workspace.deleted_at AS workspace_deleted_at
+       FROM artifacts artifact
+       JOIN artifact_revisions revision
+         ON revision.tenant_id=artifact.tenant_id AND revision.id=artifact.current_revision_id
+       JOIN chat_conversations conversation
+         ON conversation.tenant_id=artifact.tenant_id AND conversation.id=artifact.conversation_id
+       JOIN workspaces workspace
+         ON workspace.tenant_id=artifact.tenant_id AND workspace.id=artifact.workspace_id
+       WHERE artifact.tenant_id=$1 AND artifact.creator_subject_id=$2 AND artifact.state='available'
+         AND conversation.state='active'
+         AND ($3::timestamptz IS NULL OR (artifact.updated_at,artifact.id)<($3,$4))
+       ORDER BY artifact.updated_at DESC,artifact.id DESC LIMIT $5`,
+      [identity.tenantId, identity.subjectId, before?.updatedAt ?? null, before?.id ?? null, input.limit + 1],
+    );
+    const values = result.rows.map((row) => ({
+      artifact: artifact(row),
+      revision: revision({
+        id: row.revision_id,
+        tenant_id: row.tenant_id,
+        artifact_id: row.revision_artifact_id,
+        revision_number: row.revision_number,
+        base_revision_id: row.base_revision_id,
+        media_type: row.revision_media_type,
+        byte_length: row.revision_byte_length,
+        sha256: row.revision_sha256,
+        storage_backend: row.storage_backend,
+        storage_locator: row.storage_locator,
+        created_by_subject_id: row.created_by_subject_id,
+        created_at: row.revision_created_at,
+      }),
+      conversationTitle: row.conversation_title == null ? null : String(row.conversation_title),
+      conversationAgentCatalogId: chatAgentCatalogIdSchema.parse(row.conversation_agent_catalog_id),
+      workspaceGrantId: String(row.workspace_grant_id),
+      workspaceDeletedAt: row.workspace_deleted_at == null ? null : new Date(String(row.workspace_deleted_at)),
+    }));
+    const hasMore = values.length > input.limit;
+    if (hasMore) values.pop();
+    return { artifacts: values, nextCursor: hasMore ? values.at(-1)!.artifact.id : null };
+  }
+
   async listExpiredStaging(now: Date, limit: number) {
     const result = await this.pool.query(
       `SELECT * FROM artifact_staging_uploads
@@ -690,13 +812,15 @@ export class PostgresChatStore implements ChatStore {
     try {
       await client.query("BEGIN");
       const source = await client.query(
-        `SELECT conversation.*,message.ordinal AS fork_ordinal
+        `SELECT conversation.*,message.ordinal AS fork_ordinal,target.id AS target_workspace_id
          FROM chat_conversations conversation
          JOIN chat_messages message ON message.tenant_id=conversation.tenant_id
            AND message.conversation_id=conversation.id AND message.id=$4
+         JOIN workspaces target ON target.tenant_id=conversation.tenant_id
+           AND target.id=$5 AND target.subject_id=conversation.owner_subject_id AND target.deleted_at IS NULL
          WHERE conversation.tenant_id=$1 AND conversation.id=$2 AND conversation.owner_subject_id=$3
            AND conversation.state='active' FOR SHARE OF conversation,message`,
-        [input.identity.tenantId, input.conversationId, input.identity.subjectId, input.fromMessageId],
+        [input.identity.tenantId, input.conversationId, input.identity.subjectId, input.fromMessageId, input.targetWorkspaceId],
       );
       if (!source.rowCount) throw notFound();
       const id = randomUUID();
@@ -707,7 +831,7 @@ export class PostgresChatStore implements ChatStore {
            requested_service_class,reasoning_effort,parent_conversation_id,forked_from_message_id,
            retention_class,state,created_at,updated_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'saved','active',$11,$11) RETURNING *`,
-        [id, input.identity.tenantId, source.rows[0].workspace_id, input.identity.subjectId,
+        [id, input.identity.tenantId, source.rows[0].target_workspace_id, input.identity.subjectId,
           input.defaultAgentCatalogId, source.rows[0].title, input.requestedServiceClass,
           input.reasoningEffort ?? null, input.conversationId, input.fromMessageId, now],
       );

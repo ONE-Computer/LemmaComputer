@@ -280,6 +280,53 @@ textarea:focus-visible,
   opacity: .7;
 }
 
+.sidebar-artifact-heading {
+  margin-top: 8px;
+  border-top: 1px solid #dedcd7;
+  padding-top: 8px;
+}
+
+.sidebar-artifact-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sidebar-artifact-list a {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  color: #313741;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.sidebar-artifact-list a:hover {
+  background: #e9e8e4;
+  color: var(--navy);
+}
+
+.sidebar-artifact-list svg {
+  width: 18px;
+  height: 18px;
+}
+
+.sidebar-artifact-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-artifact-list small {
+  display: block;
+  color: #7a8797;
+  font-size: 10px;
+}
+
 .sidebar-profile {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 14px;
@@ -2777,6 +2824,23 @@ a.chat-file-part:hover {
   border-radius: 8px;
   background: #f3f6f9;
   color: #526276;
+  font-size: 12px;
+}
+
+.chat-archive-continuation {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-archive-continuation > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-archive-continuation button {
+  min-height: 32px;
+  padding: 5px 10px;
   font-size: 12px;
 }
 

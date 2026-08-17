@@ -42,6 +42,7 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
     await chats.setVendorSession(identity, conversation.id, "claude-cli", "vendor-session-secret");
     const fork = await chats.forkConversation({
       identity, conversationId: conversation.id, fromMessageId: "assistant-1",
+      targetWorkspaceId: workspace.id,
       defaultAgentCatalogId: "codex-cli", requestedServiceClass: "balanced", reasoningEffort: "high",
     });
     assert.equal(fork.parentConversationId, conversation.id);
@@ -142,11 +143,30 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
       [[conversation.id, fork.id]],
     )).rows.map((row) => row.state), ["active", "active"]);
     assert.equal((await pool.query("SELECT state FROM artifacts WHERE id=$1", [artifactId])).rows[0].state, "available");
+    const archivedConversations = await chats.listOwnedConversations(identity, { limit: 20 });
+    assert.equal(archivedConversations.conversations.length, 2);
+    assert.ok(archivedConversations.conversations.every((item) => item.workspaceDeletedAt instanceof Date));
+    const archivedArtifacts = await chats.listOwnedArtifacts(identity, { limit: 20 });
+    assert.equal(archivedArtifacts.artifacts.length, 1);
+    assert.equal(archivedArtifacts.artifacts[0].artifact.id, artifactId);
+    assert.ok(archivedArtifacts.artifacts[0].workspaceDeletedAt instanceof Date);
 
     const recreated = await workspaces.createOrGet(identity, `grant-${suffix}`, randomUUID());
     assert.equal(recreated.id, workspace.id, "recreating the same logical workspace revives its durable history");
     assert.equal(recreated.deletedAt, null);
     assert.equal((await chats.listConversations(identity, workspace.id, { limit: 20 })).conversations.length, 2);
+    const targetWorkspace = await workspaces.createOrGet(identity, `target-${suffix}`, randomUUID());
+    const continued = await chats.forkConversation({
+      identity,
+      conversationId: conversation.id,
+      fromMessageId: "assistant-1",
+      targetWorkspaceId: targetWorkspace.id,
+      defaultAgentCatalogId: "hermes-claw",
+      requestedServiceClass: "balanced",
+    });
+    assert.equal(continued.workspaceId, targetWorkspace.id);
+    assert.equal(continued.parentConversationId, conversation.id);
+    assert.deepEqual((await chats.listMessages(identity, continued.id)).map((message) => message.id), ["user-1", "assistant-1"]);
 
     await pool.query(
       "UPDATE chat_conversations SET retention_class='legal_hold' WHERE id=$1",

@@ -336,11 +336,54 @@ const companionActivity = {
 
 const chatSession = {
   id: "fixture-session-1",
+  workspaceId,
+  workspaceGrantId: "workspace-acme",
+  workspaceDeleted: false,
   title: "Quarterly planning",
   createdAt: now,
   updatedAt: now,
   agentCatalogId: "hermes-claw",
 };
+const archivedChatSession = {
+  id: "fixture-session-archived",
+  workspaceId: "11153ce0-9186-48ca-9173-f03790a99362",
+  workspaceGrantId: "workspace-project-workspace",
+  workspaceDeleted: true,
+  title: "Project handover",
+  createdAt: now,
+  updatedAt: new Date(Date.now() - 60_000).toISOString(),
+  agentCatalogId: "hermes-claw",
+};
+const archivedArtifact = {
+  id: "artifact-11111111111111111111111111111111",
+  revisionId: "revision-11111111111111111111111111111111",
+  conversationId: archivedChatSession.id,
+  conversationTitle: archivedChatSession.title,
+  agentCatalogId: "hermes-claw",
+  workspaceId: archivedChatSession.workspaceId,
+  workspaceGrantId: archivedChatSession.workspaceGrantId,
+  workspaceDeleted: true,
+  displayName: "project-handover.md",
+  mediaType: "text/markdown",
+  byteLength: 128,
+  direction: "output",
+  createdAt: archivedChatSession.updatedAt,
+};
+const archivedChatMessages = [{
+  id: "fixture-archived-user-message",
+  role: "user",
+  metadata: { agentCatalogId: "hermes-claw", state: "completed", createdAt: archivedChatSession.createdAt },
+  parts: [{ type: "text", text: "Prepare a handover artifact.", state: "done" }],
+}, {
+  id: "fixture-archived-assistant-message",
+  role: "assistant",
+  metadata: { agentCatalogId: "hermes-claw", state: "completed", createdAt: archivedChatSession.updatedAt },
+  parts: [{
+    type: "data-file-reference",
+    id: archivedArtifact.id,
+    data: { filename: archivedArtifact.displayName, mediaType: archivedArtifact.mediaType, byteLength: archivedArtifact.byteLength, revisionId: archivedArtifact.revisionId },
+  }, { type: "text", text: "The project handover is saved.", state: "done" }],
+}];
 const initialChatMessages = [
   {
     id: "fixture-user-message-1",
@@ -1056,6 +1099,10 @@ const responses = new Map([
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/status`, { workspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [chatSession] }],
   [`GET /v1/workspaces/${workspaceId}/chat/agents/hermes-claw/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
+  ["GET /v1/chat/sessions", { sessions: [chatSession, archivedChatSession], nextCursor: null }],
+  ["GET /v1/chat/artifacts", { artifacts: [archivedArtifact], nextCursor: null }],
+  [`GET /v1/chat/sessions/${chatSession.id}/messages`, { messages: chatMessages }],
+  [`GET /v1/chat/sessions/${archivedChatSession.id}/messages`, { messages: archivedChatMessages }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents`, { workspaceId: productWorkspaceId, serviceClassOptions: [{ value: "lite", available: true, reasonCode: "ready" }, { value: "balanced", available: true, reasonCode: "ready" }, { value: "pro", available: true, reasonCode: "ready" }], agents: [{ catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }, { catalogId: "claude-cli", displayName: "Claude Code", state: "ready", reasonCode: "CHAT_AGENT_READY", reasoningEffortsByServiceClass: { lite: ["auto", "low", "medium", "high"], balanced: ["auto", "low", "medium", "high"], pro: ["auto", "low", "medium", "high"] } }] }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/status`, { workspaceId: productWorkspaceId, catalogId: "hermes-claw", displayName: "Hermes Agent CLI", state: "ready", reasonCode: "CHAT_AGENT_READY" }],
   [`GET /v1/workspaces/${productWorkspaceId}/chat/agents/hermes-claw/sessions`, { sessions: [] }],
@@ -1156,6 +1203,10 @@ const server = http.createServer((request, response) => {
       nextAfterSequence: replay.at(-1)?.sequence ?? null,
       terminal: after >= events.at(-1).sequence || replay.some((event) => event.kind === "terminal"),
     }));
+    return;
+  }
+  if (request.method === "GET" && /^\/v1\/chat\/sessions\/fixture-session-fork-[^/]+\/messages$/.test(url.pathname)) {
+    response.end(JSON.stringify({ messages: archivedChatMessages }));
     return;
   }
   if (key === "GET /v1/workspaces") {
@@ -1445,6 +1496,27 @@ const server = http.createServer((request, response) => {
         title: input.title ?? null,
         agentCatalogId,
         ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+      }));
+    });
+    return;
+  }
+  const forkChatSessionMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)\/chat\/sessions\/([^/]+)\/forks$/);
+  if (request.method === "POST" && forkChatSessionMatch && [workspaceId, productWorkspaceId].includes(decodeURIComponent(forkChatSessionMatch[1]))) {
+    const targetWorkspaceId = decodeURIComponent(forkChatSessionMatch[1]);
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = body ? JSON.parse(body) : {};
+      response.statusCode = 201;
+      response.end(JSON.stringify({
+        ...archivedChatSession,
+        id: `fixture-session-fork-${Date.now()}`,
+        workspaceId: targetWorkspaceId,
+        workspaceDeleted: false,
+        workspaceGrantId: targetWorkspaceId === productWorkspaceId ? "workspace-product" : "workspace-acme",
+        agentCatalogId: input.agentCatalogId,
+        parentConversationId: decodeURIComponent(forkChatSessionMatch[2]),
+        forkedFromMessageId: input.fromMessageId,
       }));
     });
     return;
