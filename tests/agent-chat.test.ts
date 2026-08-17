@@ -52,6 +52,23 @@ test("the workspace runtime is stateless for canonical chat history", async () =
   assert.equal(chatTurnStateSchema.safeParse("needs_input").success, true);
 });
 
+test("ordinary employee input uses one shared marker contract across agent vendors and remains separate from approval", async () => {
+  const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
+  const claude = adapter.slice(adapter.indexOf("async def claude_vendor_events"), adapter.indexOf("async def codex_vendor_events"));
+  const codex = adapter.slice(adapter.indexOf("def codex_config"), adapter.indexOf("async def hermes_vendor_events"));
+  const hermes = adapter.slice(adapter.indexOf("async def hermes_vendor_events"), adapter.indexOf("def vendor_events"));
+  assert.match(adapter, /NEEDS_INPUT_MARKER = "\[LEMMACOMPUTER_NEEDS_INPUT\]"/);
+  assert.match(adapter, /do not call tools\. Ask one concise question/);
+  assert.match(adapter, /normal text reply/);
+  assert.match(adapter, /conversational input never authorizes a protected operation/);
+  assert.match(adapter, /OpenVTC approval remains a/);
+  assert.match(claude, /system_prompt=system_prompt\(\)/);
+  assert.match(codex, /base_instructions=system_prompt\(\)/);
+  assert.match(hermes, /"instructions": system_prompt\(\)/);
+  assert.match(adapter, /if stripped\.startswith\(NEEDS_INPUT_MARKER\):\s*needs_input = True/);
+  assert.match(adapter, /if needs_input and terminal_state == "completed":\s*terminal_state = "needs_input"/);
+});
+
 test("the runtime receives Control history but never writes canonical transcript files", async () => {
   const adapter = await readFile(new URL("../docker/workspace/lemmacomputer-agent-chat.py", import.meta.url), "utf8");
   assert.match(adapter, /prompt_with_transcript\(\s*item, prompt_with_documents\(text, attachments, return_artifacts\)/);

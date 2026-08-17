@@ -122,6 +122,10 @@ export function presentActivityEvents(events = []) {
     presented.filter((event) => event.kind === "web_action").map((event) => event.payload?.label),
   );
   return presented
+    // Tool-attempt failures remain in the retained activity/audit data. The
+    // employee timeline shows the recovered outcome, or the terminal error if
+    // the turn itself ultimately fails, instead of exposing internal retries.
+    .filter((event) => !(event.kind === "tool" && event.state === "failed"))
     .filter((event) => !(event.kind === "tool" && event.state === "completed" && isWebToolName(event.payload?.name) && explicitWebLabels.has(event.payload?.summary)))
     .sort((left, right) => left.sequence - right.sequence);
 }

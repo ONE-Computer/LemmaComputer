@@ -141,6 +141,34 @@ test("work trace collapses lifecycle updates and replaces raw web tools with exp
   assert.doesNotMatch(html, />WebSearch</);
 });
 
+test("employee Activity hides recovered tool failures but preserves terminal errors", () => {
+  const event = (sequence, kind, state, payload, provenance = "tool") => ({
+    ...base,
+    eventId: `50000000-0000-4000-8000-${String(sequence + 1).padStart(12, "0")}`,
+    sequence,
+    kind,
+    state,
+    provenance,
+    payload,
+  });
+  const presented = presentActivityEvents([
+    event(0, "tool", "failed", { toolCallId: "failed-attempt", name: "Terminal", summary: "Tool failed" }),
+    event(1, "tool", "completed", { toolCallId: "fallback", name: "Write", summary: "Presentation created" }),
+    event(2, "error", "failed", { code: "TURN_FAILED", message: "The turn could not be completed", retryable: true }, "deterministic_system"),
+    event(3, "terminal", "failed", { turnState: "failed", message: "Turn failed" }, "deterministic_system"),
+  ]);
+
+  assert.deepEqual(presented.map((item) => [item.kind, item.state]), [
+    ["tool", "completed"],
+    ["error", "failed"],
+    ["terminal", "failed"],
+  ]);
+  const html = renderToStaticMarkup(createElement(ActivityTimeline, { events: presented, feedState: "ready" }));
+  assert.match(html, /Presentation created/);
+  assert.match(html, /The turn could not be completed/);
+  assert.doesNotMatch(html, /Tool failed/);
+});
+
 test("Activity panel source preserves keyboard dialog behavior, focus return, live announcements, and the viewer extension slot", async () => {
   const source = await readFile(new URL("../apps/web/src/ActivityPanel.jsx", import.meta.url), "utf8");
   assert.match(source, /event\.key === "Escape"/);
