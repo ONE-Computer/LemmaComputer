@@ -139,6 +139,7 @@ export interface McpConnectorAdministrationGateway {
     clientSecret: string;
     scopes: string[];
   }): Promise<void>;
+  syncOAuthMcpServerScopes(input: { serverId: string; scopes: string[] }): Promise<void>;
   removeMcpServer(serverId: string): Promise<void>;
 }
 
@@ -761,6 +762,22 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
           scopes: input.scopes,
         },
       },
+    }, true);
+    if (!result.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", result.status, result.payload);
+  }
+
+  /**
+   * Updates only the scopes a server row requests. The gateway merges the
+   * credential blob, preserving keys the update omits, so this corrects a row
+   * whose scopes are stale without holding the client secret that Control
+   * deliberately never stores. Scopes are part of the token-minting identity,
+   * so the gateway purges stored per-user tokens and each person reauthorizes
+   * for the corrected set.
+   */
+  async syncOAuthMcpServerScopes(input: { serverId: string; scopes: string[] }) {
+    const result = await this.adminCall("/v1/mcp/server", {
+      method: "PUT",
+      body: { server_id: input.serverId, credentials: { scopes: input.scopes } },
     }, true);
     if (!result.ok) throw this.upstreamError("MCP_REGISTRATION_FAILED", result.status, result.payload);
   }

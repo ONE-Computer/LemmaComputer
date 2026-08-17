@@ -57,7 +57,9 @@ class SharedGateway implements OAuthConnectionGateway {
   }
   async registerOAuthMcpServer(input: McpConnectorRegistrationInput) { this.registered.push(input); }
   ensured: McpConnectorRegistrationInput[][] = [];
+  syncedScopes: Array<{ serverId: string; scopes: string[] }> = [];
   async ensureOAuthMcpServers(inputs: McpConnectorRegistrationInput[]) { this.ensured.push(inputs); }
+  async syncOAuthMcpServerScopes(input: { serverId: string; scopes: string[] }) { this.syncedScopes.push(input); }
   async replaceOAuthMcpServerCredentials(input: CredentialReplacement) { this.replaced.push(input); }
   async removeMcpServer(serverId: string) { this.removed.push(serverId); }
 }
@@ -313,4 +315,31 @@ test("tenant credentials register the connector's scopes with the gateway", asyn
   const registered = gateway.registered[0]!;
   assert.ok(registered.scopes.length, "an empty scope list produces a connector that cannot list tools");
   assert.deepEqual(registered.scopes, catalogCredentialSetup("gmail")!.scopes);
+});
+
+test("a tenant row registered with stale scopes is corrected without re-entering the secret", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const gateway = new SharedGateway();
+  const connections = service(gateway, registry);
+  await connections.saveConnectorCredentials(acme, "admin-acme", "gmail", {
+    clientId: "acme-client",
+    clientSecret: "acme-secret",
+  });
+  const serverId = gateway.registered[0]!.serverId;
+
+  // Stand in for a row registered before its connector declared any scopes.
+  // Control never stores the client secret, so without this reconciliation the
+  // only way to correct such a row would be for an administrator to find the
+  // secret again in the provider's console.
+  gateway.syncedScopes.length = 0;
+  await connections.start(acme, "gmail", true);
+
+  assert.deepEqual(gateway.syncedScopes, [{
+    serverId,
+    scopes: catalogCredentialSetup("gmail")!.scopes,
+  }]);
+  // Reconciliation must never recreate the row, which would replace a working
+  // OAuth client with a credential-less one.
+  assert.deepEqual(gateway.ensured.flat(), []);
+  assert.equal(gateway.registered.length, 1);
 });

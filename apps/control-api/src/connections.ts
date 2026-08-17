@@ -1304,6 +1304,20 @@ export class McpConnectionService {
   }
 
   private async ensureManagedConnectorServers(connectors: ManagedConnectorRegistration[]) {
+    // A row carrying a tenant's own OAuth application is never recreated here,
+    // because only the credentials path holds the secret. Its scopes must still
+    // follow the catalog: a row registered before a scope was corrected would
+    // otherwise keep requesting the old set forever, and the only escape would
+    // be re-entering a secret nobody can read back. Reconciling on the way into
+    // an authorization means the correction lands exactly when it matters.
+    const tenantOwned = connectors.filter((connector) => connector.credentialMode === "tenant");
+    if (tenantOwned.length && typeof this.gateway.syncOAuthMcpServerScopes === "function") {
+      const sync = this.gateway.syncOAuthMcpServerScopes.bind(this.gateway);
+      await Promise.all(tenantOwned.map((connector) => sync({
+        serverId: connector.serverId,
+        scopes: connector.scopes,
+      })));
+    }
     const managed = connectors
       .filter((connector) => this.isOnDemandConnector(connector))
       .map((connector) => ({
