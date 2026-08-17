@@ -456,6 +456,81 @@ function WorkspaceAssignment({ label, icon: Icon, children, detail }) {
   );
 }
 
+const countedItem = (count, singular, plural = `${singular}s`) => `${count} ${count === 1 ? singular : plural}`;
+
+function WorkspaceDeletionDialog({ request, onChange, onConfirm, onClose }) {
+  const { target, impact, loading, error, contentDisposition, busy } = request;
+  const protectedItems = (impact?.protectedConversations ?? 0) + (impact?.protectedArtifacts ?? 0);
+  const historySummary = impact
+    ? `${countedItem(impact.conversations, "chat")} and ${countedItem(impact.artifacts, "artifact")}`
+    : "Chats and artifacts";
+
+  return (
+    <ModalDialog
+      className="workspace-deletion-modal"
+      title={`Delete ${workspaceName(target)}?`}
+      description="The stopped runtime and workspace home will be removed. Choose what happens to durable chats and artifacts separately."
+      onClose={busy ? () => undefined : onClose}
+      labelledBy="workspace-deletion-title"
+      eyebrow="Delete workspace"
+    >
+      {loading ? <p className="workspace-deletion-status" role="status">Checking durable content…</p> : <>
+        {error && <p className="workspace-deletion-error" role="alert">{error}</p>}
+        <fieldset className="workspace-deletion-options" disabled={busy || Boolean(error)}>
+          <legend>Durable content</legend>
+          <label className={contentDisposition === "preserve" ? "selected" : ""}>
+            <input
+              type="radio"
+              name="workspace-content-disposition"
+              value="preserve"
+              checked={contentDisposition === "preserve"}
+              onChange={() => onChange("preserve")}
+            />
+            <span className="profile-radio" aria-hidden="true" />
+            <span>
+              <strong>Keep chats and artifacts</strong>
+              <small>{historySummary} will be preserved and become available again if you recreate this workspace.</small>
+            </span>
+          </label>
+          <label className={`destructive${contentDisposition === "delete" ? " selected" : ""}`}>
+            <input
+              type="radio"
+              name="workspace-content-disposition"
+              value="delete"
+              checked={contentDisposition === "delete"}
+              onChange={() => onChange("delete")}
+            />
+            <span className="profile-radio" aria-hidden="true" />
+            <span>
+              <strong>Delete eligible chats and artifacts</strong>
+              <small>{historySummary} will be staged for retention-controlled deletion. Shared, exported, and legally held content stays protected.</small>
+            </span>
+          </label>
+        </fieldset>
+        {contentDisposition === "delete" && protectedItems > 0 && (
+          <p className="workspace-deletion-protected">
+            <Info24Regular aria-hidden="true" />
+            {countedItem(protectedItems, "protected item")} will not be deleted.
+          </p>
+        )}
+      </>}
+      <div className="modal-actions">
+        <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+        <button
+          className="primary-button destructive-button"
+          type="button"
+          onClick={onConfirm}
+          disabled={loading || Boolean(error) || !impact || busy}
+          aria-busy={busy}
+        >
+          <Delete24Regular aria-hidden="true" />
+          {busy ? "Deleting…" : contentDisposition === "delete" ? "Delete and stage content" : "Delete workspace"}
+        </button>
+      </div>
+    </ModalDialog>
+  );
+}
+
 function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
@@ -5685,6 +5760,7 @@ export function App() {
   const [selectedSandboxGrantId, setSelectedSandboxGrantId] = useState(null);
   const [sandboxError, setSandboxError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
+  const [workspaceDeletion, setWorkspaceDeletion] = useState(null);
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
   const [revisionSaving, setRevisionSaving] = useState(false);
   const surfacedApprovalIds = useRef(new Set());
@@ -6441,14 +6517,35 @@ export function App() {
   };
 
   const deleteWorkspace = async (targetWorkspace = workspace) => {
-    if (!targetWorkspace || !await requestConfirmation({
-      title: "Delete this workspace record?",
-      description: "The stopped workspace record and its retained home storage will be removed. You can create a new workspace later.",
-      confirmLabel: "Delete workspace",
-      danger: true,
-    })) return;
+    if (!targetWorkspace) return;
+    setWorkspaceDeletion({
+      target: targetWorkspace,
+      contentDisposition: "preserve",
+      impact: null,
+      loading: true,
+      error: "",
+      busy: false,
+    });
     try {
-      await workspaceApi.delete(targetWorkspace.id);
+      const impact = await workspaceApi.deletionImpact(targetWorkspace.id);
+      setWorkspaceDeletion((current) => current?.target.id === targetWorkspace.id
+        ? { ...current, impact, loading: false }
+        : current);
+    } catch (error) {
+      setWorkspaceDeletion((current) => current?.target.id === targetWorkspace.id
+        ? { ...current, loading: false, error: error?.message ?? "Durable content could not be checked." }
+        : current);
+    }
+  };
+
+  const confirmWorkspaceDeletion = async () => {
+    const request = workspaceDeletion;
+    if (!request?.target || !request.impact || request.loading || request.busy) return;
+    const targetWorkspace = request.target;
+    setWorkspaceDeletion((current) => current ? { ...current, busy: true, error: "" } : current);
+    setWorkspaceActionId(targetWorkspace.id);
+    try {
+      await workspaceApi.delete(targetWorkspace.id, request.contentDisposition);
       const remaining = homeWorkspaces.filter((item) => item.id !== targetWorkspace.id);
       setHomeWorkspaces(remaining);
       if (targetWorkspace.id === workspace?.id) {
@@ -6460,9 +6557,16 @@ export function App() {
         setChatHistoryHasMore(false);
         setActiveChatSessionId("");
       }
-      setToast(`${workspaceName(targetWorkspace)} deleted.`);
+      setWorkspaceDeletion(null);
+      setToast(request.contentDisposition === "delete"
+        ? `${workspaceName(targetWorkspace)} deleted. Eligible chats and artifacts were staged for deletion.`
+        : `${workspaceName(targetWorkspace)} deleted. Chats and artifacts were preserved.`);
     } catch (error) {
-      showApiError(error);
+      setWorkspaceDeletion((current) => current
+        ? { ...current, busy: false, error: error?.message ?? "The workspace could not be deleted." }
+        : current);
+    } finally {
+      setWorkspaceActionId("");
     }
   };
 
@@ -7831,6 +7935,15 @@ export function App() {
           danger={confirmation.danger}
           onConfirm={() => settleConfirmation(true)}
           onCancel={() => settleConfirmation(false)}
+        />
+      )}
+
+      {workspaceDeletion && (
+        <WorkspaceDeletionDialog
+          request={workspaceDeletion}
+          onChange={(contentDisposition) => setWorkspaceDeletion((current) => current ? { ...current, contentDisposition } : current)}
+          onConfirm={confirmWorkspaceDeletion}
+          onClose={() => setWorkspaceDeletion(null)}
         />
       )}
 

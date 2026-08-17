@@ -124,6 +124,45 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
     }));
     assert.equal((await pool.query("SELECT count(*)::int AS count FROM artifacts WHERE id=$1", [rollbackArtifactId])).rows[0].count, 0);
     assert.equal((await pool.query("SELECT state FROM artifact_staging_uploads WHERE id=$1", [rollbackUploadId])).rows[0].state, "finalizing");
+
+    assert.deepEqual(await workspaces.getDeletionImpact(identity, workspace.id), {
+      conversations: 2,
+      artifacts: 1,
+      protectedConversations: 0,
+      protectedArtifacts: 0,
+    });
+    assert.equal(await workspaces.tombstone(identity, workspace.id, "preserve"), true);
+    assert.equal(await workspaces.getOwned(identity, workspace.id), null);
+    assert.deepEqual((await pool.query(
+      "SELECT deletion_content_disposition,state FROM workspaces WHERE id=$1",
+      [workspace.id],
+    )).rows[0], { deletion_content_disposition: "preserve", state: "stopped" });
+    assert.deepEqual((await pool.query(
+      "SELECT state FROM chat_conversations WHERE id=ANY($1::uuid[]) ORDER BY id",
+      [[conversation.id, fork.id]],
+    )).rows.map((row) => row.state), ["active", "active"]);
+    assert.equal((await pool.query("SELECT state FROM artifacts WHERE id=$1", [artifactId])).rows[0].state, "available");
+
+    const recreated = await workspaces.createOrGet(identity, `grant-${suffix}`, randomUUID());
+    assert.equal(recreated.id, workspace.id, "recreating the same logical workspace revives its durable history");
+    assert.equal(recreated.deletedAt, null);
+    assert.equal((await chats.listConversations(identity, workspace.id, { limit: 20 })).conversations.length, 2);
+
+    await pool.query(
+      "UPDATE chat_conversations SET retention_class='legal_hold' WHERE id=$1",
+      [conversation.id],
+    );
+    assert.deepEqual(await workspaces.getDeletionImpact(identity, workspace.id), {
+      conversations: 2,
+      artifacts: 1,
+      protectedConversations: 1,
+      protectedArtifacts: 1,
+    });
+    assert.equal(await workspaces.tombstone(identity, workspace.id, "delete"), true);
+    assert.equal(await workspaces.getOwned(identity, workspace.id), null);
+    assert.equal((await pool.query("SELECT state FROM chat_conversations WHERE id=$1", [conversation.id])).rows[0].state, "active");
+    assert.equal((await pool.query("SELECT state FROM chat_conversations WHERE id=$1", [fork.id])).rows[0].state, "staged_delete");
+    assert.equal((await pool.query("SELECT state FROM artifacts WHERE id=$1", [artifactId])).rows[0].state, "available");
   } finally {
     await Promise.all([pool.end(), workspaces.close(), chats.close()]);
   }

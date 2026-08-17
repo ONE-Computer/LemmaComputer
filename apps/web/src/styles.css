@@ -1901,6 +1901,63 @@ textarea:focus-visible,
 
 .workspace-card-actions > .danger-button { margin-left: auto; }
 
+.modal-card.workspace-deletion-modal { width: min(100%, 720px); }
+
+.workspace-deletion-options {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.workspace-deletion-options legend {
+  margin-bottom: 9px;
+  color: #273545;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-deletion-options label {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  padding: 15px 16px;
+  border: 1px solid #ccd3db;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.workspace-deletion-options label:hover { border-color: #7388a5; }
+.workspace-deletion-options label.selected { border-color: var(--navy); background: #f5f8fc; box-shadow: inset 0 0 0 1px var(--navy); }
+.workspace-deletion-options label.destructive.selected { border-color: #a73a34; background: #fff7f6; box-shadow: inset 0 0 0 1px #a73a34; }
+.workspace-deletion-options label:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent); outline-offset: 2px; }
+.workspace-deletion-options input { position: absolute; opacity: 0; pointer-events: none; }
+.workspace-deletion-options .profile-radio { width: 18px; height: 18px; margin-top: 2px; border: 1.5px solid #8994a2; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 4px #fff; }
+.workspace-deletion-options label.selected .profile-radio { border-color: var(--navy); background: var(--navy); }
+.workspace-deletion-options label.destructive.selected .profile-radio { border-color: #a73a34; background: #a73a34; }
+.workspace-deletion-options label > span:last-child { display: grid; gap: 5px; }
+.workspace-deletion-options strong { color: #172334; font-size: 14px; }
+.workspace-deletion-options small { color: #5c6875; font-size: 13px; line-height: 1.45; }
+.workspace-deletion-options:disabled label { cursor: not-allowed; opacity: .65; }
+
+.workspace-deletion-status,
+.workspace-deletion-error,
+.workspace-deletion-protected {
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-deletion-status { color: #405064; background: #f3f6f9; }
+.workspace-deletion-error { color: #87342c; background: #fff4f2; }
+.workspace-deletion-protected { display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; color: #735700; background: #fff7df; }
+.workspace-deletion-protected svg { flex: 0 0 auto; }
+
 .workspace-overview-empty {
   display: flex;
   align-items: center;

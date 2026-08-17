@@ -11,6 +11,8 @@ import {
   type RuntimePolicy,
   type Sandbox,
   type SignedPolicyBundle,
+  type WorkspaceContentDisposition,
+  type WorkspaceDeletionImpact,
   type WorkspaceView,
 } from "@lemmacomputer/contracts";
 import { deriveEgressProxySecret, issueEgressProxyGrant } from "@lemmacomputer/egress-policy";
@@ -767,13 +769,22 @@ export class WorkspaceService {
     return toView(record, undefined, policy);
   }
 
-  async delete(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {
+  async deletionImpact(identity: IdentityContext, workspaceId: string): Promise<WorkspaceDeletionImpact> {
+    await this.owned(identity, workspaceId);
+    const impact = await this.store.getDeletionImpact(identity, workspaceId);
+    if (!impact) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    return impact;
+  }
+
+  async delete(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, contentDisposition: WorkspaceContentDisposition = "preserve") {
     const record = await this.owned(identity, workspaceId);
     await this.store.revokeAccessGrants(record.id);
     if (record.providerId) await this.controller.destroyWorkspace(record.id, record.providerId);
     await this.controller.purgeWorkspace(record.id, record.accessGeneration);
-    await this.revokeAgentGrants(record.id, policy);
-    await this.store.remove(identity, record.id);
+    await this.revokeAgentGrantsReliably(record.id, policy);
+    if (!await this.store.tombstone(identity, record.id, contentDisposition)) {
+      throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    }
   }
 
   async testGateway(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string) {

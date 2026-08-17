@@ -752,6 +752,21 @@ export const createWorkspaceSchema = z.object({
   grantId: z.string().min(1).max(128).default("personal"),
 });
 
+export const workspaceContentDispositionSchema = z.enum(["preserve", "delete"]);
+export type WorkspaceContentDisposition = z.infer<typeof workspaceContentDispositionSchema>;
+
+export const deleteWorkspaceSchema = z.object({
+  contentDisposition: workspaceContentDispositionSchema.default("preserve"),
+});
+
+export const workspaceDeletionImpactSchema = z.object({
+  conversations: z.number().int().nonnegative(),
+  artifacts: z.number().int().nonnegative(),
+  protectedConversations: z.number().int().nonnegative(),
+  protectedArtifacts: z.number().int().nonnegative(),
+});
+export type WorkspaceDeletionImpact = z.infer<typeof workspaceDeletionImpactSchema>;
+
 export const identityContextSchema = z.object({
   tenantId: z.string().min(1).max(128),
   subjectId: z.string().min(1).max(128),

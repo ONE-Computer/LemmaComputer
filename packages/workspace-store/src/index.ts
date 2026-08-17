@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { activityEventSchema, LemmaComputerError } from "@lemmacomputer/contracts";
-import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceRequestedServiceClass, WorkspaceState } from "@lemmacomputer/contracts";
+import type { ActivityEventDraft, ActivityEventV1, AgentCatalogId, ChatAgentCatalogId, ChatArtifact, GovernedOperationState, IdentityContext, OwnedJson, PolicyVerificationKey, SandboxApplicationId, SandboxModelAlias, SandboxProfileId, WorkspaceContentDisposition, WorkspaceDeletionImpact, WorkspaceRequestedServiceClass, WorkspaceState } from "@lemmacomputer/contracts";
 import { assertWorkspaceSchemaCompatible, runWorkspaceMigrations } from "./migrations.js";
 export * from "./identity-policy.js";
 export * from "./agent-instances.js";
@@ -35,6 +35,8 @@ export type WorkspaceRecord = {
   operationToken: string | null;
   accessGeneration: number;
   workspaceNodeId?: string | null;
+  deletedAt: Date | null;
+  deletionContentDisposition: WorkspaceContentDisposition | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -469,6 +471,8 @@ export interface WorkspaceStore {
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   revokeAccessGrants(workspaceId: string): Promise<WorkspaceRecord>;
+  getDeletionImpact(identity: IdentityContext, workspaceId: string): Promise<WorkspaceDeletionImpact | null>;
+  tombstone(identity: IdentityContext, workspaceId: string, contentDisposition: WorkspaceContentDisposition): Promise<boolean>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
   getSandboxSettings?(identity: IdentityContext, grantId: string): Promise<SandboxSettingsRecord | null>;
   saveSandboxSettings?(identity: IdentityContext, input: { grantId: string; profileId: SandboxProfileId; applicationIds: SandboxApplicationId[]; modelAlias: SandboxModelAlias | null; requestedServiceClass: WorkspaceRequestedServiceClass; agentIds: AgentCatalogId[] }): Promise<SandboxSettingsRecord>;
@@ -509,6 +513,8 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   operationToken: row.operation_token ? String(row.operation_token) : null,
   accessGeneration: Number(row.access_generation ?? 1),
   workspaceNodeId: row.workspace_node_id == null ? null : String(row.workspace_node_id),
+  deletedAt: row.deleted_at == null ? null : new Date(String(row.deleted_at)),
+  deletionContentDisposition: row.deletion_content_disposition == null ? null : String(row.deletion_content_disposition) as WorkspaceContentDisposition,
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });
@@ -900,7 +906,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async getCurrent(identity: IdentityContext, grantId: string) {
     const result = await this.pool.query(
-      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3",
+      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 AND grant_id=$3 AND deleted_at IS NULL",
       [identity.tenantId, identity.subjectId, grantId],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
@@ -908,7 +914,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async listCurrent(identity: IdentityContext) {
     const result = await this.pool.query(
-      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 ORDER BY created_at DESC,id ASC",
+      "SELECT * FROM workspaces WHERE tenant_id=$1 AND subject_id=$2 AND deleted_at IS NULL ORDER BY created_at DESC,id ASC",
       [identity.tenantId, identity.subjectId],
     );
     return result.rows.map(mapRow);
@@ -916,7 +922,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async listTenantCurrent(tenantId: string) {
     const result = await this.pool.query(
-      "SELECT * FROM workspaces WHERE tenant_id=$1 ORDER BY created_at DESC,id ASC",
+      "SELECT * FROM workspaces WHERE tenant_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC,id ASC",
       [tenantId],
     );
     return result.rows.map(mapRow);
@@ -924,7 +930,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const result = await this.pool.query(
-      "SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3",
+      "SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND deleted_at IS NULL",
       [workspaceId, identity.tenantId, identity.subjectId],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
@@ -937,6 +943,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
        LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=workspace.tenant_id
        WHERE workspace.id=$1 AND workspace.tenant_id=$2 AND workspace.subject_id=$3
          AND workspace.access_generation=$4 AND workspace.state=ANY($5::text[])
+         AND workspace.deleted_at IS NULL
          AND organization.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'
          AND NOT EXISTS (
            SELECT 1 FROM platform_tenant_cleanup_jobs cleanup
@@ -969,7 +976,24 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       );
       let record: WorkspaceRecord;
       if (existing.rowCount) {
-        record = mapRow(existing.rows[0]);
+        if (existing.rows[0].deleted_at == null) {
+          record = mapRow(existing.rows[0]);
+        } else {
+          const revived = await client.query(
+            `UPDATE workspaces SET
+               state='not_created',provider_id=NULL,failure_code=NULL,operation_token=NULL,
+               deleted_at=NULL,deletion_content_disposition=NULL,updated_at=$2,
+               workspace_node_id=(
+                 SELECT assignment.workspace_node_id
+                 FROM tenant_workspace_node_assignments assignment
+                 JOIN workspace_nodes node ON node.id=assignment.workspace_node_id
+                 WHERE assignment.tenant_id=$3 AND node.state='active'
+               )
+             WHERE id=$1 RETURNING *`,
+            [existing.rows[0].id, new Date(), identity.tenantId],
+          );
+          record = mapRow(revived.rows[0]);
+        }
       } else {
         const id = randomUUID();
         const now = new Date();
@@ -1005,7 +1029,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState) {
     const token = randomUUID();
     const result = await this.pool.query(
-      "UPDATE workspaces SET state=$2, operation_token=$3, failure_code=NULL, updated_at=now() WHERE id=$1 AND state=ANY($4::text[]) RETURNING *",
+      "UPDATE workspaces SET state=$2, operation_token=$3, failure_code=NULL, updated_at=now() WHERE id=$1 AND state=ANY($4::text[]) AND deleted_at IS NULL RETURNING *",
       [workspaceId, next, token, allowed],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
@@ -1013,7 +1037,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>) {
     const result = await this.pool.query(
-      "UPDATE workspaces SET state=COALESCE($3,state), provider_id=CASE WHEN $5 THEN $4 ELSE provider_id END, failure_code=$6, operation_token=NULL, updated_at=now() WHERE id=$1 AND operation_token=$2 RETURNING *",
+      "UPDATE workspaces SET state=COALESCE($3,state), provider_id=CASE WHEN $5 THEN $4 ELSE provider_id END, failure_code=$6, operation_token=NULL, updated_at=now() WHERE id=$1 AND operation_token=$2 AND deleted_at IS NULL RETURNING *",
       [workspaceId, operationToken, patch.state ?? null, patch.providerId ?? null, Object.hasOwn(patch, "providerId"), patch.failureCode ?? null],
     );
     if (!result.rowCount) throw new Error("Workspace operation ownership was lost");
@@ -1022,7 +1046,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>) {
     const result = await this.pool.query(
-      "UPDATE workspaces SET state=COALESCE($2,state), provider_id=CASE WHEN $4 THEN $3 ELSE provider_id END, failure_code=$5, updated_at=now() WHERE id=$1 RETURNING *",
+      "UPDATE workspaces SET state=COALESCE($2,state), provider_id=CASE WHEN $4 THEN $3 ELSE provider_id END, failure_code=$5, updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING *",
       [workspaceId, patch.state ?? null, patch.providerId ?? null, Object.hasOwn(patch, "providerId"), patch.failureCode ?? null],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
@@ -1031,11 +1055,119 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async revokeAccessGrants(workspaceId: string) {
     const result = await this.pool.query(
-      "UPDATE workspaces SET access_generation=access_generation+1, updated_at=now() WHERE id=$1 RETURNING *",
+      "UPDATE workspaces SET access_generation=access_generation+1, updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING *",
       [workspaceId],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
+  }
+
+  async getDeletionImpact(identity: IdentityContext, workspaceId: string) {
+    const result = await this.pool.query(
+      `SELECT
+         (SELECT count(*)::int FROM chat_conversations conversation
+          WHERE conversation.tenant_id=workspace.tenant_id AND conversation.owner_subject_id=workspace.subject_id
+            AND conversation.workspace_id=workspace.id AND conversation.state='active') AS conversations,
+         (SELECT count(*)::int FROM chat_conversations conversation
+          WHERE conversation.tenant_id=workspace.tenant_id AND conversation.owner_subject_id=workspace.subject_id
+            AND conversation.workspace_id=workspace.id AND conversation.state='active'
+            AND conversation.retention_class IN ('legal_hold','export')) AS protected_conversations,
+         (SELECT count(*)::int FROM artifacts artifact
+          WHERE artifact.tenant_id=workspace.tenant_id AND artifact.workspace_id=workspace.id
+            AND artifact.state<>'purged') AS artifacts,
+         (SELECT count(*)::int FROM artifacts artifact
+          WHERE artifact.tenant_id=workspace.tenant_id AND artifact.workspace_id=workspace.id
+            AND artifact.state<>'purged' AND (
+              artifact.retention_class IN ('legal_hold','export') OR EXISTS (
+                SELECT 1 FROM chat_message_artifacts binding
+                JOIN chat_conversations conversation
+                  ON conversation.tenant_id=binding.tenant_id AND conversation.id=binding.conversation_id
+                WHERE binding.tenant_id=artifact.tenant_id AND binding.artifact_id=artifact.id
+                  AND conversation.state='active'
+                  AND (conversation.workspace_id<>workspace.id OR conversation.retention_class IN ('legal_hold','export'))
+              )
+            )) AS protected_artifacts
+       FROM workspaces workspace
+       WHERE workspace.id=$1 AND workspace.tenant_id=$2 AND workspace.subject_id=$3 AND workspace.deleted_at IS NULL`,
+      [workspaceId, identity.tenantId, identity.subjectId],
+    );
+    if (!result.rowCount) return null;
+    return {
+      conversations: Number(result.rows[0].conversations),
+      artifacts: Number(result.rows[0].artifacts),
+      protectedConversations: Number(result.rows[0].protected_conversations),
+      protectedArtifacts: Number(result.rows[0].protected_artifacts),
+    };
+  }
+
+  async tombstone(identity: IdentityContext, workspaceId: string, contentDisposition: WorkspaceContentDisposition) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const workspace = await client.query(
+        `SELECT id FROM workspaces
+         WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [workspaceId, identity.tenantId, identity.subjectId],
+      );
+      if (!workspace.rowCount) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      const now = new Date();
+      if (contentDisposition === "delete") {
+        await client.query(
+          `UPDATE artifact_staging_uploads SET state='abandoned',updated_at=$4
+           WHERE tenant_id=$1 AND owner_subject_id=$2 AND workspace_id=$3
+             AND state IN ('staged','finalizing','failed')`,
+          [identity.tenantId, identity.subjectId, workspaceId, now],
+        );
+        await client.query(
+          `UPDATE artifacts artifact SET state='staged_delete',retention_class='staged_delete',updated_at=$4
+           WHERE artifact.tenant_id=$1 AND artifact.creator_subject_id=$2 AND artifact.workspace_id=$3
+             AND artifact.state IN ('available','failed')
+             AND artifact.retention_class NOT IN ('legal_hold','export')
+             AND NOT EXISTS (
+               SELECT 1 FROM chat_message_artifacts binding
+               JOIN chat_conversations conversation
+                 ON conversation.tenant_id=binding.tenant_id AND conversation.id=binding.conversation_id
+               WHERE binding.tenant_id=artifact.tenant_id AND binding.artifact_id=artifact.id
+                 AND conversation.state='active'
+                 AND (conversation.workspace_id<>$3 OR conversation.retention_class IN ('legal_hold','export'))
+             )`,
+          [identity.tenantId, identity.subjectId, workspaceId, now],
+        );
+        await client.query(
+          `UPDATE chat_conversations SET state='staged_delete',retention_class='staged_delete',updated_at=$4
+           WHERE tenant_id=$1 AND owner_subject_id=$2 AND workspace_id=$3 AND state='active'
+             AND retention_class NOT IN ('legal_hold','export')`,
+          [identity.tenantId, identity.subjectId, workspaceId, now],
+        );
+      }
+      await client.query(
+        "DELETE FROM channel_connections WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3",
+        [identity.tenantId, identity.subjectId, workspaceId],
+      );
+      await client.query(
+        "DELETE FROM schedules WHERE tenant_id=$1 AND subject_id=$2 AND workspace_id=$3",
+        [identity.tenantId, identity.subjectId, workspaceId],
+      );
+      const deleted = await client.query(
+        `UPDATE workspaces SET
+           state='stopped',provider_id=NULL,failure_code=NULL,operation_token=NULL,
+           deleted_at=$4,deletion_content_disposition=$5,updated_at=$4
+         WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND deleted_at IS NULL
+         RETURNING id`,
+        [workspaceId, identity.tenantId, identity.subjectId, now, contentDisposition],
+      );
+      await client.query("COMMIT");
+      return Boolean(deleted.rowCount);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async beginWorkspaceAdministrationCommand(input: {
@@ -2346,16 +2478,16 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   }
 
   async getCurrent(identity: IdentityContext, grantId: string) {
-    return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId) ?? null;
+    return [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId && item.deletedAt === null) ?? null;
   }
   async listCurrent(identity: IdentityContext) {
     return [...this.records.values()]
-      .filter((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId)
+      .filter((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.deletedAt === null)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
   async listTenantCurrent(tenantId: string) {
     return [...this.records.values()]
-      .filter((item) => item.tenantId === tenantId)
+      .filter((item) => item.tenantId === tenantId && item.deletedAt === null)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
   async getSandboxSettings(identity: IdentityContext, grantId: string) {
@@ -2393,27 +2525,34 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   }
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const item = this.records.get(workspaceId);
-    return item?.tenantId === identity.tenantId && item.subjectId === identity.subjectId ? item : null;
+    return item?.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.deletedAt === null ? item : null;
   }
   async authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates: WorkspaceState[] = ["ready", "open"]) {
     const item = this.records.get(input.workspaceId);
     return Boolean(item
       && item.tenantId === input.tenantId
       && item.subjectId === input.subjectId
+      && item.deletedAt === null
       && item.accessGeneration === input.accessGeneration
       && allowedStates.includes(item.state));
   }
   async createOrGet(identity: IdentityContext, grantId: string, _key: string) {
     const existing = [...this.records.values()].find((item) => item.tenantId === identity.tenantId && item.subjectId === identity.subjectId && item.grantId === grantId);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.deletedAt === null) return existing;
+      return this.save(existing, {
+        state: "not_created", providerId: null, failureCode: null, operationToken: null,
+        deletedAt: null, deletionContentDisposition: null,
+      });
+    }
     const now = new Date();
-    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, createdAt: now, updatedAt: now };
+    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, deletedAt: null, deletionContentDisposition: null, createdAt: now, updatedAt: now };
     this.records.set(record.id, record);
     return record;
   }
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState) {
     const record = this.records.get(workspaceId);
-    if (!record || !allowed.includes(record.state)) return null;
+    if (!record || record.deletedAt !== null || !allowed.includes(record.state)) return null;
     const claimed = { ...record, state: next, failureCode: null, operationToken: randomUUID(), updatedAt: new Date() };
     this.records.set(workspaceId, claimed);
     return claimed;
@@ -2430,8 +2569,22 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   }
   async revokeAccessGrants(workspaceId: string) {
     const record = this.records.get(workspaceId);
-    if (!record) throw new Error("Workspace not found");
+    if (!record || record.deletedAt !== null) throw new Error("Workspace not found");
     return this.save(record, { accessGeneration: record.accessGeneration + 1 });
+  }
+  async getDeletionImpact(identity: IdentityContext, workspaceId: string) {
+    return await this.getOwned(identity, workspaceId)
+      ? { conversations: 0, artifacts: 0, protectedConversations: 0, protectedArtifacts: 0 }
+      : null;
+  }
+  async tombstone(identity: IdentityContext, workspaceId: string, contentDisposition: WorkspaceContentDisposition) {
+    const record = await this.getOwned(identity, workspaceId);
+    if (!record) return false;
+    this.save(record, {
+      state: "stopped", providerId: null, failureCode: null, operationToken: null,
+      deletedAt: new Date(), deletionContentDisposition: contentDisposition,
+    });
+    return true;
   }
   async beginWorkspaceAdministrationCommand(input: {
     tenantId: string;

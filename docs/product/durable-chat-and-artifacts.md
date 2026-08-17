@@ -8,6 +8,14 @@ Attachments are accepted inline only at the request boundary. Control immediatel
 
 To continue from an earlier assistant response with a different agent, use the explicit “Continue from here” action. Control creates a child conversation containing normalized history through the selected message. Agent-native session state is deliberately not copied.
 
+## Workspace deletion
+
+Workspace runtime deletion and durable-content retention are separate decisions. The delete dialog preserves chats and artifacts by default. If the user instead chooses to delete content, Control marks eligible conversations and artifacts for retention-controlled deletion; it does not synchronously erase canonical records or object bytes. Legal holds, exports, and artifacts referenced by protected or other-workspace conversations remain protected.
+
+Deleting a workspace tombstones its logical record after its runtime, home, routes, and schedules are removed. Recreating the same workspace grant revives that record with the same opaque workspace ID, so preserved conversations and artifacts become reachable again. Cross-agent continuation still uses an explicit fork of normalized history; workspace recreation never restores vendor-native session state.
+
+Physical purge, retention windows, user-visible deletion status, and a workspace-independent archive/library remain part of the retention lifecycle rather than workspace runtime deletion.
+
 ## Local verification
 
 ```bash

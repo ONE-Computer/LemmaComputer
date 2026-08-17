@@ -111,7 +111,16 @@ export const workspaceApi = {
   restart: (id: string) => retryableMutation<WorkspaceView>(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`),
   stop: (id: string) => retryableMutation<WorkspaceView>(`/api/v1/workspaces/${encodeURIComponent(id)}/stop`),
   testGateway: (id: string) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/gateway/test`, mutation()),
-  delete: (id: string) => request(`/api/v1/workspaces/${encodeURIComponent(id)}`, mutation("DELETE")),
+  deletionImpact: (id: string) => request<{
+    conversations: number;
+    artifacts: number;
+    protectedConversations: number;
+    protectedArtifacts: number;
+  }>(`/api/v1/workspaces/${encodeURIComponent(id)}/deletion-impact`, { cache: "no-store" }),
+  delete: (id: string, contentDisposition: "preserve" | "delete" = "preserve") => request(
+    `/api/v1/workspaces/${encodeURIComponent(id)}`,
+    mutation("DELETE", { contentDisposition }),
+  ),
 };
 
 export const chatApi = {

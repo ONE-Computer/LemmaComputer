@@ -460,15 +460,26 @@ test("stop removes provider authority while retaining an owned stopped record", 
   assert.equal(controller.purges, 0);
 });
 
-test("delete purges persistent storage after removing the runtime", async () => {
+test("delete tombstones the workspace, preserves content by default, and recreates the same logical workspace", async () => {
   const controller = new FakeController();
   const store = new MemoryWorkspaceStore();
   const service = new WorkspaceService(store, controller);
   const workspace = await service.create(alex, policy, "personal", "delete-key-0001", "correlation-1");
+  assert.deepEqual(await service.deletionImpact(alex, workspace.id), {
+    conversations: 0,
+    artifacts: 0,
+    protectedConversations: 0,
+    protectedArtifacts: 0,
+  });
   await service.delete(alex, policy, workspace.id);
   assert.equal(controller.destroys, 1);
   assert.equal(controller.purges, 1);
   assert.equal(await store.getOwned(alex, workspace.id), null);
+
+  const recreated = await service.create(alex, policy, "personal", "delete-key-0002", "correlation-2");
+  assert.equal(recreated.id, workspace.id);
+  assert.equal(recreated.state, "ready");
+  assert.equal(controller.creates, 2);
 });
 
 test("workspace lifecycle provisions, reports, tests, and revokes a scoped gateway grant", async () => {

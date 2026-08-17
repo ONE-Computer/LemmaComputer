@@ -54,6 +54,39 @@ test("workspace creation is shown only when the organization grants workspace.cr
   await expect(page.getByRole("button", { name: "Create workspace" })).toBeVisible();
 });
 
+test("workspace deletion separates runtime removal from durable-content retention", async ({ page }) => {
+  const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d70";
+  let deletionRequest = null;
+  await page.route(`**/api/v1/workspaces/${workspaceId}/deletion-impact`, (route) => route.fulfill({
+    json: {
+      conversations: 3,
+      artifacts: 2,
+      protectedConversations: 1,
+      protectedArtifacts: 1,
+    },
+  }));
+  await page.route(`**/api/v1/workspaces/${workspaceId}`, async (route) => {
+    deletionRequest = route.request().postDataJSON();
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/");
+  const workspace = page.getByRole("article", { name: "Research" });
+  await workspace.getByRole("button", { name: "Delete" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Delete Research?" });
+  await expect(dialog.getByRole("radio", { name: /^Keep chats and artifacts/ })).toBeChecked();
+  await expect(dialog).toContainText("3 chats and 2 artifacts will be preserved");
+  await dialog.getByText("Delete eligible chats and artifacts", { exact: true }).click();
+  await expect(dialog.getByRole("radio", { name: /^Delete eligible chats and artifacts/ })).toBeChecked();
+  await expect(dialog).toContainText("2 protected items will not be deleted");
+  await dialog.getByRole("button", { name: "Delete and stage content" }).click();
+
+  await expect(workspace).toHaveCount(0);
+  await expect(page.getByText("Research deleted. Eligible chats and artifacts were staged for deletion.")).toBeVisible();
+  expect(deletionRequest).toEqual({ contentDisposition: "delete" });
+});
+
 test("an authenticated member can create and manage only their own workspace", async ({ page }) => {
   const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d71";
   let createdWorkspace = null;

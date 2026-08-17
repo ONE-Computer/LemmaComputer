@@ -127,6 +127,7 @@ test("a member owns the complete workspace lifecycle while foreign identifiers r
       assert.deepEqual(listed.json().workspaces, []);
 
       for (const operation of [
+        { method: "GET" as const, suffix: "/deletion-impact" },
         { method: "POST" as const, suffix: "/open" },
         { method: "POST" as const, suffix: "/restart" },
         { method: "POST" as const, suffix: "/stop" },
@@ -168,9 +169,32 @@ test("a member owns the complete workspace lifecycle while foreign identifiers r
     assert.equal(resumed.statusCode, 200);
     assert.equal(resumed.json().state, "ready");
 
-    const deleted = await ownerApp.inject({ method: "DELETE", url: `/v1/workspaces/${workspaceId}`, headers });
+    const impact = await ownerApp.inject({ method: "GET", url: `/v1/workspaces/${workspaceId}/deletion-impact`, headers });
+    assert.equal(impact.statusCode, 200);
+    assert.deepEqual(impact.json(), {
+      conversations: 0,
+      artifacts: 0,
+      protectedConversations: 0,
+      protectedArtifacts: 0,
+    });
+
+    const deleted = await ownerApp.inject({
+      method: "DELETE",
+      url: `/v1/workspaces/${workspaceId}`,
+      headers,
+      payload: { contentDisposition: "delete" },
+    });
     assert.equal(deleted.statusCode, 204);
     assert.equal(await store.getOwned(member.identity, workspaceId), null);
+
+    const recreated = await ownerApp.inject({
+      method: "POST",
+      url: "/v1/workspaces",
+      headers: { ...headers, "idempotency-key": "member-workspace-recreate-0001" },
+      payload: { grantId: "personal" },
+    });
+    assert.equal(recreated.statusCode, 201);
+    assert.equal(recreated.json().id, workspaceId);
   } finally {
     await Promise.all([ownerApp.close(), siblingApp.close(), foreignApp.close()]);
   }

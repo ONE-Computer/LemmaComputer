@@ -301,6 +301,7 @@ export class PostgresChatStore implements ChatStore {
        SELECT $1,$2,workspace.id,$3,$4,$5,$6,$7,$8,$8
        FROM workspaces workspace
        WHERE workspace.id=$9 AND workspace.tenant_id=$2 AND workspace.subject_id=$3
+         AND workspace.deleted_at IS NULL
        RETURNING *`,
       [id, input.identity.tenantId, input.identity.subjectId, input.defaultAgentCatalogId,
         input.title ?? null, input.requestedServiceClass, input.reasoningEffort ?? null, now, input.workspaceId],
