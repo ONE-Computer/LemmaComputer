@@ -226,17 +226,17 @@ test("the default catalog covers the required categories and registers a remote 
     gmail: {
       endpointUrl: "https://gmailmcp.googleapis.com/mcp/v1",
       authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-      scopes: [],
+      scopes: ["https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.compose"],
     },
     "google-drive": {
       endpointUrl: "https://drivemcp.googleapis.com/mcp/v1",
       authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-      scopes: [],
+      scopes: ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/drive.file"],
     },
     "google-calendar": {
       endpointUrl: "https://calendarmcp.googleapis.com/mcp/v1",
       authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-      scopes: [],
+      scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.readonly"],
     },
     canva: {
       endpointUrl: "https://mcp.canva.com/mcp",

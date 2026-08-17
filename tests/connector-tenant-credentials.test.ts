@@ -9,6 +9,7 @@ import type {
 } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { McpConnectionService } from "../apps/control-api/src/connections.js";
+import { catalogCredentialSetup, connectorCatalog } from "../apps/control-api/src/connector-catalog.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -153,7 +154,9 @@ test("rotating an application replaces the client in place and retires live conn
     serverId,
     clientId: "second-client",
     clientSecret: "second-secret",
-    scopes: [],
+    // Rotation carries the connector's scopes, so a replacement client is not
+    // quietly downgraded to a token that cannot list tools.
+    scopes: catalogCredentialSetup("gmail")!.scopes,
   }]);
   assert.equal(rotated.serverName, serverName);
   assert.equal(rotated.credentials?.clientId, "second-client");
@@ -273,4 +276,41 @@ test("the credentials route returns what is configured and never the secret", as
   } finally {
     await app.close();
   }
+});
+
+test("a connector that needs an application asks for the scopes its setup tells you to register", async () => {
+  // A connector registered with no scopes still completes its OAuth flow, so it
+  // reports Connected while the provider refuses tools/list. The result is a
+  // connector that looks healthy, projects nothing to any agent, and gives no
+  // indication why. Google's remote MCP endpoints answer 403 in exactly this
+  // case.
+  const catalog = connectorCatalog("acme", "http://localhost:3001");
+  const credentialed = catalog.filter((connector) => catalogCredentialSetup(connector.id));
+  assert.ok(credentialed.length >= 4, "Gmail, Drive, Calendar, and GitHub all need an application");
+
+  for (const connector of credentialed) {
+    const setup = catalogCredentialSetup(connector.id)!;
+    assert.ok(connector.scopes.length, `${connector.id} must request scopes, not rely on discovery`);
+    // The console guidance and the authorization request are the same list, so
+    // an administrator cannot register one set and have the connector ask for
+    // another.
+    assert.deepEqual(
+      [...connector.scopes].sort(),
+      [...setup.scopes].sort(),
+      `${connector.id} must request exactly the scopes its guidance asks to register`,
+    );
+  }
+});
+
+test("tenant credentials register the connector's scopes with the gateway", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const gateway = new SharedGateway();
+  const connections = service(gateway, registry);
+  await connections.saveConnectorCredentials(acme, "admin-acme", "gmail", {
+    clientId: "acme-client",
+    clientSecret: "acme-secret",
+  });
+  const registered = gateway.registered[0]!;
+  assert.ok(registered.scopes.length, "an empty scope list produces a connector that cannot list tools");
+  assert.deepEqual(registered.scopes, catalogCredentialSetup("gmail")!.scopes);
 });

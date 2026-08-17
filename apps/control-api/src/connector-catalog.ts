@@ -46,6 +46,26 @@ export type ConnectorCredentialSetup = {
   scopesNote: string;
 };
 
+// Google's remote MCP endpoints refuse tools/list with 403 unless the access
+// token already carries usable scopes. An entry that declares none is
+// registered asking for nothing, so the connection completes, the toolset comes
+// back empty, and the connector looks connected while being unusable. Declare
+// the scopes explicitly, and keep them equal to the scopes the setup guidance
+// tells an administrator to register, so the request and the consent screen
+// cannot drift apart.
+const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.compose",
+];
+const GOOGLE_DRIVE_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+];
+const GOOGLE_CALENDAR_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.readonly",
+];
+
 const googleWorkspaceSetup = (api: string, scopes: string[]): ConnectorCredentialSetup => ({
   console: "Google Cloud console",
   consoleUrl: "https://console.cloud.google.com/auth/clients",
@@ -166,13 +186,7 @@ const remoteCatalog: CatalogConnector[] = [
   remote({
     id: "gmail",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Gmail API", [
-      "https://mail.google.com/",
-      "https://www.googleapis.com/auth/gmail.modify",
-      "https://www.googleapis.com/auth/gmail.compose",
-      "https://www.googleapis.com/auth/gmail.readonly",
-      "https://www.googleapis.com/auth/gmail.metadata",
-    ]),
+    credentialSetup: googleWorkspaceSetup("Gmail API", GMAIL_SCOPES),
     serverId: "lemmacomputer_gmail",
     serverName: "lemmacomputer_gmail",
     name: "Gmail",
@@ -182,17 +196,13 @@ const remoteCatalog: CatalogConnector[] = [
     services: ["Mail", "Drafts", "Search"],
     endpointUrl: "https://gmailmcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-    scopes: [],
+    scopes: GMAIL_SCOPES,
     brand: "gmail",
   }),
   remote({
     id: "google-drive",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Google Drive API", [
-      "https://www.googleapis.com/auth/drive",
-      "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-    ]),
+    credentialSetup: googleWorkspaceSetup("Google Drive API", GOOGLE_DRIVE_SCOPES),
     serverId: "lemmacomputer_google_drive",
     serverName: "lemmacomputer_google_drive",
     name: "Google Drive",
@@ -202,26 +212,13 @@ const remoteCatalog: CatalogConnector[] = [
     services: ["Files", "Folders", "Search"],
     endpointUrl: "https://drivemcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-    scopes: [],
+    scopes: GOOGLE_DRIVE_SCOPES,
     brand: "google-drive",
   }),
   remote({
     id: "google-calendar",
     requiresCredentials: "google-workspace",
-    credentialSetup: googleWorkspaceSetup("Google Calendar API", [
-      "https://www.googleapis.com/auth/calendar",
-      "https://www.googleapis.com/auth/calendar.acls",
-      "https://www.googleapis.com/auth/calendar.calendarlist",
-      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-      "https://www.googleapis.com/auth/calendar.calendars",
-      "https://www.googleapis.com/auth/calendar.calendars.readonly",
-      "https://www.googleapis.com/auth/calendar.events",
-      "https://www.googleapis.com/auth/calendar.events.freebusy",
-      "https://www.googleapis.com/auth/calendar.events.readonly",
-      "https://www.googleapis.com/auth/calendar.freebusy",
-      "https://www.googleapis.com/auth/calendar.readonly",
-      "https://www.googleapis.com/auth/calendar.settings.readonly",
-    ]),
+    credentialSetup: googleWorkspaceSetup("Google Calendar API", GOOGLE_CALENDAR_SCOPES),
     serverId: "lemmacomputer_google_calendar",
     serverName: "lemmacomputer_google_calendar",
     name: "Google Calendar",
@@ -231,7 +228,7 @@ const remoteCatalog: CatalogConnector[] = [
     services: ["Events", "Availability", "Scheduling"],
     endpointUrl: "https://calendarmcp.googleapis.com/mcp/v1",
     authorizationOrigins: ["https://accounts.google.com", "https://oauth2.googleapis.com"],
-    scopes: [],
+    scopes: GOOGLE_CALENDAR_SCOPES,
     brand: "google-calendar",
   }),
   remote({
