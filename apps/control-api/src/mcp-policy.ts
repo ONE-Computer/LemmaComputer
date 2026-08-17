@@ -10,7 +10,14 @@ import {
   type McpPolicyRequest,
   type OwnedJson,
 } from "@lemmacomputer/contracts";
-import { runtimePolicyFor, type GovernanceStore, type IdentityPolicyStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import {
+  runtimePolicyFor,
+  type EffectivePolicy,
+  type GovernanceStore,
+  type IdentityPolicyStore,
+  type SessionPrincipal,
+  type WorkspaceStore,
+} from "@lemmacomputer/workspace-store";
 import { z } from "zod";
 import type { GovernedOperationService } from "./operations.js";
 
@@ -224,6 +231,8 @@ export type HostedToolPolicy = {
   decision: "allow" | "approval_required" | "deny";
 };
 
+export type McpEffectivePolicyResolver = (principal: SessionPrincipal) => Promise<EffectivePolicy | null>;
+
 const definition = (
   capabilityId: string,
   schemaId: string,
@@ -403,6 +412,7 @@ export class McpPolicyService {
     private readonly identityPolicies: IdentityPolicyStore,
     private readonly governance: WorkspaceStore & GovernanceStore,
     private readonly operations: GovernedOperationService,
+    private readonly resolveEffectivePolicy: McpEffectivePolicyResolver,
     private readonly hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
   ) {}
 
@@ -419,12 +429,12 @@ export class McpPolicyService {
       subjectId: request.subjectId,
       audience: "lemmacomputer-control",
     };
-    const [principal, effectivePolicy, workspace] = await Promise.all([
+    const [principal, workspace] = await Promise.all([
       this.identityPolicies.getPrincipal(request.subjectId),
-      this.identityPolicies.getEffectivePolicy(request.subjectId),
       this.governance.getOwned(identity, request.workspaceId),
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return denied("MCP_IDENTITY_MISMATCH", capability);
+    const effectivePolicy = await this.resolveEffectivePolicy(principal);
     if (!effectivePolicy || !workspace) return denied("MCP_POLICY_NOT_ASSIGNED", capability);
     // The policy callback is a privileged boundary in its own right. A token
     // projected into a sandbox must not be able to authorize MCP work while
@@ -435,9 +445,9 @@ export class McpPolicyService {
     const runtime = runtimePolicyFor(effectivePolicy);
     const catalogRuntime = runtimePolicyFor(effectivePolicy, undefined, undefined, ownedAgentCatalog.map((agent) => agent.id).filter(isWorkspaceSelectableAgentCatalogId));
     const allowedAgentIds = new Set([runtime.agentId, ...(catalogRuntime.agents?.map((agent) => agent.agentId) ?? [])]);
-    // Connector credentials and effective policy are user-scoped. Workspace
-    // isolation comes from the exact owned lookup above and from the
-    // workspace/agent/policy metadata on the LiteLLM grant.
+    // Connector credentials and the composed effective member policy are
+    // user-scoped. Workspace isolation comes from the exact owned lookup above
+    // and from the workspace/agent/policy metadata on the LiteLLM grant.
     const bindingMatches = allowedAgentIds.has(request.agentId)
       && runtime.policyVersionId === request.policyVersionId
       && runtime.policyHash === request.policyHash
@@ -575,12 +585,12 @@ export class McpPolicyService {
       schemaHash,
       operationId,
     });
-    const [principal, effectivePolicy, workspace] = await Promise.all([
+    const [principal, workspace] = await Promise.all([
       this.identityPolicies.getPrincipal(request.subjectId),
-      this.identityPolicies.getEffectivePolicy(request.subjectId),
       this.governance.getOwned(identity, request.workspaceId),
     ]);
     if (!principal || principal.tenantId !== request.tenantId) return genericDecision("deny", "MCP_IDENTITY_MISMATCH");
+    const effectivePolicy = await this.resolveEffectivePolicy(principal);
     if (!effectivePolicy || !workspace) return genericDecision("deny", "MCP_POLICY_NOT_ASSIGNED");
     if (!["ready", "open"].includes(workspace.state)) return genericDecision("deny", "MCP_WORKSPACE_NOT_READY");
     const runtime = runtimePolicyFor(effectivePolicy);

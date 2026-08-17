@@ -1028,6 +1028,10 @@ export function createControlServer(
     security.identityPolicyStore,
     store,
     operations,
+    async (actor) => {
+      const assigned = await security.identityPolicyStore!.getEffectivePolicy(actor.userId);
+      return (await effectivePolicyFor(actor, assigned)).effective;
+    },
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
   ) : undefined;
   const toolAudit = security.toolAuditStore ? new ToolAuditService(
@@ -1337,13 +1341,13 @@ export function createControlServer(
     if (await allowsWorkspaceGrantPermission(actor, permission, owner, grantId)) return actor;
     throw new LemmaComputerError("FORBIDDEN", "Your organization role does not allow this action", 403);
   };
-  const effectivePolicyFor = async (value: SessionPrincipal, effective: EffectivePolicy | null) => {
+  async function effectivePolicyFor(value: SessionPrincipal, effective: EffectivePolicy | null) {
     const organizationPolicy = await security.protectedWorkspacePolicy?.currentOrganizationPolicy?.(value.tenantId) ?? null;
     return {
       effective: effective && organizationPolicy ? constrainEffectivePolicy(effective, organizationPolicy) : effective,
       organizationPolicy,
     };
-  };
+  }
   const assignedPolicy = async (request: object) => {
     const value = principal(request);
     const effective = security.identityPolicyStore ? await security.identityPolicyStore.getEffectivePolicy(value.userId) : null;

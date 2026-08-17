@@ -4,7 +4,7 @@ import test from "node:test";
 import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest } from "@lemmacomputer/contracts";
 import type { GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
-import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy } from "../apps/control-api/src/mcp-policy.js";
+import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy, type McpEffectivePolicyResolver } from "../apps/control-api/src/mcp-policy.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
@@ -12,7 +12,10 @@ const agentId = randomUUID();
 const policyVersionId = randomUUID();
 const policyHash = "a".repeat(64);
 
-const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>) => {
+const setup = async (
+  hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
+  composeEffectivePolicy?: (assigned: EffectivePolicy) => EffectivePolicy | null,
+) => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());
   await store.update(workspace.id, { state: "ready" });
@@ -52,7 +55,18 @@ const setup = async (hostedToolPolicy?: (identity: IdentityContext, serverName: 
   } as unknown as IdentityPolicyStore;
   const executor = { executeGovernedTool: async () => ({ upstreamReference: "unused", resultSummary: "unused", result: {} }) } as GovernedToolExecutor;
   const operations = new GovernedOperationService(store, executor, new FixtureApprovalAuthority("mcp-policy-fixture-secret-at-least-32-characters"));
-  const policy = new McpPolicyService(identityPolicies, store, operations, hostedToolPolicy);
+  const resolveEffectivePolicy: McpEffectivePolicyResolver = async (actor) => (
+    actor.userId === principal.userId
+      ? composeEffectivePolicy ? composeEffectivePolicy(effective) : effective
+      : null
+  );
+  const policy = new McpPolicyService(
+    identityPolicies,
+    store,
+    operations,
+    resolveEffectivePolicy,
+    hostedToolPolicy,
+  );
   const base: McpPolicyRequest = {
     schemaVersion: 1,
     tenantId: identity.tenantId,
@@ -110,6 +124,51 @@ test("hosted connector policy defaults can allow, block, or hold an exact tool f
   assert.equal(operation?.toolName, "create_issue");
   assert.equal(operation?.resourceLocation, "Linear");
   assert.equal((await policy.authorize({ ...request, serverId: "another_server" }, "hosted-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
+});
+
+test("MCP authorization uses the organization-composed effective member policy binding", async () => {
+  const composedPolicyVersionId = randomUUID();
+  const composedPolicyHash = "c".repeat(64);
+  const hosted = async (_identity: IdentityContext, serverName: string, toolName: string): Promise<HostedToolPolicy | null> => (
+    serverName === "lemmacomputer_linear" ? {
+      connectorId: "linear",
+      connectorName: "Linear",
+      serverId: "lemmacomputer_linear",
+      serverName,
+      toolName,
+      displayName: "List Issues",
+      decision: "allow",
+    } : null
+  );
+  const { policy, base } = await setup(hosted, (assigned) => ({
+    ...assigned,
+    policyVersionId: composedPolicyVersionId,
+    version: assigned.version + 1,
+    documentHash: composedPolicyHash,
+  }));
+
+  assert.equal((await policy.authorize(base, "assigned-binding-built-in")).code, "MCP_POLICY_BINDING_MISMATCH");
+  const composedBinding = {
+    policyVersionId: composedPolicyVersionId,
+    policyHash: composedPolicyHash,
+  };
+  assert.equal((await policy.authorize({
+    ...base,
+    ...composedBinding,
+  }, "composed-binding-built-in")).decision, "allow");
+
+  const hostedRequest: McpPolicyRequest = {
+    ...base,
+    serverId: "lemmacomputer_linear",
+    serverName: "lemmacomputer_linear",
+    toolName: "list_issues",
+    arguments: {},
+  };
+  assert.equal((await policy.authorize(hostedRequest, "assigned-binding-hosted")).code, "MCP_POLICY_BINDING_MISMATCH");
+  assert.equal((await policy.authorize({
+    ...hostedRequest,
+    ...composedBinding,
+  }, "composed-binding-hosted")).decision, "allow");
 });
 
 test("the curated Microsoft 365 surface is complete and defaults every write to approval", () => {
@@ -174,7 +233,7 @@ test("Control permits only a bounded explicit Calendar view", async () => {
   }
 });
 
-test("Control auto-allows only an exact assigned bounded Microsoft 365 read", async () => {
+test("Control auto-allows only an exact effective-policy bounded Microsoft 365 read", async () => {
   const { policy, base } = await setup();
   assert.equal((await policy.authorize(base, "read-allow")).decision, "allow");
   assert.equal((await policy.authorize({ ...base, arguments: { top: 25 } }, "read-limit")).decision, "allow");
@@ -184,7 +243,7 @@ test("Control auto-allows only an exact assigned bounded Microsoft 365 read", as
   assert.equal((await policy.authorize({ ...base, serverName: "attacker" }, "read-server-mutation")).code, "MCP_TOOL_NOT_GOVERNED");
 });
 
-test("one user-scoped connector policy serves every owned workspace but no foreign workspace", async () => {
+test("one user-scoped effective policy serves every owned workspace but no foreign workspace", async () => {
   const { store, policy, base } = await setup();
   const second = await store.createOrGet(identity, "workspace-research", randomUUID());
   await store.update(second.id, { state: "ready" });
