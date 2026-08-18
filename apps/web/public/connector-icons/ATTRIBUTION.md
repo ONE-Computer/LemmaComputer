@@ -82,9 +82,9 @@ catalog does not depend on a third-party request at render time:
 | `google-drive.png` | <https://ssl.gstatic.com/images/branding/product/2x/drive_2020q4_48dp.png> |
 | `google-calendar.png` | <https://ssl.gstatic.com/images/branding/product/2x/calendar_2020q4_48dp.png> |
 | `canva.png` | <https://static.canva.com/domain-assets/canva/static/images/android-192x192-2.png> |
-| `monday.png` | `monday WM_app symbol_default.png` from <https://monday.com/p/wp-content/uploads/2025/01/monday.com-products-assets-archive.zip> |
+| `monday.svg` | Compact mark reproduced from the current colored wordmark in <https://monday.com/p/wp-content/uploads/2026/07/monday.com-logo-pack-2026.zip> |
 | `clickup.svg` | <https://clickup.com/assets/brand/v4/Logomark-gradient.svg> |
-| `calendly.svg` | <https://images.ctfassets.net/k0lk9kiuza3o/3L8hrM2H4gJLD7s2UFhhxE/75734eb6c87362ba5386ef33c4760d3d/Logomark.svg> |
+| `calendly.svg` | `calendly_brand mark_color.svg` from Calendly's official <https://assets.ctfassets.net/k0lk9kiuza3o/3x0QYSDg5Ciuc1fC0iYkQ5/15be2c04ce5af8e44c64a34857ef9773/Calendly_Complete_Media_Kit_012225.zip> |
 | `fireflies.svg` | <https://fireflies.ai/api/logos/file/fireflies.svg?prefix=payload%2Flogos> |
 | `alpha-vantage.png` | <https://www.alphavantage.co/logo.png/> |
 | `massive.png` | <https://massive.com/brands/favicon-massive.png> |

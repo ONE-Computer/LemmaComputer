@@ -56,6 +56,10 @@ test("the complete built-in connector catalog renders at desktop and mobile widt
   }));
   expect(renderedIcons).toHaveLength(catalog.length);
   expect(renderedIcons.every(({ source, loaded }) => source && loaded)).toBe(true);
+  expect(renderedIcons).toEqual(expect.arrayContaining([
+    { name: "monday.com", source: "/connector-icons/monday.svg", loaded: true },
+    { name: "Calendly", source: "/connector-icons/calendly.svg", loaded: true },
+  ]));
   await testInfo.attach("rendered-icon-inventory", { body: JSON.stringify(renderedIcons, null, 2), contentType: "application/json" });
   await page.screenshot({ path: testInfo.outputPath("desktop-full.png"), fullPage: true });
   await screenshotSections(page, testInfo, "desktop");
