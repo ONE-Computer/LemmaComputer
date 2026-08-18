@@ -53,11 +53,17 @@ const stringified = (value: unknown) => JSON.stringify(value);
 
 const main = async () => {
   const runId = randomBytes(8).toString("hex");
-  const [litellmPort, fixturePort, controlPostgresPort] = await Promise.all([availablePort(), availablePort(), availablePort()]);
+  const [litellmPort, providerProbePort, fixturePort, controlPostgresPort] = await Promise.all([
+    availablePort(), availablePort(), availablePort(), availablePort(),
+  ]);
   const project = `lemmacomputer-provider-${process.pid}-${runId}`;
   const masterKey = `sk-provider-qualification-master-${randomBytes(24).toString("base64url")}`;
   const credentialSecret = randomBytes(32).toString("base64url");
   const litellmPostgresPassword = randomBytes(24).toString("hex");
+  const providerProbeMasterKey = `sk-provider-probe-qualification-master-${randomBytes(24).toString("base64url")}`;
+  const providerProbeCredentialSecret = randomBytes(32).toString("base64url");
+  const providerProbePostgresPassword = randomBytes(24).toString("hex");
+  const providerProbeUsageToken = randomBytes(32).toString("base64url");
   const controlPostgresPassword = randomBytes(24).toString("hex");
   const proxyToken = `provider-qualification-proxy-${randomBytes(24).toString("base64url")}`;
   const alphaTenant = `tenant-alpha-${runId}`;
@@ -67,12 +73,13 @@ const main = async () => {
   const alphaReconfiguredKey = `sk-provider-qualification-alpha-reconfigured-${randomBytes(18).toString("hex")}`;
   const betaKey = `sk-provider-qualification-beta-${randomBytes(18).toString("hex")}`;
   const rejectedKey = "sk-provider-qualification-rejected-" + randomBytes(18).toString("hex");
+  const providerProbeKey = "sk-provider-probe-qualification-" + randomBytes(18).toString("hex");
   const bedrockKey = "bedrock-provider-qualification-alpha-" + randomBytes(18).toString("hex");
   const bedrockRotatedKey = "bedrock-provider-qualification-alpha-rotated-" + randomBytes(18).toString("hex");
   const bedrockReconfiguredKey = "bedrock-provider-qualification-alpha-reconfigured-" + randomBytes(18).toString("hex");
   const rejectedBedrockKey = "bedrock-provider-qualification-rejected-" + randomBytes(18).toString("hex");
   const sentinels = [
-    alphaKey, alphaRotatedKey, alphaReconfiguredKey, betaKey, rejectedKey,
+    alphaKey, alphaRotatedKey, alphaReconfiguredKey, betaKey, rejectedKey, providerProbeKey,
     bedrockKey, bedrockRotatedKey, bedrockReconfiguredKey, rejectedBedrockKey,
   ];
   const environment = {
@@ -81,6 +88,11 @@ const main = async () => {
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_MASTER_KEY: masterKey,
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_POSTGRES_PASSWORD: litellmPostgresPassword,
+    LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_MASTER_KEY: providerProbeMasterKey,
+    LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_SALT_KEY: randomBytes(32).toString("hex"),
+    LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_POSTGRES_PASSWORD: providerProbePostgresPassword,
+    LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_USAGE_TOKEN: providerProbeUsageToken,
+    LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_LITELLM_PORT: String(providerProbePort),
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_CONTROL_POSTGRES_PASSWORD: controlPostgresPassword,
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_PORT: String(litellmPort),
     LEMMACOMPUTER_PROVIDER_QUALIFICATION_FIXTURE_PORT: String(fixturePort),
@@ -97,6 +109,7 @@ const main = async () => {
     return `${result.stdout ?? ""}${result.stderr ?? ""}`;
   };
   const litellmUrl = `http://127.0.0.1:${litellmPort}`;
+  const providerProbeUrl = `http://127.0.0.1:${providerProbePort}`;
   const controlDatabaseUrl = `postgres://lemmacomputer:${controlPostgresPassword}@127.0.0.1:${controlPostgresPort}/lemmacomputer`;
   const providerGateway = new LiteLLMGatewayAdapter({
     adminUrl: litellmUrl,
@@ -112,6 +125,12 @@ const main = async () => {
     credentialSecret,
     requestTimeoutMs: 30_000,
     bedrockRuntimeEndpoint: "http://gateway-fixture:4200",
+  });
+  const callbackProviderAdministration = new LiteLLMProviderAdministration({
+    adminUrl: providerProbeUrl,
+    masterKey: providerProbeMasterKey,
+    credentialSecret: providerProbeCredentialSecret,
+    requestTimeoutMs: 30_000,
   });
   const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(controlDatabaseUrl);
   const control = createControlServer(
@@ -205,7 +224,21 @@ const main = async () => {
     attempted = true;
     compose(["up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
     await waitFor(`${litellmUrl}/health/liveliness`, "Pinned LiteLLM");
+    await waitFor(`${providerProbeUrl}/health/liveliness`, "Callback-enabled provider-probe LiteLLM");
     await waitFor(`http://127.0.0.1:${fixturePort}/healthz`, "Provider fixture");
+
+    const callbackProbeRoute = await callbackProviderAdministration.configureManagedProvider({
+      tenantId: `tenant-provider-probe-${runId}`,
+      provider: "openai",
+      apiKey: providerProbeKey,
+      modelId: defaultManagedProviderModelIds.openai,
+      existingModelIds: [],
+    });
+    assert.equal(
+      callbackProbeRoute.modelIds.length,
+      managedProviderModels.openai.length,
+      "OpenAI Provider Settings must qualify through the production callback and direct Responses entry point",
+    );
 
     const migrationStore = PostgresWorkspaceStore.fromConnectionString(controlDatabaseUrl);
     try {
@@ -403,11 +436,13 @@ const main = async () => {
     ];
     const litellmLogs = compose(["logs", "--no-color"]);
     const litellmDump = compose(["exec", "-T", "litellm-postgres", "pg_dump", "-U", "litellm", "--data-only", "--inserts", "litellm"]);
+    const providerProbeDump = compose(["exec", "-T", "provider-probe-postgres", "pg_dump", "-U", "litellm", "--data-only", "--inserts", "litellm"]);
     const controlDump = compose(["exec", "-T", "control-postgres", "pg_dump", "-U", "lemmacomputer", "--data-only", "--inserts", "lemmacomputer"]);
     for (const sentinel of sentinels) {
       assert.equal(stringified(reads).includes(sentinel), false, "Control reads or safe provider metadata exposed a submitted API key");
       assert.equal(litellmLogs.includes(sentinel), false, "Pinned LiteLLM logs exposed a submitted API key");
       assert.equal(litellmDump.includes(sentinel), false, "Pinned LiteLLM PostgreSQL data exposed a submitted API key in plaintext");
+      assert.equal(providerProbeDump.includes(sentinel), false, "Callback-enabled provider-probe PostgreSQL exposed a submitted API key in plaintext");
       assert.equal(controlDump.includes(sentinel), false, "Control PostgreSQL metadata exposed a submitted API key");
     }
     const counters = await json(`http://127.0.0.1:${fixturePort}/counters`, { method: "GET" });

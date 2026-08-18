@@ -140,6 +140,9 @@ export function createGatewayFixture() {
 
   app.post("/v1/responses", async (request, reply) => {
     counters.model += 1;
+    if (rejectedProviderCredential(request)) {
+      return reply.code(401).send({ error: { message: "fixture rejected the submitted provider credential" } });
+    }
     const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const responseId = `resp-${randomUUID()}`;
     const messageId = `msg-${randomUUID()}`;

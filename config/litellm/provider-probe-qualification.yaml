@@ -1,0 +1,14 @@
+# Isolated qualification for Provider Settings probes through the production
+# policy callback. This file is test-only and is never mounted by the product.
+model_list: []
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true
+
+litellm_settings:
+  callbacks: lemmacomputer_policy_callback.proxy_handler_instance
+  drop_params: true
+  set_verbose: false
+  turn_off_message_logging: true
+  log_raw_request_response: false

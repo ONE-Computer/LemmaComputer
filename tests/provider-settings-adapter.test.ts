@@ -109,13 +109,15 @@ test("managed provider configuration isolates tenants, validates candidates, and
       response.end(JSON.stringify({ success: true }));
       return;
     }
-    if (item.method === "POST" && item.url === "/chat/completions") {
+    if (item.method === "POST" && ["/chat/completions", "/responses"].includes(item.url)) {
       if (rejectCandidate) {
         response.statusCode = 401;
         response.end(JSON.stringify({ error: { message: "provider rejected " + rejectedKey } }));
         return;
       }
-      response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "OK" } }] }));
+      response.end(JSON.stringify(item.url === "/responses"
+        ? { id: "resp-provider-probe", status: "completed", output: [] }
+        : { choices: [{ message: { role: "assistant", content: "OK" } }] }));
       return;
     }
     response.statusCode = 404;
@@ -211,12 +213,17 @@ test("managed provider configuration isolates tenants, validates candidates, and
       );
     }
     const stableProbes = requests.filter((request) => (
-      request.url === "/chat/completions"
-      && ["lemmacomputer-assistant", "lemmacomputer-claude", "lemmacomputer-glm"].includes(String(request.body.model))
+      ["lemmacomputer-assistant", "lemmacomputer-claude", "lemmacomputer-glm"].includes(String(request.body.model))
     ));
     assert.equal(stableProbes.length, 4);
     for (const probe of stableProbes) assert.match(probe.authorization, /^Bearer sk-ocp-/);
-    for (const probe of requests.filter((request) => request.url === "/chat/completions")) {
+    const openAiProbes = requests.filter((request) => request.url === "/responses");
+    assert.equal(openAiProbes.length, 4);
+    assert.ok(openAiProbes.every((probe) => typeof probe.body.input === "string" && !("messages" in probe.body)));
+    const chatProbes = requests.filter((request) => request.url === "/chat/completions");
+    assert.equal(chatProbes.length, 4);
+    assert.ok(chatProbes.every((probe) => Array.isArray(probe.body.messages) && !("input" in probe.body)));
+    for (const probe of [...openAiProbes, ...chatProbes]) {
       assert.equal("temperature" in probe.body, false, "Provider probes must use the model's default temperature");
     }
     for (const request of requests.filter((request) => !request.url.startsWith("/credentials"))) {
@@ -358,8 +365,8 @@ test("managed provider configuration isolates tenants, validates candidates, and
       new Set(modelSet.modelIds.filter((id) => !retired.modelIds.includes(id))),
     );
     assert.ok(stableUpdates.every((document) => Array.isArray(document.model_info.access_groups) && document.model_info.access_groups.length === 1));
-    assert.ok(switchRequests.filter((request) => request.url === "/chat/completions")
-      .every((request) => !Object.hasOwn(request.body, "max_tokens")));
+    assert.ok(switchRequests.filter((request) => request.url === "/responses")
+      .every((request) => !Object.hasOwn(request.body, "max_output_tokens")));
     assert.ok(switchRequests.filter((request) => request.url === "/key/generate")
       .every((request) => !Object.hasOwn(request.body, "tpm_limit")));
 

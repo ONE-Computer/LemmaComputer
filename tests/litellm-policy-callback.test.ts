@@ -686,53 +686,45 @@ async def assert_provider_boundary():
 
     probe = {
         "model": "openai/gpt-real",
-        "messages": [{"role": "user", "content": "probe"}],
+        "input": "probe",
         "litellm_call_id": "probe-call",
-        "litellm_params": {"model_info": openai_route},
+        "litellm_params": {"model_info": openai_route, "aresponses": True},
         "user_api_key_metadata": {"untrusted": True},
     }
     routed_probe = await callback.async_pre_call_hook(
-        ProbeAuth(), None, probe, "acompletion"
+        ProbeAuth(), None, probe, "aresponses"
     )
     assert "user_api_key_dict" in routed_probe
     provider_probe = await callback.async_pre_call_deployment_hook(
-        routed_probe, "acompletion"
+        routed_probe, "aresponses"
     )
     assert provider_probe is not routed_probe
     assert "user_api_key_dict" in routed_probe
     assert "user_api_key_dict" not in provider_probe
     assert "user_api_key_metadata" not in provider_probe
     assert provider_probe["model"] == "openai/gpt-real"
-    assert provider_probe["messages"] == probe["messages"]
+    assert provider_probe["input"] == "probe"
     assert authority_calls == []
 
-    # The OpenAI Chat -> Responses bridge builds fresh deployment-hook kwargs
-    # and drops the authenticated key projection. The callback-owned probe
-    # binding may cross exactly this internal hop, for the same concrete route.
-    nested_probe = {
-        **provider_probe,
-        "input": [{"role": "user", "content": "probe"}],
-        "litellm_call_id": "probe-responses-call",
+    # The authenticated probe is bound to its concrete route. Request metadata
+    # alone is never sufficient to obtain the non-billable exemption.
+    mismatched_probe = {
+        **probe,
+        "litellm_call_id": "probe-wrong-route",
         "litellm_params": {
-            **provider_probe["litellm_params"],
-            "model_info": openai_route,
-            "aresponses": True,
-        },
-    }
-    mismatched_nested_probe = {
-        **nested_probe,
-        "litellm_call_id": "probe-responses-wrong-route",
-        "litellm_params": {
-            **nested_probe["litellm_params"],
+            **probe["litellm_params"],
             "model_info": {
                 **openai_route,
                 "lemmacomputer_deployment_id": "deployment-other",
             },
         },
     }
+    routed_mismatched_probe = await callback.async_pre_call_hook(
+        ProbeAuth(), None, mismatched_probe, "aresponses"
+    )
     try:
         await callback.async_pre_call_deployment_hook(
-            mismatched_nested_probe, "acompletion"
+            routed_mismatched_probe, "aresponses"
         )
     except Exception:
         pass
@@ -740,29 +732,31 @@ async def assert_provider_boundary():
         raise AssertionError("provider probe binding must not cross routes")
     assert authority_calls == []
 
-    nested_provider_probe = await callback.async_pre_call_deployment_hook(
-        nested_probe, "acompletion"
+    # OpenAI probes must enter through Responses directly. A Chat Completions
+    # probe is rejected before LiteLLM can translate it and lose key identity.
+    chat_probe = {
+        **probe,
+        "messages": [{"role": "user", "content": "probe"}],
+        "litellm_call_id": "probe-chat-call",
+        "litellm_params": {"model_info": openai_route},
+    }
+    chat_probe.pop("input", None)
+    routed_chat_probe = await callback.async_pre_call_hook(
+        ProbeAuth(), None, chat_probe, "acompletion"
     )
-    assert nested_provider_probe["model"] == "openai/gpt-real"
-    assert "user_api_key_dict" not in nested_provider_probe
-    assert authority_calls == []
-
-    # The private binding is single-use. A second nested request has neither a
-    # trusted key exemption nor admitted identity and therefore fails closed.
     try:
         await callback.async_pre_call_deployment_hook(
-            {**nested_probe, "litellm_call_id": "probe-responses-replay"},
-            "acompletion",
+            routed_chat_probe, "acompletion"
         )
     except Exception:
         pass
     else:
-        raise AssertionError("provider probe Responses binding must be single-use")
+        raise AssertionError("OpenAI provider probes must not use Chat Completions")
     assert authority_calls == []
 
-    # LiteLLM v1.93 can omit custom provider metadata from a dynamically
-    # registered route while retaining its exact deployment ID. Recover the
-    # provider only from the authenticated Control-issued probe key.
+    # LiteLLM v1.93 can omit the provider field from dynamically registered
+    # route metadata. The authenticated key still binds the provider while the
+    # retained deployment ID prevents the probe from crossing routes.
     route_without_provider = {
         key: value for key, value in openai_route.items()
         if key != "lemmacomputer_provider"
@@ -773,25 +767,24 @@ async def assert_provider_boundary():
         "litellm_params": {"model_info": route_without_provider},
     }
     routed_probe_without_route_provider = await callback.async_pre_call_hook(
-        ProbeAuth(), None, probe_without_route_provider, "acompletion"
+        ProbeAuth(), None, probe_without_route_provider, "aresponses"
     )
     provider_probe_without_route_provider = await callback.async_pre_call_deployment_hook(
-        routed_probe_without_route_provider, "acompletion"
+        routed_probe_without_route_provider, "aresponses"
     )
-    nested_probe_without_route_provider = {
-        **provider_probe_without_route_provider,
-        "input": [{"role": "user", "content": "probe"}],
-        "litellm_call_id": "probe-responses-without-route-provider",
-        "litellm_params": {
-            **provider_probe_without_route_provider["litellm_params"],
-            "model_info": route_without_provider,
-            "aresponses": True,
-        },
-    }
-    nested_provider_probe_without_route_provider = await callback.async_pre_call_deployment_hook(
-        nested_probe_without_route_provider, "acompletion"
-    )
-    assert nested_provider_probe_without_route_provider["model"] == "openai/gpt-real"
+    assert provider_probe_without_route_provider["model"] == "openai/gpt-real"
+    assert authority_calls == []
+
+    # No process-local context is carried into a second hook invocation. Once
+    # authenticated key data has been stripped, the same request fails closed.
+    try:
+        await callback.async_pre_call_deployment_hook(
+            {**provider_probe, "litellm_call_id": "probe-replay"}, "aresponses"
+        )
+    except Exception:
+        pass
+    else:
+        raise AssertionError("provider probe identity must not survive beyond its authenticated request")
     assert authority_calls == []
 
     admitted = {

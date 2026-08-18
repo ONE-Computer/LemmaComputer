@@ -555,13 +555,12 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         },
       });
       if (!grant.ok) throw this.providerFailure(grant.status, "route", provider, grant.payload);
-      const result = await this.call("/chat/completions", {
+      const result = await this.call(provider === "openai" ? "/responses" : "/chat/completions", {
         method: "POST",
         credential,
-        body: {
-          model,
-          messages: [{ role: "user", content: "Reply with OK." }],
-        },
+        body: provider === "openai"
+          ? { model, input: "Reply with OK." }
+          : { model, messages: [{ role: "user", content: "Reply with OK." }] },
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
     } finally {

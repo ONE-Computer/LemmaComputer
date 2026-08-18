@@ -52,9 +52,6 @@ _USAGE_STATES_BY_CALL = {}
 _INTERNAL_ADMISSION_CONTEXT = contextvars.ContextVar(
     "lemmacomputer_internal_admission_context", default=None
 )
-_INTERNAL_PROVIDER_PROBE_CONTEXT = contextvars.ContextVar(
-    "lemmacomputer_internal_provider_probe_context", default=None
-)
 PROVIDER_ROUTE_TEST_EXEMPTION = "provider-route-test-v1"
 USAGE_CHAIN_SECRET = hmac.new(
     USAGE_TOKEN.encode("utf-8"),
@@ -600,81 +597,32 @@ def _verified_usage_reentry(kwargs, source_attempt_id, route, call_type):
     return False
 
 
-def _is_trusted_provider_probe(kwargs):
-    """Accept the exemption only from LiteLLM's authenticated key projection."""
-    return (
-        _trusted_key_metadata(kwargs).get("lemmacomputer_non_billable_exemption")
-        == PROVIDER_ROUTE_TEST_EXEMPTION
-    )
-
-
-def _set_internal_provider_probe_context(kwargs, route):
-    """Bind a trusted probe to the exact provider route without forwarding it."""
+def _verified_provider_probe(kwargs, route, call_type):
+    """Accept only a Control-issued probe on its provider-native entry point."""
     trusted = _trusted_key_metadata(kwargs)
+    if trusted.get("lemmacomputer_non_billable_exemption") != PROVIDER_ROUTE_TEST_EXEMPTION:
+        return False
+    trusted_provider = trusted.get("lemmacomputer_provider")
+    trusted_deployment_id = trusted.get("lemmacomputer_deployment_id")
+    if not all(
+        isinstance(value, str) and bool(value)
+        for value in (trusted_provider, trusted_deployment_id)
+    ):
+        raise RuntimeError("Provider route test key binding is incomplete")
+    if trusted_provider == "openai" and not _is_internal_responses_conversion(kwargs, call_type):
+        raise RuntimeError("OpenAI provider route tests must use the Responses API")
     route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
     route_deployment_id = (
         route.get("lemmacomputer_deployment_id") if isinstance(route, dict) else None
     )
-    trusted_provider = trusted.get("lemmacomputer_provider")
-    trusted_deployment_id = trusted.get("lemmacomputer_deployment_id")
     if (
         isinstance(route_provider, str)
-        and isinstance(trusted_provider, str)
         and route_provider != trusted_provider
     ) or (
         isinstance(route_deployment_id, str)
-        and isinstance(trusted_deployment_id, str)
         and route_deployment_id != trusted_deployment_id
     ):
         raise RuntimeError("Provider route test binding does not match the concrete route")
-    # LiteLLM v1.93 can omit custom provider metadata from the deployment hook
-    # while preserving the exact deployment ID. Recover only from the
-    # authenticated, Control-issued probe key projection; request metadata is
-    # never trusted for this exemption.
-    provider = route_provider or trusted_provider
-    deployment_id = route_deployment_id or trusted_deployment_id
-    source_call_id = _litellm_call_id(kwargs)
-    if not all(
-        isinstance(value, str) and bool(value)
-        for value in (provider, deployment_id, source_call_id)
-    ):
-        raise RuntimeError("Provider route test concrete route is incomplete")
-    binding = _signed_usage_chain({
-        "kind": PROVIDER_ROUTE_TEST_EXEMPTION,
-        "provider": provider,
-        "deploymentId": deployment_id,
-        "sourceCallId": source_call_id,
-    })
-    _INTERNAL_PROVIDER_PROBE_CONTEXT.set({
-        "signedBinding": binding,
-        "consumed": False,
-    })
-
-
-def _verified_provider_probe_reentry(kwargs, route, call_type):
-    """Consume the callback-owned probe binding for one internal Responses hop."""
-    if not _is_internal_responses_conversion(kwargs, call_type):
-        return False
-    context = _INTERNAL_PROVIDER_PROBE_CONTEXT.get()
-    if not isinstance(context, dict) or context.get("consumed") is not False:
-        return False
-    binding = _verified_usage_chain(context.get("signedBinding"))
-    if not isinstance(binding, dict):
-        return False
-    route_provider = route.get("lemmacomputer_provider") if isinstance(route, dict) else None
-    route_deployment_id = (
-        route.get("lemmacomputer_deployment_id") if isinstance(route, dict) else None
-    )
-    if (
-        binding.get("kind") != PROVIDER_ROUTE_TEST_EXEMPTION
-        or not isinstance(binding.get("provider"), str)
-        or binding.get("deploymentId") != route_deployment_id
-        or (isinstance(route_provider, str) and binding.get("provider") != route_provider)
-    ):
-        return False
-    # Context variables are copied into LiteLLM's internal request task. Mutate
-    # the shared binding so neither the parent nor a sibling can reuse it.
-    context["consumed"] = True
     return True
 
 
@@ -1088,8 +1036,6 @@ def _admission_payload(
     kwargs, call_type, task_binding, parent_attempt_id=None, budget_bounds=None
 ):
     trusted = _trusted_key_metadata(kwargs)
-    if _is_trusted_provider_probe(kwargs):
-        return None
     identity_names = (
         "lemmacomputer_tenant_id", "lemmacomputer_subject_id",
         "lemmacomputer_workspace_id", "lemmacomputer_agent_id",
@@ -1371,7 +1317,7 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
         route = _model_info(kwargs)
         try:
             source_attempt_id = _source_attempt_id(kwargs, route) if route else None
-            if _verified_provider_probe_reentry(kwargs, route, call_type):
+            if _verified_provider_probe(kwargs, route, call_type):
                 return _provider_request(kwargs)
             # LiteLLM's Chat Completions -> Responses bridge invokes this hook
             # again as `acompletion`, but marks the nested call with
@@ -1408,9 +1354,6 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
                 parent_attempt_id,
                 _budget_bounds(kwargs, route) if route else None,
             )
-            if payload is None:
-                _set_internal_provider_probe_context(kwargs, route)
-                return _provider_request(kwargs)
             if routing_state:
                 payload["requestedAlias"] = "lemmacomputer-auto"
                 payload["requestedServiceClass"] = routing_state["requestedServiceClass"]
@@ -1493,7 +1436,6 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             if recorded:
                 _forget_usage_state(state)
             _INTERNAL_ADMISSION_CONTEXT.set(None)
-            _INTERNAL_PROVIDER_PROBE_CONTEXT.set(None)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         state = _usage_state(kwargs)
@@ -1521,7 +1463,6 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             if recorded:
                 _forget_usage_state(state)
             _INTERNAL_ADMISSION_CONTEXT.set(None)
-            _INTERNAL_PROVIDER_PROBE_CONTEXT.set(None)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         metadata = _metadata(user_api_key_dict)
