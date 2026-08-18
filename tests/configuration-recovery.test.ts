@@ -7,30 +7,30 @@ test("configuration recovery maps provider, model-route, and pricing codes to ex
     message: "A model provider has not been connected for this workspace.",
     action: "Set up a workspace provider",
     contact: "Contact your administrator to connect one.",
-    href: "?view=ai-control-plane&section=models-providers",
+    href: "?view=ai-control-plane&section=models-providers&focus=provider",
     permission: "provider",
   });
   assert.equal(
     configurationRecoveryFor({ code: "MODEL_TIER_ROUTE_UNAVAILABLE" })?.href,
-    "?view=ai-control-plane&section=model-routes",
+    "?view=ai-control-plane&section=models-providers&focus=route",
   );
   assert.equal(
     configurationRecoveryFor({ code: "MODEL_TIER_PRICING_UNAVAILABLE" })?.href,
-    "?view=ai-control-plane&section=pricing",
+    "?view=ai-control-plane&section=models-providers&focus=pricing",
   );
   assert.equal(
     configurationRecoveryFor({
       code: "NO_ELIGIBLE_DEPLOYMENT",
       message: "No policy-approved, priced deployment satisfies the request",
     })?.href,
-    "?view=ai-control-plane&section=pricing",
+    "?view=ai-control-plane&section=models-providers&focus=pricing",
   );
   assert.equal(
     configurationRecoveryFor({
       code: "NO_ELIGIBLE_DEPLOYMENT",
       message: "No policy-approved deployment satisfies the request",
     })?.href,
-    "?view=ai-control-plane&section=model-routes",
+    "?view=ai-control-plane&section=models-providers&focus=route",
   );
 });
 

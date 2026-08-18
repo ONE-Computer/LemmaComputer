@@ -82,7 +82,7 @@ test("administrators get exact recovery links for provider, model-route, and pri
   const alert = page.getByRole("alert");
   await expect(alert).toContainText("A model provider has not been connected for this workspace.");
   const providerLink = alert.getByRole("link", { name: "Set up a workspace provider" });
-  await expect(providerLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers");
+  await expect(providerLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers&focus=provider");
   await expect(providerLink).toHaveCSS("text-decoration-line", "underline");
 
   failure = {
@@ -94,7 +94,7 @@ test("administrators get exact recovery links for provider, model-route, and pri
   await expect(alert).toContainText("No model route is ready for this workspace.");
   await expect(alert.getByRole("link", { name: "Configure model routes" })).toHaveAttribute(
     "href",
-    "?view=ai-control-plane&section=model-routes",
+    "?view=ai-control-plane&section=models-providers&focus=route",
   );
 
   failure = {
@@ -105,10 +105,10 @@ test("administrators get exact recovery links for provider, model-route, and pri
   await page.getByRole("button", { name: "Create workspace" }).click();
   await expect(alert).toContainText("Approved pricing is missing for this workspace's model route.");
   const pricingLink = alert.getByRole("link", { name: "Set up pricing" });
-  await expect(pricingLink).toHaveAttribute("href", "?view=ai-control-plane&section=pricing");
+  await expect(pricingLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers&focus=pricing");
   await pricingLink.click();
-  await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
-  await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\?view=ai-control-plane&section=models-providers&focus=pricing$/);
+  await expect(page.getByRole("heading", { name: "Models & routing", exact: true })).toBeVisible();
 });
 
 test("members are told to contact an administrator without receiving configuration links", async ({ page }) => {

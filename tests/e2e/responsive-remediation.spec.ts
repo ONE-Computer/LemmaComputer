@@ -44,15 +44,13 @@ test("administrator row actions reflow inside their owning cards", async ({ page
 
 test("mobile dense data stays inside explicit scroll owners and exposes every AI destination", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/?view=ai-control-plane&section=model-routes");
+  await page.goto("/?view=ai-control-plane&section=models-providers");
   await expectNoDocumentOverflow(page);
 
-  const routeScroller = page.locator(".route-table-scroll");
-  await expect.poll(() => routeScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-  await routeScroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-  await expect.poll(() => routeScroller.evaluate((element) => element.scrollLeft > 0)).toBe(true);
+  await expect(page.locator(".models-routing-layout")).toBeVisible();
+  await expect(page.locator(".models-routing-inspector")).toBeVisible();
 
-  for (const label of ["Overview", "Models & providers", "Model routes", "Pricing", "Teams & budgets", "Data health"]) {
+  for (const label of ["Overview", "Models & routing", "Teams & budgets", "Data health"]) {
     await expect(page.getByRole("button", { name: label, exact: true })).toBeInViewport();
   }
 });

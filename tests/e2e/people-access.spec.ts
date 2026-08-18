@@ -1231,9 +1231,9 @@ test("scoped provider administrator sees only server-granted provider and connec
   await page.getByRole("button", { name: /Provider Admin/ }).click();
   await expect(page.getByRole("button", { name: "AI control plane" })).toBeVisible();
   await page.getByRole("button", { name: "AI control plane" }).click();
-  await expect(page.getByRole("button", { name: "Models & providers" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Models & routing" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Overview" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Provider settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Models & routing" })).toBeVisible();
   await expect(page.getByText("OpenAI", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Connectors" }).click();

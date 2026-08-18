@@ -6545,6 +6545,7 @@ a.chat-file-part:hover {
 .admin-team-heading p { margin-bottom: 4px; color: #2453a6; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .admin-team-heading h2 { color: #172334; font-size: 22px; letter-spacing: -.025em; }
 .admin-team-heading span { display: block; max-width: 720px; margin-top: 7px; color: #68727d; font-size: 13px; line-height: 1.45; }
+.admin-team-heading-actions { display: flex; align-items: center; gap: 8px; }
 .admin-team-empty { margin: 0; padding: 28px 24px; color: #68727d; }
 .admin-team-list article {
   display: grid;

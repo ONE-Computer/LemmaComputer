@@ -342,7 +342,7 @@ export function AiControlPlaneOverview({
         </section>
       </div>
 
-      <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink></footer>
+      <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage models & routing</InlineLink></footer>
       {emissionsDetailsOpen && <ModalDialog
         className="ai-emissions-method-modal"
         title="How this estimate is calculated"

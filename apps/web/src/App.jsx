@@ -40,6 +40,7 @@ import { SpendDashboard } from "./SpendDashboard.jsx";
 import { PersonalAiOverview } from "./PersonalAiOverview.jsx";
 import { UsageDataHealth } from "./UsageDataHealth.jsx";
 import { RoutingAdmin } from "./RoutingAdmin.jsx";
+import { ModelsRoutingAdmin } from "./ModelsRoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
 import { emissionsRegionOptions } from "./ai-emissions.js";
@@ -340,10 +341,11 @@ const settingsViewFromLocation = () => {
   return settingsViewBySection[settingsSectionFromLocation()] ?? "overview";
 };
 const accountSecurityOpenFromLocation = () => settingsSectionFromLocation() === "security";
-const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend"]);
+const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend", "team-routing"]);
 const aiControlPlaneViewFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
   const view = params.get("section") ?? "overview";
+  if (params.get("view") === "ai-control-plane" && (view === "model-routes" || view === "pricing")) return "models-providers";
   return params.get("view") === "ai-control-plane" && aiControlPlaneViews.has(view) ? view : "overview";
 };
 const chatSessionFromLocation = () => {
@@ -1810,7 +1812,7 @@ function TeamBudgetDialog({ team, onClose }) {
   </ModalDialog>;
 }
 
-function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault }) {
+function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault, onOpenRoutingOverrides }) {
   const [editor, setEditor] = useState(null);
   const [budgetTeam, setBudgetTeam] = useState(null);
   const [memberUserId, setMemberUserId] = useState("");
@@ -1836,7 +1838,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
     <section className="admin-team-section" aria-labelledby="admin-teams-heading">
       <div className="admin-team-heading">
         <div><p>Spend allocation</p><h2 id="admin-teams-heading">Teams</h2><span>Team membership decides where AI usage is charged. It does not grant workspace, model, tool, connector, or administrator access.</span></div>
-        <button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button>
+        <div className="admin-team-heading-actions"><button className="secondary-button compact-button" type="button" onClick={onOpenRoutingOverrides}>Routing overrides</button><button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button></div>
       </div>
       {loading ? <p className="admin-team-empty">Loading Teams…</p> : !teams.length ? <p className="admin-team-empty">No Teams have been created yet.</p> : <div className="admin-team-list">
         {teams.map((team) => <article key={team.id}>
@@ -5935,9 +5937,7 @@ export function App() {
   };
   const availableAiControlPlaneTabs = aiControlPlaneTabs.filter((tab) => ({
     overview: canReadUsage,
-    "models-providers": canManageAnyProvider,
-    "model-routes": canManagePolicy || hasCapability("provider.manage"),
-    pricing: canReadUsage || canManageUsage,
+    "models-providers": canManageAnyProvider || canManagePolicy || canReadUsage || canManageUsage,
     "teams-budgets": canManageUsage,
     "data-health": canReadUsage || canManageUsage,
   }[tab.id]));
@@ -6263,7 +6263,7 @@ export function App() {
 
   useEffect(() => {
     const providerPageOpen = activeNav === "AI control plane" && aiControlPlaneView === "models-providers";
-    if (!session || !providerPageOpen || !canManageAnyProvider) return undefined;
+    if (!session || !providerPageOpen) return undefined;
     let active = true;
     setProviderSettingsLoading(true);
     adminApi.providerSettings()
@@ -6271,7 +6271,7 @@ export function App() {
       .catch((error) => { if (active) setProviderSettingsError(error.message); })
       .finally(() => { if (active) setProviderSettingsLoading(false); });
     return () => { active = false; };
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageAnyProvider]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Sites") return undefined;
@@ -7183,9 +7183,12 @@ export function App() {
 
 
   const selectAiControlPlaneView = (view = "overview", historyMode = "push") => {
-    const requestedView = aiControlPlaneViews.has(view) ? view : "overview";
+    const normalizedView = view === "model-routes" || view === "pricing" ? "models-providers" : view;
+    const requestedView = aiControlPlaneViews.has(normalizedView) ? normalizedView : "overview";
     const nextView = requestedView === "spend" && canReadUsage
       ? requestedView
+      : requestedView === "team-routing" && (canManagePolicy || canManageUsage)
+        ? requestedView
       : availableAiControlPlaneTabs.some((tab) => tab.id === requestedView)
         ? requestedView
         : availableAiControlPlaneTabs[0]?.id ?? "overview";
@@ -7195,6 +7198,7 @@ export function App() {
     url.searchParams.set("view", "ai-control-plane");
     if (nextView === "overview") url.searchParams.delete("section");
     else url.searchParams.set("section", nextView);
+    url.searchParams.delete("focus");
     url.searchParams.delete("chat");
     const nextLocation = `${url.pathname}${url.search}`;
     if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
@@ -8013,23 +8017,25 @@ export function App() {
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>
             {aiControlPlaneView === "overview" && canReadUsage && <AiControlPlaneOverview
               onOpenSpend={() => selectAiControlPlaneView("spend")}
-              onOpenRouting={() => selectAiControlPlaneView("model-routes")}
-              onOpenPricing={() => selectAiControlPlaneView("pricing")}
+              onOpenRouting={() => selectAiControlPlaneView("models-providers")}
+              onOpenPricing={() => selectAiControlPlaneView("models-providers")}
             />}
             {aiControlPlaneView === "spend" && canReadUsage && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
-            {aiControlPlaneView === "data-health" && (canReadUsage || canManageUsage) && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("pricing")} />}
-            {aiControlPlaneView === "models-providers" && canManageAnyProvider && <ProviderSettingsScreen
+            {aiControlPlaneView === "data-health" && (canReadUsage || canManageUsage) && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("models-providers")} />}
+            {aiControlPlaneView === "models-providers" && <ModelsRoutingAdmin
               providers={providerSettings}
-              loading={providerSettingsLoading}
-              busy={providerSettingsBusy}
-              error={providerSettingsError}
-              onSave={saveProviderSetting}
-              onTest={testProviderSetting}
-              onDisable={disableProviderSetting}
-              onDelete={deleteProviderSetting}
+              providerLoading={providerSettingsLoading}
+              providerBusy={providerSettingsBusy}
+              providerError={providerSettingsError}
+              canManageProviders={canManageAnyProvider}
+              canManageRouting={canManagePolicy || hasCapability("provider.manage")}
+              canManagePricing={canManageUsage}
+              focus={new URLSearchParams(window.location.search).get("focus")}
+              draftScope={{ tenantId: session.tenant.id, userId: session.user.id }}
+              onSaveProvider={saveProviderSetting}
+              onTestProvider={testProviderSetting}
+              onDisableProvider={disableProviderSetting}
             />}
-            {aiControlPlaneView === "model-routes" && (canManagePolicy || hasCapability("provider.manage")) && <RoutingAdmin draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
-            {aiControlPlaneView === "pricing" && (canReadUsage || canManageUsage) && <RoutingAdmin section="pricing" />}
             {aiControlPlaneView === "teams-budgets" && canManageUsage && <TeamsAdminSection
               teams={adminTeams}
               users={adminUsers}
@@ -8042,7 +8048,9 @@ export function App() {
               onAssignMember={assignAdminTeamMember}
               onRemoveMember={removeAdminTeamMember}
               onSetDefault={setAdminDefaultTeam}
+              onOpenRoutingOverrides={() => selectAiControlPlaneView("team-routing")}
             />}
+            {aiControlPlaneView === "team-routing" && (canManagePolicy || canManageUsage) && <RoutingAdmin onBack={() => selectAiControlPlaneView("teams-budgets")} draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
           </AiControlPlane>
         )}
         {activeNav === "Settings" && <SettingsScreen
