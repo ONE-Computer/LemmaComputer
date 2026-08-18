@@ -54,6 +54,120 @@ test("workspace creation is shown only when the organization grants workspace.cr
   await expect(page.getByRole("button", { name: "Create workspace" })).toBeVisible();
 });
 
+test("administrators get exact recovery links for provider, model-route, and pricing setup", async ({ page }) => {
+  let failure = {
+    status: 409,
+    code: "PROVIDER_NOT_CONFIGURED",
+    message: "That provider is not configured",
+  };
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: failure.status,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: failure.code, message: failure.message, retryable: false } }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  const prompt = page.getByRole("dialog", { name: "Create workspace" });
+  await prompt.getByLabel("Workspace name").fill("Recovery links");
+  await prompt.getByRole("button", { name: "Continue to configuration" }).click();
+  await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("A model provider has not been connected for this workspace.");
+  const providerLink = alert.getByRole("link", { name: "Set up a workspace provider" });
+  await expect(providerLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers");
+  await expect(providerLink).toHaveCSS("text-decoration-line", "underline");
+
+  failure = {
+    status: 503,
+    code: "MODEL_TIER_ROUTE_UNAVAILABLE",
+    message: "No ready route is available for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("No model route is ready for this workspace.");
+  await expect(alert.getByRole("link", { name: "Configure model routes" })).toHaveAttribute(
+    "href",
+    "?view=ai-control-plane&section=model-routes",
+  );
+
+  failure = {
+    status: 422,
+    code: "MODEL_TIER_PRICING_UNAVAILABLE",
+    message: "Pricing is not ready for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Approved pricing is missing for this workspace's model route.");
+  const pricingLink = alert.getByRole("link", { name: "Set up pricing" });
+  await expect(pricingLink).toHaveAttribute("href", "?view=ai-control-plane&section=pricing");
+  await pricingLink.click();
+  await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
+  await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();
+});
+
+test("members are told to contact an administrator without receiving configuration links", async ({ page }) => {
+  let failure = {
+    status: 409,
+    code: "PROVIDER_NOT_CONFIGURED",
+    message: "That provider is not configured",
+  };
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    json: {
+      user: { id: "member-alex", displayName: "Alex Member", email: "alex@acme.test" },
+      tenant: { id: "acme", displayName: "Acme" },
+      roles: ["member"],
+      capabilities: ["organization.read", "workspace.use", "workspace.create", "workspace.manage_own"],
+      resourceCapabilities: [],
+    },
+  }));
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: { workspaces: [] } });
+      return;
+    }
+    await route.fulfill({
+      status: failure.status,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: failure.code, message: failure.message, retryable: false } }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  const prompt = page.getByRole("dialog", { name: "Create workspace" });
+  await prompt.getByLabel("Workspace name").fill("Member recovery");
+  await prompt.getByRole("button", { name: "Continue to configuration" }).click();
+  await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("Contact your administrator to connect one.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+
+  failure = {
+    status: 503,
+    code: "MODEL_TIER_ROUTE_UNAVAILABLE",
+    message: "No ready route is available for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Contact your administrator to configure one.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+
+  failure = {
+    status: 422,
+    code: "MODEL_TIER_PRICING_UNAVAILABLE",
+    message: "Pricing is not ready for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Contact your administrator to add it.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+});
+
 test("workspace deletion separates runtime removal from durable-content retention", async ({ page }) => {
   const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d70";
   let deletionRequest = null;

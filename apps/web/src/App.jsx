@@ -57,6 +57,7 @@ import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 import { providerModelCapabilityLabels } from "./provider-inventory.js";
 import { customerPasskeyApi } from "./customer-auth-client.js";
 import { reconcileWorkspaceInventory, replaceWorkspaceInInventory } from "./workspace-inventory.js";
+import { configurationRecoveryFor, errorMessage } from "./configuration-recovery.js";
 import {
   protectedOrganizationConstraintsFromEditor,
   protectedPolicyAllowed,
@@ -118,6 +119,18 @@ const chatServiceClassOptions = [
   { value: "balanced", label: "Balanced · everyday work" },
   { value: "pro", label: "Pro · highest capability" },
 ];
+
+function ConfigurationErrorDetail({ error, access }) {
+  const recovery = configurationRecoveryFor(error);
+  if (!recovery) return <span>{errorMessage(error)}</span>;
+  const canManage = Boolean(access?.[recovery.permission]);
+  return <span className="configuration-recovery-detail">
+    <span>{recovery.message}</span>
+    {canManage
+      ? <a className="configuration-recovery-link" href={recovery.href}>{recovery.action}</a>
+      : <span>{recovery.contact}</span>}
+  </span>;
+}
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
 const chatServiceClassUnavailableCopy = {
@@ -532,7 +545,7 @@ function WorkspaceDeletionDialog({ request, onChange, onConfirm, onClose }) {
   );
 }
 
-function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, configurationAccess, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
   return (
@@ -562,7 +575,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
         : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} workspaceMembers={workspaceMembers} onReviewWorkspaces={canManageAnyWorkspace ? () => onSectionChange("organization") : undefined} onSaved={onGuardrailsSaved} />
           : <>
 
-      {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
+      {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong><ConfigurationErrorDetail error={apiError} access={configurationAccess} /></span></div>}
 
       {loading ? (
         <div className="workspace-overview-empty" role="status">Loading your workspaces…</div>
@@ -3417,7 +3430,7 @@ const explicitWorkspaceServiceClass = (value, options) => (
     : options.some((option) => option.value === "balanced") ? "balanced" : options[0]?.value ?? "balanced"
 );
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState(null);
@@ -3503,7 +3516,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
-      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
+      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong><ConfigurationErrorDetail error={error} access={configurationAccess} /></span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
         <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
@@ -4741,13 +4754,14 @@ function ChatConversation({
   onFork,
   archived = false,
   sourceWorkspaceName = "",
+  configurationAccess,
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [historyState, setHistoryState] = useState("ready");
-  const [historyError, setHistoryError] = useState("");
+  const [historyError, setHistoryError] = useState(null);
   const [historyReload, setHistoryReload] = useState(0);
   const [chatActionsOpen, setChatActionsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -4841,14 +4855,14 @@ function ChatConversation({
       setAttachments([]);
       setAttachmentError("");
       setHistoryState("ready");
-      setHistoryError("");
+      setHistoryError(null);
       clearError();
       return undefined;
     }
     if (loadedSessionRef.current === sessionId) return undefined;
     let active = true;
     setHistoryState("loading");
-    setHistoryError("");
+    setHistoryError(null);
     setSelectedActivityTurnId("");
     setMessages([]);
     chatApi.messages(sessionId)
@@ -4860,7 +4874,7 @@ function ChatConversation({
       })
       .catch((requestError) => {
         if (!active) return;
-        setHistoryError(requestError.message);
+        setHistoryError(requestError);
         setHistoryState("error");
       });
     return () => { active = false; };
@@ -4975,7 +4989,7 @@ function ChatConversation({
         ]);
         onSessionCreated?.(threadId, sessionId);
       } catch (requestError) {
-        setHistoryError(requestError.message);
+        setHistoryError(requestError);
         setHistoryState("error");
         return;
       }
@@ -5009,7 +5023,7 @@ function ChatConversation({
       .then(() => {
         if (sessionRef.current === sessionId) setHistoryReload((value) => value + 1);
       })
-      .catch((requestError) => setHistoryError(requestError.message));
+      .catch((requestError) => setHistoryError(requestError));
   };
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
@@ -5129,7 +5143,7 @@ function ChatConversation({
       {(error || historyError) && (
         <div className="workspace-error chat-error" role="alert">
           <Info24Regular aria-hidden="true" />
-          <span>{error?.message || historyError}</span>
+          <ConfigurationErrorDetail error={error || historyError} access={configurationAccess} />
           {historyError && (
             <button type="button" className="chat-error-retry" onClick={() => setHistoryReload((value) => value + 1)}>
               Try again
@@ -5332,6 +5346,7 @@ export function ChatScreen({
   onLoadOlder,
   newThreadRequest = 0,
   onRunningSessionIdsChange,
+  configurationAccess,
 }) {
   const [agents, setAgents] = useState([]);
   const [serviceClassAvailability, setServiceClassAvailability] = useState([]);
@@ -5397,7 +5412,7 @@ export function ChatScreen({
       setSessionNextCursor(page.nextCursor ?? null);
       publishHistoryMetadata(page.nextCursor ?? null, false);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError);
       publishHistoryMetadata(sessionNextCursor, false);
     } finally {
       if (append) setSessionLoadingMore(false);
@@ -5485,7 +5500,7 @@ export function ChatScreen({
       .catch((requestError) => {
         if (!active) return;
         setStatus("error");
-        setError(requestError.message);
+        setError(requestError);
       });
     return () => { active = false; };
   }, [workspace?.id, workspaceState, reload]);
@@ -5509,7 +5524,7 @@ export function ChatScreen({
       .catch((requestError) => {
         if (!active) return;
         setStatus("error");
-        setError(requestError.message);
+        setError(requestError);
       });
     return () => { active = false; };
   }, [workspace?.id, workspaceState, activeAgentId, reload]);
@@ -5599,7 +5614,7 @@ export function ChatScreen({
       onAgentChange?.(workspace.id, catalogId);
       onSessionChange(created.id);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError);
     }
   };
   const selectRequestedServiceClass = (serviceClass) => {
@@ -5694,7 +5709,9 @@ export function ChatScreen({
                   ? `${agentName} is not responding in this workspace. Restart it once to apply the latest managed agent runtime.`
                   : offline
                     ? `Start the workspace to bring ${agentName}, its sessions, and its connections online.`
-                    : error || `${agentName} is temporarily unavailable.`}</p>
+                    : error
+                      ? <ConfigurationErrorDetail error={error} access={configurationAccess} />
+                      : `${agentName} is temporarily unavailable.`}</p>
             {status !== "loading" && !unavailable && (
               <div className="chat-recovery-actions">
                 <button
@@ -5767,6 +5784,7 @@ export function ChatScreen({
               onFork={forkThread}
               archived={archived}
               sourceWorkspaceName={savedSession ? workspaceName({ grantId: savedSession.workspaceGrantId }) : ""}
+              configurationAccess={configurationAccess}
             />
           </div>;
         })}
@@ -5806,7 +5824,7 @@ export function App() {
   const [siteBusyId, setSiteBusyId] = useState("");
   const [reviewedSkills, setReviewedSkills] = useState([]);
   const [workspaceActionId, setWorkspaceActionId] = useState("");
-  const [apiError, setApiError] = useState("");
+  const [apiError, setApiError] = useState(null);
   const [schedules, setSchedules] = useState([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [scheduleBusyId, setScheduleBusyId] = useState("");
@@ -5881,7 +5899,7 @@ export function App() {
   const [sandboxSaving, setSandboxSaving] = useState(false);
   const [sandboxCreateOpen, setSandboxCreateOpen] = useState(false);
   const [selectedSandboxGrantId, setSelectedSandboxGrantId] = useState(null);
-  const [sandboxError, setSandboxError] = useState("");
+  const [sandboxError, setSandboxError] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [workspaceDeletion, setWorkspaceDeletion] = useState(null);
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
@@ -5910,6 +5928,11 @@ export function App() {
   const canManageUsage = hasCapability("usage.manage");
   const canReadAudit = hasCapability("audit.read");
   const canOpenAiControlPlane = canReadUsage || canManageUsage || canManageAnyProvider || canManagePolicy;
+  const configurationAccess = {
+    provider: canManageAnyProvider,
+    modelRoutes: canManagePolicy || hasCapability("provider.manage"),
+    pricing: canManageUsage,
+  };
   const availableAiControlPlaneTabs = aiControlPlaneTabs.filter((tab) => ({
     overview: canReadUsage,
     "models-providers": canManageAnyProvider,
@@ -6159,7 +6182,7 @@ export function App() {
   };
 
   const showApiError = (error) => {
-    setApiError(error.message);
+    setApiError(error);
     setToast("");
   };
 
@@ -6434,8 +6457,8 @@ export function App() {
     const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
     setSandboxLoading(true);
     sandboxApi.settings(selectedSandboxGrantId)
-      .then((value) => { setSandboxSettings(value); setSandboxError(""); })
-      .catch((error) => setSandboxError(error.message))
+      .then((value) => { setSandboxSettings(value); setSandboxError(null); })
+      .catch((error) => setSandboxError(error))
       .finally(() => setSandboxLoading(false));
     if (selectedWorkspace) {
       setTelegramLoading(true);
@@ -7080,7 +7103,7 @@ export function App() {
         window.requestAnimationFrame(() => mainContentRef.current?.focus());
       }
     } catch (error) {
-      setSandboxError(error.message);
+      setSandboxError(error);
     } finally {
       setSandboxSaving(false);
     }
@@ -7856,6 +7879,7 @@ export function App() {
             workspaces={homeWorkspaces}
             loading={homeWorkspacesLoading}
             apiError={apiError}
+            configurationAccess={configurationAccess}
             actionWorkspaceId={workspaceActionId}
             canCreateWorkspace={hasCapability("workspace.create")}
             canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId) || hasScopedCapability("workspace.manage_own", "workspace", workspaceId)}
@@ -7930,6 +7954,7 @@ export function App() {
           historyHasMore={chatHistoryHasMore}
           historyLoadingMore={chatHistoryLoadingMore}
           onLoadOlder={() => setChatHistoryLoadRequest((value) => value + 1)}
+          configurationAccess={configurationAccess}
         />}
         {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}
@@ -7937,6 +7962,7 @@ export function App() {
           loading={sandboxLoading}
           saving={sandboxSaving}
           error={sandboxError}
+          configurationAccess={configurationAccess}
           selectedGrantId={selectedSandboxGrantId}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}

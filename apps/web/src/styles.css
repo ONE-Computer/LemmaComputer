@@ -1628,6 +1628,30 @@ textarea:focus-visible,
   line-height: 1.45;
 }
 
+.configuration-recovery-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 5px;
+}
+
+.configuration-recovery-link {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.configuration-recovery-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.configuration-recovery-link:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
 .workspace-overview-heading {
   display: flex;
   align-items: end;
