@@ -3770,7 +3770,7 @@ const connectorIconFiles = {
   linear: "linear.svg",
   massive: "massive.png",
   microsoft: "microsoft.svg",
-  monday: "monday.png",
+  monday: "monday.svg",
   neon: "neon.svg",
   notion: "notion.svg",
   slack: "slack.svg",
