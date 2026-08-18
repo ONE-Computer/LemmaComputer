@@ -11,7 +11,7 @@ test("administrator enters the AI control plane from the account menu and naviga
   await expect(page).toHaveURL(/\?view=ai-control-plane$/);
   await expect(page.getByRole("heading", { name: "AI control plane", exact: true })).toBeVisible();
   const tabs = page.getByRole("navigation", { name: "AI control plane" });
-  await expect(tabs.getByRole("button")).toHaveCount(6);
+  await expect(tabs.getByRole("button")).toHaveCount(4);
   await expect(tabs.getByRole("button", { name: "Audit log" })).toHaveCount(0);
   await expect(tabs.getByRole("button", { name: "Data health" })).toBeVisible();
   await expect(tabs.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
@@ -45,15 +45,11 @@ test("administrator enters the AI control plane from the account menu and naviga
   await emissionsDialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(emissionsDialog).toHaveCount(0);
   await expect(emissionsInfo).toBeFocused();
-  await tabs.getByRole("button", { name: "Pricing" }).click();
-  await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
-  await expect(page.getByRole("heading", { name: "Pricing", exact: true })).toBeVisible();
-  await tabs.getByRole("button", { name: "Model routes" }).click();
-  await expect(page).toHaveURL(/\?view=ai-control-plane&section=model-routes$/);
-  await expect(page.getByRole("heading", { name: "Model routes" })).toBeVisible();
-  await page.goBack();
-  await expect(page).toHaveURL(/\?view=ai-control-plane&section=pricing$/);
-  await expect(tabs.getByRole("button", { name: "Pricing" })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.getByRole("button", { name: "Pricing" })).toHaveCount(0);
+  await expect(tabs.getByRole("button", { name: "Model routes" })).toHaveCount(0);
+  await tabs.getByRole("button", { name: "Models & routing" }).click();
+  await expect(page).toHaveURL(/\?view=ai-control-plane&section=models-providers$/);
+  await expect(page.getByRole("heading", { name: "Models & routing", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\?view=ai-control-plane$/);
   await expect(tabs.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-current", "page");
@@ -74,17 +70,17 @@ test("Settings keeps account and workspace controls without duplicating AI gover
 
 test("provider setup shows configured deployments and selects more than one routing model", async ({ page }) => {
   await page.goto("/?view=ai-control-plane&section=models-providers");
-  await expect(page.getByRole("heading", { name: "Provider settings" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Models & routing" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to Settings" })).toHaveCount(0);
 
-  const anthropic = page.locator(".provider-settings-inventory article").filter({ hasText: "Anthropic" });
-  await expect(anthropic.getByRole("list", { name: "Anthropic configured deployments" })).toContainText("Anthropic Claude Sonnet 4.6");
-  await expect(anthropic.getByRole("list", { name: "Anthropic configured deployments" })).toContainText("Anthropic Claude Opus 4.8");
-  await anthropic.getByRole("button", { name: "Configure" }).click();
+  const anthropic = page.locator(".models-routing-provider").filter({ hasText: "Anthropic" });
+  await expect(anthropic).toContainText("Anthropic Claude Sonnet 4.6");
+  await expect(anthropic).toContainText("Anthropic Claude Opus 4.8");
+  await anthropic.getByRole("button", { name: "Manage account" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "Configure Anthropic" });
+  const dialog = page.getByRole("dialog", { name: "Manage Anthropic" });
   await expect(dialog.getByRole("combobox", { name: "Estimated serving grid for emissions" })).toHaveText(/United States/);
-  await expect(dialog.getByText(/does not control or guarantee the provider’s inference location/)).toBeVisible();
+  await expect(dialog.getByText(/does not control the provider's inference location/)).toBeVisible();
   const sonnet = dialog.getByRole("checkbox", { name: /Anthropic Claude Sonnet 4.6/ });
   const opus = dialog.getByRole("checkbox", { name: /Anthropic Claude Opus 4.8/ });
   await expect(sonnet).toBeChecked();
@@ -96,8 +92,8 @@ test("provider setup shows configured deployments and selects more than one rout
 
 test("provider model selection discloses reviewed OpenAI model capabilities", async ({ page }) => {
   await page.goto("/?view=ai-control-plane&section=models-providers");
-  const openai = page.locator(".provider-settings-inventory article").filter({ hasText: "OpenAI" });
-  await openai.getByRole("button", { name: "Connect" }).click();
+  const openai = page.locator(".models-routing-provider").filter({ hasText: "OpenAI" });
+  await openai.getByRole("button", { name: "Connect account" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Connect OpenAI" });
   await expect(dialog.getByText("Function tools")).toHaveCount(3);

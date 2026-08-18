@@ -1,0 +1,556 @@
+.models-routing-screen {
+  display: grid;
+  min-width: 0;
+  gap: 18px;
+  color: #172334;
+}
+
+.models-routing-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.models-routing-heading > div:first-child {
+  display: grid;
+  max-width: 720px;
+  gap: 5px;
+}
+
+.models-routing-heading p,
+.models-routing-heading h2,
+.models-routing-heading span {
+  margin: 0;
+}
+
+.models-routing-heading p {
+  color: #68717d;
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: .065em;
+  text-transform: uppercase;
+}
+
+.models-routing-heading h2 {
+  color: var(--ink);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -.035em;
+  line-height: 1.15;
+}
+
+.models-routing-heading > div:first-child > span {
+  color: #65717d;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.models-routing-version {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 14px;
+  color: #667482;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.models-routing-version .secondary-button {
+  width: auto;
+}
+
+.models-routing-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid #bddfc9;
+  border-radius: 9px;
+  background: #f0faf4;
+  color: #175f39;
+  font-size: 13px;
+}
+
+.models-routing-focus {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 13px 15px;
+  border: 1px solid #c8d7ef;
+  border-radius: 6px;
+  background: #f4f8fd;
+  color: #43526a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.models-routing-focus svg { flex: 0 0 auto; margin-top: 1px; color: #174ea6; }
+.models-routing-focus span { display: grid; gap: 2px; }
+.models-routing-focus strong { color: #17365f; }
+
+.models-routing-notice svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+
+.models-routing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-width: 0;
+  border: 1px solid #dce2e7;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.models-routing-main {
+  min-width: 0;
+  padding: 16px 0 0;
+}
+
+.models-routing-readiness {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  margin: 0 18px 18px;
+  padding: 0 16px;
+  border: 1px solid #d7dfe7;
+  border-radius: 9px;
+  background: #fcfdfe;
+  color: #3f4e5e;
+  font-size: 13px;
+}
+
+.models-routing-readiness > svg {
+  width: 22px;
+  height: 22px;
+  color: #174b89;
+}
+
+.models-routing-readiness strong {
+  color: #14263c;
+  font-size: 15px;
+}
+
+.models-routing-readiness .primary-button {
+  width: auto;
+}
+
+.models-routing-columns,
+.models-routing-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(150px, .9fr) minmax(120px, .75fr) minmax(120px, .7fr);
+  align-items: center;
+}
+
+.models-routing-columns {
+  min-height: 42px;
+  padding: 0 18px 0 76px;
+  border-bottom: 1px solid #dfe4e8;
+  color: #687583;
+  font-size: 11px;
+}
+
+.models-routing-inventory {
+  min-height: 470px;
+}
+
+.models-routing-provider + .models-routing-provider {
+  border-top: 1px solid #dfe4e8;
+}
+
+.models-routing-provider > header {
+  display: grid;
+  grid-template-columns: 30px 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 78px;
+  padding: 0 18px 0 10px;
+}
+
+.models-routing-expand,
+.models-routing-inspector > header > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #455669;
+  cursor: pointer;
+}
+
+.models-routing-expand:hover,
+.models-routing-inspector > header > button:hover {
+  background: #f0f3f6;
+}
+
+.models-routing-provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #edf4fb;
+  color: #164781;
+}
+
+.models-routing-provider-icon svg {
+  width: 25px;
+  height: 25px;
+}
+
+.models-routing-provider > header > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: start;
+  gap: 4px 8px;
+}
+
+.models-routing-provider > header strong {
+  color: #17283d;
+  font-size: 15px;
+}
+
+.models-routing-provider > header small {
+  grid-column: 1 / -1;
+  color: #76818c;
+  font-size: 11px;
+}
+
+.models-routing-provider-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #6e7984;
+  font-size: 11px;
+}
+
+.models-routing-provider-state.active {
+  color: #1e7147;
+}
+
+.models-routing-provider-state svg {
+  width: 16px;
+  height: 16px;
+}
+
+.models-routing-text-action,
+.models-routing-inline-link,
+.models-routing-inspector-title button {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #174b89;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.models-routing-text-action:hover,
+.models-routing-inline-link:hover,
+.models-routing-inspector-title button:hover {
+  text-decoration: underline;
+}
+
+.models-routing-row {
+  width: 100%;
+  min-height: 68px;
+  padding: 0 18px 0 76px;
+  border: 0;
+  border-top: 1px solid #edf0f2;
+  background: transparent;
+  color: #334253;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.models-routing-row:hover {
+  background: #fbfcfd;
+}
+
+.models-routing-row.selected {
+  box-shadow: inset 3px 0 #174b89;
+  background: #f5f8fc;
+}
+
+.models-routing-row > span {
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.models-routing-row-name {
+  display: grid;
+  gap: 3px;
+}
+
+.models-routing-row-name strong {
+  overflow: hidden;
+  color: #17283d;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.models-routing-row-name small {
+  overflow: hidden;
+  color: #7a8590;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.models-routing-ready,
+.models-routing-gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 650;
+}
+
+.models-routing-ready {
+  color: #1e7147;
+}
+
+.models-routing-gap {
+  color: #a4511e;
+}
+
+.models-routing-ready svg,
+.models-routing-gap svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.models-routing-empty {
+  margin: 0;
+  padding: 20px 76px;
+  color: #6e7984;
+  font-size: 12px;
+}
+
+.models-routing-inspector {
+  min-width: 0;
+  border-left: 1px solid #dce2e7;
+  background: #fdfdfc;
+}
+
+.models-routing-inspector > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px;
+  border-bottom: 1px solid #dfe4e8;
+}
+
+.models-routing-inspector > header > div {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 6px 9px;
+}
+
+.models-routing-inspector > header span {
+  grid-column: 1 / -1;
+  color: #657383;
+  font-size: 12px;
+}
+
+.models-routing-inspector > header strong {
+  color: #16283e;
+  font-size: 20px;
+}
+
+.models-routing-inspector > header small {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #f0efec;
+  color: #5f6973;
+  font-size: 10px;
+}
+
+.models-routing-model-id,
+.models-routing-inspector > section {
+  display: grid;
+  gap: 9px;
+  padding: 17px 20px;
+  border-bottom: 1px solid #e1e5e8;
+}
+
+.models-routing-model-id span,
+.models-routing-model-id strong,
+.models-routing-inspector p,
+.models-routing-inspector section > small {
+  margin: 0;
+  color: #6b7784;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.models-routing-model-id strong {
+  overflow-wrap: anywhere;
+  color: #465a72;
+  font-weight: 500;
+}
+
+.models-routing-inspector-title {
+  display: flex;
+  align-items: center;
+  justify-content: start;
+  gap: 5px;
+  color: #17283d;
+  font-size: 13px;
+}
+
+.models-routing-inspector-title button {
+  margin-left: auto;
+}
+
+.models-routing-inspector-title svg {
+  width: 16px;
+  height: 16px;
+  color: #687685;
+}
+
+.models-routing-inspector .secondary-button {
+  justify-self: start;
+  width: auto;
+  margin-top: 2px;
+}
+
+.models-routing-inline-link {
+  justify-self: start;
+}
+
+.models-routing-inspector-empty {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  padding: 32px 22px;
+  color: #687685;
+}
+
+.models-routing-inspector-empty svg {
+  width: 24px;
+  height: 24px;
+}
+
+.models-routing-inspector-empty strong {
+  color: #26394f;
+}
+
+.models-routing-inspector-empty span {
+  font-size: 12px;
+}
+
+.model-history-list {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid #e0e5e9;
+}
+
+.model-history-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 0;
+  border-bottom: 1px solid #e6eaed;
+}
+
+.model-history-list article > div {
+  display: grid;
+  gap: 3px;
+}
+
+.model-history-list span,
+.model-history-list small,
+.model-history-list p {
+  color: #6d7884;
+  font-size: 12px;
+}
+
+@media (max-width: 1050px) {
+  .models-routing-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .models-routing-columns,
+  .models-routing-row {
+    grid-template-columns: minmax(190px, 1.3fr) minmax(130px, .9fr) minmax(105px, .7fr) minmax(105px, .7fr);
+  }
+}
+
+@media (max-width: 840px) {
+  .models-routing-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .models-routing-version {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .models-routing-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .models-routing-inspector {
+    border-top: 1px solid #dce2e7;
+    border-left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .models-routing-readiness {
+    grid-template-columns: auto 1fr;
+    padding-block: 12px;
+  }
+
+  .models-routing-readiness > span,
+  .models-routing-readiness > button {
+    grid-column: 2;
+  }
+
+  .models-routing-columns {
+    display: none;
+  }
+
+  .models-routing-provider > header {
+    grid-template-columns: 28px 40px minmax(0, 1fr);
+    padding-right: 12px;
+  }
+
+  .models-routing-provider > header .models-routing-text-action {
+    grid-column: 3;
+    justify-self: start;
+  }
+
+  .models-routing-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 12px;
+    padding: 12px 16px 12px 76px;
+  }
+
+  .models-routing-row > span:nth-child(3),
+  .models-routing-row > span:nth-child(4) {
+    grid-column: 2;
+  }
+}

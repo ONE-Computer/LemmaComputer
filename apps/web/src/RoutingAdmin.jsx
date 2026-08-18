@@ -178,6 +178,23 @@ const clearRouteDraft = (scope) => {
   try { window.localStorage.removeItem(key); } catch { /* Browser storage may be unavailable. */ }
 };
 
+export {
+  MappingEditor,
+  PricingEditor,
+  clearRouteDraft,
+  datetimeLocalValue,
+  hashPricingRecord,
+  pricingCoverage,
+  pricingUnits,
+  rateLabel,
+  ratePerMillion,
+  readRouteDraft,
+  serviceClassDescriptions,
+  serviceClassLabels,
+  shortId,
+  writeRouteDraft,
+};
+
 function PriceCell({ card, unit }) {
   const missing = ratePerMillion(card, unit) == null;
   return <span className={missing ? "route-price-missing" : ""}>{rateLabel(card, unit)}</span>;
@@ -197,7 +214,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
     && editor.prices.input_uncached_token !== ""
     && editor.prices.output_token !== "";
   return <ModalDialog
-    title={`New ${serviceClassLabels[editor.deployment.serviceClass]} price version`}
+    title={`New ${serviceClassLabels[editor.deployment.serviceClass] ?? editor.deployment.displayName ?? "model"} price version`}
     description="Create immutable pricing evidence for this provider deployment and attach it to a local mapping draft. This does not change a current Team policy."
     eyebrow="Rate card"
     labelledBy="route-pricing-title"

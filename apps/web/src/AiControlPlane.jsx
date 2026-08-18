@@ -2,15 +2,13 @@ import "./AiControlPlane.css";
 
 export const aiControlPlaneTabs = [
   { id: "overview", label: "Overview" },
-  { id: "models-providers", label: "Models & providers" },
-  { id: "model-routes", label: "Model routes" },
-  { id: "pricing", label: "Pricing" },
+  { id: "models-providers", label: "Models & routing" },
   { id: "teams-budgets", label: "Teams & budgets" },
   { id: "data-health", label: "Data health" },
 ];
 
 export function AiControlPlane({ activeView, onViewChange, tabs = aiControlPlaneTabs, children }) {
-  const activeTab = activeView === "spend" ? "overview" : activeView;
+  const activeTab = activeView === "spend" ? "overview" : activeView === "team-routing" ? "teams-budgets" : activeView;
 
   return (
     <div className="secondary-screen ai-control-plane">
