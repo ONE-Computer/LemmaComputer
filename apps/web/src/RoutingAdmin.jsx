@@ -226,7 +226,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
       <small>{editor.deployment.providerDeployment}</small>
     </div>
     <div className="route-price-form-grid">
-      <label className="modal-field"><span>Provider account ID</span><input aria-label="Provider account ID" value={editor.providerAccountId} disabled={busy} onChange={(event) => onChange({ ...editor, providerAccountId: event.target.value })} /></label>
+      <label className="modal-field"><span>Provider account ID</span><input aria-label="Provider account ID" value={editor.providerAccountId} readOnly disabled={busy} /><small>Inherited from the connected provider account.</small></label>
       <label className="modal-field"><span>Currency</span><input aria-label="Pricing currency" value={editor.currency} maxLength={3} disabled={busy} onChange={(event) => onChange({ ...editor, currency: event.target.value.toUpperCase() })} /></label>
       {pricingUnits.map((item) => <label className="modal-field" key={item.key}><span>{item.label} / 1M tokens{item.key.startsWith("cache") ? " (optional)" : ""}</span><input aria-label={`${item.label} price per 1M tokens`} type="number" min="0" step="0.0001" value={editor.prices[item.key]} disabled={busy} onChange={(event) => updateRate(item.key, event.target.value)} /></label>)}
       <label className="modal-field"><span>Version label</span><input aria-label="Price version label" value={editor.sourceVersion} disabled={busy} onChange={(event) => onChange({ ...editor, sourceVersion: event.target.value })} /></label>
@@ -251,7 +251,8 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
   const revisionLength = editor.revisionNote.trim().length;
   const remainingRevisionCharacters = Math.max(0, minimumRevisionLength - revisionLength);
   const revisionValid = remainingRevisionCharacters === 0;
-  const deploymentsValid = editor.deployments.length >= 3 && editor.deployments.every((item) => item.provider && item.providerModel.trim() && item.providerDeployment.trim());
+  const assignedDeployments = editor.deployments.filter((item) => item.provider || item.providerAccountId || item.providerModel || item.providerDeployment);
+  const deploymentsValid = assignedDeployments.length > 0 && assignedDeployments.every((item) => item.provider && item.providerAccountId && item.providerModel.trim() && item.providerDeployment.trim());
   const valid = revisionValid && deploymentsValid;
   return <ModalDialog
     title="Create a mapping draft"
@@ -268,7 +269,18 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
         const selectedDeployment = inventory.find((item) => providerDeploymentKey(item) === providerDeploymentKey(deployment));
         const selectProviderDeployment = (inventoryId) => {
           const selected = inventory.find((item) => item.id === inventoryId);
-          if (!selected) return;
+          if (!selected) {
+            updateDeployment(deployment.id, {
+              provider: "",
+              providerAccountId: "",
+              providerModel: "",
+              providerDeployment: "",
+              region: null,
+              providerServiceTier: null,
+              rateCardId: "",
+            });
+            return;
+          }
           updateDeployment(deployment.id, {
             ...selected,
             id: deployment.id,
@@ -278,12 +290,12 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
         };
         return <section key={deployment.id} className="route-mapping-editor-row" aria-labelledby={`route-editor-${deployment.serviceClass}`}>
           <header><span className={`route-alias ${deployment.serviceClass}`} id={`route-editor-${deployment.serviceClass}`}>{serviceClassLabels[deployment.serviceClass]}</span><small>{serviceClassDescriptions[deployment.serviceClass]}</small></header>
-          <label className="modal-field"><span>Provider deployment</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} provider deployment`} value={selectedDeployment?.id ?? ""} options={inventory.map((item) => ({ value: item.id, label: providerDeploymentLabel(item) }))} disabled={busy} onValueChange={selectProviderDeployment} />{providerModelCapabilityLabels(selectedDeployment?.modelCapabilities).length > 0 && <small className="route-model-capabilities">Inherited model capabilities: {providerModelCapabilityLabels(selectedDeployment.modelCapabilities).join(" · ")}</small>}</label>
-          <label className="modal-field route-editor-rate"><span>Pinned price record</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} price record`} value={deployment.rateCardId ?? ""} options={[{ value: "", label: "No price record" }, ...compatibleCards.map((card) => ({ value: card.id, label: `${card.sourceVersion} · ${card.currency}` }))]} disabled={busy} onValueChange={(rateCardId) => updateDeployment(deployment.id, { rateCardId })} /></label>
+          <label className="modal-field"><span>Provider deployment</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} provider deployment`} value={selectedDeployment?.id ?? ""} options={[{ value: "", label: "Not assigned" }, ...inventory.map((item) => ({ value: item.id, label: providerDeploymentLabel(item) }))]} disabled={busy} onValueChange={selectProviderDeployment} />{providerModelCapabilityLabels(selectedDeployment?.modelCapabilities).length > 0 && <small className="route-model-capabilities">Inherited model capabilities: {providerModelCapabilityLabels(selectedDeployment.modelCapabilities).join(" · ")}</small>}</label>
+          <label className="modal-field route-editor-rate"><span>Pinned price record</span><SelectMenu ariaLabel={`${serviceClassLabels[deployment.serviceClass]} price record`} value={deployment.rateCardId ?? ""} options={[{ value: "", label: "No price record" }, ...compatibleCards.map((card) => ({ value: card.id, label: `${card.sourceVersion} · ${card.currency}` }))]} disabled={busy || !selectedDeployment} onValueChange={(rateCardId) => updateDeployment(deployment.id, { rateCardId })} /></label>
         </section>;
       })}
     </div>
-    {!valid && <div className="route-editor-validation" role="status" aria-live="polite"><Info20Regular aria-hidden="true" /><span>{!revisionValid ? revisionLength ? `Add ${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} to the revision note to save this draft.` : `Add a revision note of at least ${minimumRevisionLength} characters to save this draft.` : "Select a valid provider deployment for Lite, Balanced, and Pro."}</span></div>}
+    {!valid && <div className="route-editor-validation" role="status" aria-live="polite"><Info20Regular aria-hidden="true" /><span>{!revisionValid ? revisionLength ? `Add ${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} to the revision note to save this draft.` : `Add a revision note of at least ${minimumRevisionLength} characters to save this draft.` : assignedDeployments.length ? "Finish or clear the incomplete provider assignment." : "Assign at least one organization route to save this draft."}</span></div>}
     <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates an immutable version for Team policy adoption. It does not activate or repoint any current Team route.</span></div>
     <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Save local draft</button></div>
   </ModalDialog>;

@@ -47,6 +47,21 @@ const bedrockProfileOptions = [
 const routeClasses = ["lite", "balanced", "pro"];
 const routeRank = { lite: 0, balanced: 1, pro: 2 };
 
+const routeIsAssigned = (route) => Boolean(
+  route?.provider
+  && route?.providerAccountId
+  && route?.providerModel?.trim()
+  && route?.providerDeployment?.trim()
+);
+
+const organizationRouteReadiness = (routes, inventory, cardById) => routeClasses.map((serviceClass) => {
+  const assignments = routes.filter((route) => route.serviceClass === serviceClass && routeIsAssigned(route));
+  if (assignments.length !== 1) return { serviceClass, ready: false };
+  const route = assignments[0];
+  const enabled = inventory.some((deployment) => providerDeploymentKey(deployment) === providerDeploymentKey(route));
+  return { serviceClass, ready: enabled && pricingCoverage(cardById.get(route.rateCardId)).complete };
+});
+
 const displayDate = (value) => value ? new Date(value).toLocaleString() : "Not tested";
 const providerStateLabel = (state) => ({
   active: "Connected",
@@ -159,8 +174,10 @@ export function ModelsRoutingAdmin({
   const selectedRoute = selected ? routeByDeployment.get(providerDeploymentKey(selected)) : null;
   const selectedCard = selected ? cardById.get(selectedRoute?.rateCardId) ?? latestRateCardForDeployment(rateCards, selected) : null;
   const selectedCoverage = pricingCoverage(selectedCard);
-  const readyRoutes = effectiveRoutes.filter((route) => pricingCoverage(cardById.get(route.rateCardId)).complete).length;
-  const issueCount = Math.max(0, 3 - readyRoutes);
+  const routeReadiness = useMemo(() => organizationRouteReadiness(effectiveRoutes, inventory, cardById), [cardById, effectiveRoutes, inventory]);
+  const readyRoutes = routeReadiness.filter((route) => route.ready).length;
+  const issueCount = routeClasses.length - readyRoutes;
+  const routesReadyToPublish = routeReadiness.every((route) => route.ready);
 
   useEffect(() => {
     Promise.all([adminApi.rateCards(), adminApi.latestRoutingMapping()])
@@ -195,15 +212,19 @@ export function ModelsRoutingAdmin({
     return next;
   });
   const draftableDeployments = () => {
-    const source = effectiveRoutes.length ? effectiveRoutes : routeClasses.map((serviceClass, index) => ({
-      ...inventory[Math.min(index, Math.max(0, inventory.length - 1))],
+    const source = routeClasses.map((serviceClass) => effectiveRoutes.find((route) => route.serviceClass === serviceClass) ?? {
       id: `draft-${serviceClass}`,
       serviceClass,
-    }));
-    return source.filter((deployment) => deployment?.provider).map((deployment) => {
+      provider: "",
+      providerAccountId: "",
+      providerModel: "",
+      providerDeployment: "",
+      rateCardId: "",
+    });
+    return source.map((deployment) => {
       const model = inventory.find((candidate) => providerDeploymentKey(candidate) === providerDeploymentKey(deployment));
       const normalized = model ? { ...deployment, ...model, id: deployment.id } : deployment;
-      const card = cardById.get(normalized.rateCardId) ?? latestRateCardForDeployment(rateCards, normalized);
+      const card = routeIsAssigned(normalized) ? cardById.get(normalized.rateCardId) ?? latestRateCardForDeployment(rateCards, normalized) : null;
       return {
         ...normalized,
         rateCardId: normalized.rateCardId ?? card?.id ?? "",
@@ -222,7 +243,7 @@ export function ModelsRoutingAdmin({
   };
   const openMappingEditor = () => setMappingEditor({ revisionNote: draft?.revisionNote ?? "", deployments: draftableDeployments() });
   const saveMappingDraft = () => {
-    const next = { revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments };
+    const next = { revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments.filter(routeIsAssigned) };
     setDraft(next);
     writeRouteDraft(draftScope, next);
     setMappingEditor(null);
@@ -230,7 +251,7 @@ export function ModelsRoutingAdmin({
   };
   const mappingInput = (value) => ({
     revisionNote: value.revisionNote,
-    deployments: value.deployments.map((deployment) => ({
+    deployments: value.deployments.filter(routeIsAssigned).map((deployment) => ({
       serviceClass: deployment.serviceClass,
       provider: deployment.provider,
       ...(deployment.providerAccountId?.trim() ? { providerAccountId: deployment.providerAccountId.trim() } : {}),
@@ -314,15 +335,6 @@ export function ModelsRoutingAdmin({
       setBusy(false);
     }
   };
-  const resolveIssue = () => {
-    const missingRoute = effectiveRoutes.find((route) => !pricingCoverage(cardById.get(route.rateCardId)).complete);
-    const deployment = missingRoute && inventory.find((candidate) => providerDeploymentKey(candidate) === providerDeploymentKey(missingRoute));
-    if (deployment && canManagePricing) {
-      setSelectedId(deployment.id);
-      openPricing(deployment);
-    } else if (canManageRouting) openMappingEditor();
-  };
-
   return <div className="models-routing-screen">
     <header className="models-routing-heading">
       <div><p>Models & routing</p><h2>Models & routing</h2><span>Enable approved models and maintain how they are priced and routed across your organization.</span></div>
@@ -333,7 +345,7 @@ export function ModelsRoutingAdmin({
     {focus && <div className="models-routing-focus" role="note"><Info20Regular aria-hidden="true" /><span><strong>{focus === "provider" ? "Connect a provider account" : focus === "pricing" ? "Complete model pricing" : "Complete the organization route"}</strong>{focus === "provider" ? "Use one provider API key across every enabled model from that provider." : focus === "pricing" ? "The first enabled model missing complete pricing is selected. Add its required rates before routing it." : "The first unassigned model is selected. Assign priced models to the Lite, Balanced, and Pro organization defaults."}</span></div>}
     <div className="models-routing-layout">
       <main className="models-routing-main">
-        <section className="models-routing-readiness" aria-label="Organization route readiness"><CheckmarkCircle20Regular aria-hidden="true" /><strong>{readyRoutes} of 3 routes ready</strong><span>{issueCount ? `${issueCount} route${issueCount === 1 ? "" : "s"} need pricing or assignment` : "All organization routes are ready"}</span>{(canManageRouting || canManagePricing) && issueCount > 0 && <button className="primary-button" type="button" onClick={resolveIssue}>Resolve {issueCount} issue{issueCount === 1 ? "" : "s"}</button>}</section>
+        <section className="models-routing-readiness" aria-label="Organization route readiness"><CheckmarkCircle20Regular aria-hidden="true" /><strong>{readyRoutes} of 3 routes ready</strong><span>{issueCount ? `${issueCount} organization route${issueCount === 1 ? "" : "s"} still need an assigned model with complete pricing` : "All organization routes are ready"}</span></section>
         <div className="models-routing-columns" aria-hidden="true"><span>Provider / model</span><span>Pricing (per 1M tokens)</span><span>Route use (org default)</span><span>Status</span></div>
         <section className="models-routing-inventory" aria-label="Provider accounts and enabled models">
           {(providerLoading || loading) && <p className="models-routing-empty">Loading provider accounts and routes…</p>}
@@ -378,7 +390,7 @@ export function ModelsRoutingAdmin({
     {providerEditor && <ProviderEditor provider={providerEditor} busy={providerBusy} onClose={() => setProviderEditor(null)} onSave={onSaveProvider} />}
     {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={inventory} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
-    {publishOpen && <ModalDialog title="Publish organization routes?" description="This publishes an immutable route version. Team overrides remain pinned until they are changed separately." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Every route in this version must point to an enabled model with complete pricing.</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || effectiveRoutes.some((route) => !pricingCoverage(cardById.get(route.rateCardId)).complete)} onClick={publishMapping}>{busy ? "Publishing…" : "Publish route version"}</button></div></ModalDialog>}
+    {publishOpen && <ModalDialog title="Publish organization routes?" description="This publishes an immutable route version. Team overrides remain pinned until they are changed separately." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Every route in this version must point to an enabled model with complete pricing.</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Publishing…" : "Publish route version"}</button></div></ModalDialog>}
     {history && <HistoryDialog kind={history.kind} deployment={history.deployment} rateCards={rateCards} mapping={mapping} onClose={() => setHistory(null)} />}
   </div>;
 }
