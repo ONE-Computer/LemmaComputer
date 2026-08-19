@@ -1667,8 +1667,7 @@ export function createControlServer(
     }, { revoked: 0, failed: 0 });
   };
   const requirePolicy = async (request: object) => {
-    const { principal: value, effective } = await assignedPolicy(request);
-    return policyForGrant(value, effective);
+    await assignedPolicy(request);
   };
   const requireWorkspacePolicy = async (request: object, workspaceId: string) => {
     requirePermission(request, "workspace.use", { type: "workspace", resourceId: workspaceId });
