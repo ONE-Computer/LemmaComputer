@@ -3432,6 +3432,19 @@ const explicitWorkspaceServiceClass = (value, options) => (
     : options.some((option) => option.value === "balanced") ? "balanced" : options[0]?.value ?? "balanced"
 );
 
+function WorkspaceAiReadinessNotice({ title, canManage }) {
+  return <div className="workspace-ai-readiness" role="status">
+    <Info24Regular aria-hidden="true" />
+    <span>
+      <strong>{title}</strong>
+      <span>AI needs a connected provider model with complete pricing and a published organization route available to this workspace.</span>
+      {canManage
+        ? <a className="workspace-inline-recovery-link" href="?view=ai-control-plane&section=models-providers">Review models &amp; routing</a>
+        : <span>Contact your administrator to finish the organization’s models and routing.</span>}
+    </span>
+  </div>;
+}
+
 function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
@@ -3442,6 +3455,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [pendingProfileId, setPendingProfileId] = useState("");
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
+  const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
+  const aiSetupReady = Boolean(availableServiceClasses.length && settings?.availableModels?.length);
+  const canManageAiSetup = Boolean(configurationAccess?.provider || configurationAccess?.modelRoutes || configurationAccess?.pricing);
 
   useEffect(() => {
     if (!settings) return;
@@ -3450,11 +3466,11 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       : null;
     setProfileId(supportedDefault?.id ?? settings.profileId);
     setApplicationIds(settings.applicationIds);
-    setModelAlias(settings.modelAlias);
+    setModelAlias(aiSetupReady ? settings.modelAlias : null);
     setRequestedServiceClass(explicitWorkspaceServiceClass(settings.requestedServiceClass, explicitWorkspaceServiceClassOptions(settings)));
-    setAgentIds(settings.agentIds);
+    setAgentIds(aiSetupReady ? settings.agentIds : []);
     setSecurityGroupVersionId(settings.securityGroup?.assignmentSource === "custom" ? settings.securityGroup.id : "inherit");
-  }, [creatingWorkspace, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
+  }, [creatingWorkspace, aiSetupReady, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
@@ -3470,18 +3486,20 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const toggleApplication = (applicationId) => setApplicationIds((current) => (
     current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
   ));
-  const toggleAgent = (agentId) => setAgentIds((current) => {
-    if (current.includes(agentId)) {
-      const next = current.filter((id) => id !== agentId);
-      if (next.length === 0) setModelAlias(null);
-      return next;
-    }
-    if (current.length === 0) setModelAlias(settings.modelAlias ?? settings.availableModels[0]?.alias ?? null);
-    return [...current, agentId];
-  });
+  const toggleAgent = (agentId) => {
+    if (!aiSetupReady) return;
+    setAgentIds((current) => {
+      if (current.includes(agentId)) {
+        const next = current.filter((id) => id !== agentId);
+        if (next.length === 0) setModelAlias(null);
+        return next;
+      }
+      if (current.length === 0) setModelAlias(settings.modelAlias ?? settings.availableModels[0]?.alias ?? null);
+      return [...current, agentId];
+    });
+  };
   const selectedProfile = settings?.availableProfiles.find((profile) => profile.id === profileId) ?? settings?.profile;
   const disposableOpen = selectedProfile?.executionMode === "disposable-open";
-  const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
   const selectableProfiles = settings?.availableProfiles.filter((profile) => profile.id !== "kasm-persistent-standard" || (!creatingWorkspace && profile.id === settings.profileId)) ?? [];
   const openProfileAvailable = selectableProfiles.some((profile) => profile.executionMode === "disposable-open");
   const supportedProfileSelected = selectableProfiles.some((profile) => profile.id === profileId);
@@ -3550,15 +3568,16 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="application-roadmap two-column" aria-label="Planned application catalog">{pendingApplications.map((application) => <div key={application.name}><span><strong>{application.name}</strong><small>{application.type}</small></span><span className="coming-soon">Coming soon</span><p>{application.detail}</p></div>)}</div>
           </section>
 
-          <section className="sandbox-management-section" aria-labelledby="sandbox-agents-heading">
+          <section className={`sandbox-management-section${aiSetupReady ? "" : " workspace-ai-section-unavailable"}`} aria-labelledby="sandbox-agents-heading" aria-disabled={!aiSetupReady || undefined}>
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-agents-heading">AI agents</h2><p>Add AI agents only when they are needed. Each selected agent receives a separate governed identity, model grant, and tool scope.</p></span></div>
+            {!aiSetupReady && <WorkspaceAiReadinessNotice title="AI agents unavailable" canManage={canManageAiSetup} />}
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
               const unavailableCopy = unavailableAgentCopy(choice);
-              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}${aiSetupReady ? "" : " disabled"}`} key={choice.name}><input type="checkbox" checked={selected} disabled={!aiSetupReady} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
             })}</section>)}</div>
-            {!agentIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No AI agents selected. This workspace does not require a model provider or receive AI credentials.</p>}
+            {aiSetupReady && !agentIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No AI agents selected. This workspace does not require a model provider or receive AI credentials.</p>}
           </section>
 
           {showChannels && agentIds.length > 0 && <TelegramChannelSection
@@ -3574,9 +3593,10 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             onCreateCredential={onCreateCredential}
           />}
 
-          {agentIds.length > 0 && <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
+          {(agentIds.length > 0 || !aiSetupReady) && <section className={`sandbox-management-section${aiSetupReady ? "" : " workspace-ai-section-unavailable"}`} aria-labelledby="sandbox-model-heading" aria-disabled={!aiSetupReady || undefined}>
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Default model mode</h2><p>Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.</p></span></div>
-            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
+            {!aiSetupReady && <WorkspaceAiReadinessNotice title="Model modes unavailable" canManage={canManageAiSetup} />}
+            {aiSetupReady && <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>}
           </section>}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
@@ -3609,7 +3629,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · {applicationIds.length || agentIds.length ? `${applicationIds.length} app${applicationIds.length === 1 ? "" : "s"} · ${agentIds.length} AI agent${agentIds.length === 1 ? "" : "s"}` : "base workspace"}</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview || (!aiSetupReady && agentIds.length > 0)}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
@@ -4406,9 +4426,9 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
               <span>{configured ? `${connection.allowedUserCount} approved ${connection.allowedUserCount === 1 ? "sender" : "senders"} · token version ${connection.tokenVersion}` : "One dedicated bot credential can be attached to this workspace."}</span>
             </div>
             {!workspaceExists ? (
-              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>Available after creation</strong>Create this workspace without a channel, then return here if you want to connect Telegram.</span></div>
+              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>Available after creation</strong><span>Create this workspace without a channel, then return here to attach Telegram.</span><a className="workspace-inline-recovery-link" href="?view=settings&section=credentials">Set up a Telegram credential</a></span></div>
             ) : !agentOptions.length ? (
-              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>No eligible agent</strong>Save Hermes Agent, Claude CLI, or Codex CLI in this workspace configuration first.</span></div>
+              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>No eligible agent</strong><span>Save Hermes Agent, Claude CLI, or Codex CLI in this workspace configuration first.</span><a className="workspace-inline-recovery-link" href="#sandbox-agents-heading">Review AI agents</a></span></div>
             ) : <>
               {availableCredentials.length ? <label>
                 <span>Credential</span>

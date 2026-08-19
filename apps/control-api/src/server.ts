@@ -290,6 +290,7 @@ export const compatibleSandboxSelection = (
   const serviceClasses = publishedServiceClasses === null
     ? assignedServiceClasses
     : assignedServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
+  const governedRoutingEnabled = publishedServiceClasses !== null;
   const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
   const profileId = saved
     ? profiles.includes(saved.profileId) ? saved.profileId : null
@@ -297,23 +298,31 @@ export const compatibleSandboxSelection = (
   const applicationIds = saved
     ? saved.applicationIds.filter((id) => applications.includes(id))
     : defaultApplicationIds(document, applications);
-  const agentIds = saved
-    ? saved.agentIds.filter((id) => agents.includes(id))
-    : defaultAgentIds(document, agents);
+  const agentIds = governedRoutingEnabled && !governedRoutingAvailable
+    ? []
+    : saved
+      ? saved.agentIds.filter((id) => agents.includes(id))
+      : defaultAgentIds(document, agents);
   const modelAlias = agentIds.length === 0
     ? null
-    : governedRoutingAvailable
-      ? "lemmacomputer-auto" as const
+    : governedRoutingEnabled
+      ? governedRoutingAvailable ? "lemmacomputer-auto" as const : null
       : saved?.modelAlias && models.includes(saved.modelAlias)
-        ? saved.modelAlias
-        : models[0] ?? null;
-  const requestedServiceClass = saved
-    ? saved.requestedServiceClass === undefined
-      ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
-      : serviceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
+          ? saved.modelAlias
+          : models[0] ?? null;
+  const requestedServiceClass = serviceClasses.length
+    ? saved
+      ? saved.requestedServiceClass === undefined
+        ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
+        : serviceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
+          ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
+          : null
+      : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
+    : agentIds.length === 0
+      ? saved && assignedServiceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
         ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
-        : null
-    : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses);
+        : explicitWorkspaceServiceClass(document.defaultServiceClass, assignedServiceClasses)
+      : null;
   if (!profileId || (agentIds.length > 0 && !modelAlias) || !requestedServiceClass) return null;
   return {
     profileId,
@@ -4626,23 +4635,32 @@ export function createControlServer(
     const assignedServiceClasses = publishedServiceClasses === null
       ? policyServiceClasses
       : policyServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
-    const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
+    const governedRoutingEnabled = publishedServiceClasses !== null;
+    const availableModels = sandboxModels.filter((model) => governedRoutingEnabled
+      ? governedRoutingAvailable && model.alias === "lemmacomputer-auto"
+      : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
     if (!availableProfiles.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile", 500);
-    if (!assignedServiceClasses.length) throw new LemmaComputerError("MODEL_ROUTES_NOT_PUBLISHED", "No organization model routes have been published for this workspace", 409);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const savedProfile = saved ? sandboxProfiles.find((profile) => profile.id === saved.profileId) : undefined;
     const selectedProfile = savedProfile ?? availableProfiles[0]!;
     const profileId = selectedProfile.id;
     const applicationIds = saved?.applicationIds.filter((id) => availableApplications.some((application) => application.id === id));
+    const selectableServiceClasses = assignedServiceClasses.length
+      ? assignedServiceClasses
+      : policyServiceClasses;
     const requestedServiceClass = explicitWorkspaceServiceClass(
       saved?.requestedServiceClass ?? document.defaultServiceClass,
-      assignedServiceClasses,
+      selectableServiceClasses,
     );
     if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
-    const agentIds = saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id));
+    const agentIds = assignedServiceClasses.length
+      ? saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id))
+      : [];
     const selectedApplicationIds = saved ? applicationIds ?? [] : defaultApplicationIds(document, assignedApplications);
-    const selectedAgentIds = saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds);
+    const selectedAgentIds = assignedServiceClasses.length
+      ? saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds)
+      : [];
     if (selectedAgentIds.length > 0 && !availableModels.length) {
       throw new LemmaComputerError("POLICY_INVALID", "The active policy has AI agents but no supported model route", 500);
     }
@@ -4693,7 +4711,9 @@ export function createControlServer(
       modelAlias,
       requestedServiceClass,
       routePreferenceMigrationRequired: Boolean(saved && (
-        (selectedAgentIds.length > 0 && governedRoutingAvailable && saved.modelAlias !== "lemmacomputer-auto")
+        saved.agentIds.length !== selectedAgentIds.length
+        || saved.agentIds.some((id, index) => id !== selectedAgentIds[index])
+        || (selectedAgentIds.length > 0 && governedRoutingAvailable && saved.modelAlias !== "lemmacomputer-auto")
         || saved.requestedServiceClass !== requestedServiceClass
       )),
       profile: selectedProfile,
@@ -4724,6 +4744,7 @@ export function createControlServer(
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
     const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    const governedRoutingEnabled = publishedServiceClasses !== null;
     const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
     const policyServiceClasses = assignedWorkspaceServiceClasses(document);
     const serviceClasses = publishedServiceClasses === null
@@ -4731,17 +4752,20 @@ export function createControlServer(
       : policyServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
     const modelAlias = input.agentIds.length === 0
       ? null
-      : governedRoutingAvailable
-        ? "lemmacomputer-auto"
+      : governedRoutingEnabled
+        ? governedRoutingAvailable ? "lemmacomputer-auto" : null
         : input.modelAlias;
     const agents = assignedAgentIds(document);
     if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias)))) {
+    if (input.agentIds.length > 0 && !serviceClasses.length) {
+      throw new LemmaComputerError("MODEL_ROUTES_NOT_PUBLISHED", "No organization model routes have been published for this workspace", 409);
+    }
+    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingEnabled && !models.includes(modelAlias)))) {
       throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     }
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
-    if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
+    if (input.requestedServiceClass === "auto" || (input.agentIds.length > 0 && !serviceClasses.includes(input.requestedServiceClass))) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const previousSettings = await store.getSandboxSettings?.(actor.identity, input.grantId);
     const previousProfileId = previousSettings?.profileId ?? input.profileId;
     const previousEgress = await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({

@@ -669,7 +669,7 @@ export const sandboxSettingsSchema = z.object({
     value: workspaceRequestedServiceClassSchema,
     displayName: z.string().min(1),
     description: z.string().min(1),
-  }).strict()).min(1),
+  }).strict()),
   agentIds: z.array(agentCatalogIdSchema)
     .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
   availableAgents: z.array(agentCatalogEntrySchema),

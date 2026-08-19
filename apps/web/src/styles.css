@@ -1104,6 +1104,59 @@ textarea:focus-visible,
   color: #606a76;
 }
 
+.workspace-ai-section-unavailable {
+  background: #fbfbfa;
+}
+
+.workspace-ai-section-unavailable .agent-family-grid {
+  opacity: .5;
+}
+
+.agent-choice.disabled {
+  cursor: not-allowed;
+  background: #f7f7f6;
+}
+
+.agent-choice.disabled:hover {
+  border-color: #d7d8d8;
+}
+
+.workspace-ai-readiness {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 11px;
+  margin-bottom: 18px;
+  padding: 15px 16px;
+  border: 1px solid #ead6a8;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5e4a1f;
+}
+
+.workspace-ai-readiness > svg {
+  width: 21px;
+  height: 21px;
+}
+
+.workspace-ai-readiness > span {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-inline-recovery-link {
+  color: #245a94;
+  font-weight: 680;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.workspace-inline-recovery-link:hover {
+  color: #173f6e;
+}
+
 .sandbox-model-options {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }

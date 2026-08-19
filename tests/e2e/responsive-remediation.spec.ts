@@ -53,6 +53,7 @@ test("mobile dense data stays inside explicit scroll owners and exposes every AI
   for (const label of ["Overview", "Models & routing", "Teams & budgets", "Data health"]) {
     await expect(page.getByRole("button", { name: label, exact: true })).toBeInViewport();
   }
+  await expect(page.locator(".ai-control-plane-tabs")).toHaveCSS("scrollbar-width", "none");
 });
 
 test("Workspace focus and Chat composer remain visible at responsive breakpoints", async ({ page }) => {

@@ -383,6 +383,42 @@ test("workspace configuration shows only published organization routes", async (
   await expect(modelRoutes.getByText("Balanced", { exact: true })).toHaveCount(0);
 });
 
+test("workspace configuration pre-empts unavailable AI setup without blocking a base workspace", async ({ page }) => {
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        modelAlias: null,
+        agentIds: [],
+        availableModels: [],
+        availableServiceClasses: [],
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const agents = page.locator('section[aria-labelledby="sandbox-agents-heading"]');
+  await expect(agents).toHaveAttribute("aria-disabled", "true");
+  await expect(agents.getByText("AI agents unavailable", { exact: true })).toBeVisible();
+  await expect(agents.getByRole("checkbox")).not.toHaveCount(0);
+  for (const checkbox of await agents.getByRole("checkbox").all()) await expect(checkbox).toBeDisabled();
+
+  const modelModes = page.locator('section[aria-labelledby="sandbox-model-heading"]');
+  await expect(modelModes).toHaveAttribute("aria-disabled", "true");
+  await expect(modelModes.getByText("Model modes unavailable", { exact: true })).toBeVisible();
+  await expect(modelModes.getByRole("radiogroup")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review models & routing" }).first()).toHaveAttribute(
+    "href",
+    "?view=ai-control-plane&section=models-providers",
+  );
+  await expect(page.getByRole("alert", { name: /Workspace configuration unavailable/ })).toHaveCount(0);
+});
+
 test("workspace configuration can save a base workspace with no applications or AI agents", async ({ page }) => {
   let savedConfiguration: Record<string, unknown> | null = null;
   await page.route("**/api/v1/sandbox-settings**", async (route) => {

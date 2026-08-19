@@ -80,3 +80,22 @@ test("published organization routes constrain new and saved workspace selections
   });
   assert.equal(compatibleSandboxSelection(document, saved(["claude-desktop"]), ["lite", "pro"]), null);
 });
+
+test("an organization without published routes reconciles to a creatable base workspace", () => {
+  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-desktop"]), []), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox", "google-chrome"],
+    modelAlias: null,
+    requestedServiceClass: "balanced",
+    agentIds: [],
+    changed: true,
+  });
+  assert.deepEqual(compatibleSandboxSelection(document, null, []), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox"],
+    modelAlias: null,
+    requestedServiceClass: "balanced",
+    agentIds: [],
+    changed: false,
+  });
+});

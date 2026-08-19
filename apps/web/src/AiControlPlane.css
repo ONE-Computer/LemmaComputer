@@ -53,17 +53,11 @@
   gap: 4px;
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
-  scrollbar-color: #9aaec3 transparent;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .ai-control-plane-tabs::-webkit-scrollbar {
-  height: 6px;
-}
-
-.ai-control-plane-tabs::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: #9aaec3;
+  display: none;
 }
 
 .ai-control-plane-tabs button {

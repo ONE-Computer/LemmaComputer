@@ -103,6 +103,8 @@ test("workspace channels are compact, optional, and do not participate in config
   assert.match(channels, /<strong>Slack<\/strong>/);
   assert.match(channels, /Coming soon/);
   assert.match(channels, /Create this workspace without a channel/);
+  assert.match(channels, /href="\?view=settings&section=credentials">Set up a Telegram credential/);
+  assert.match(channels, /href="#sandbox-agents-heading">Review AI agents/);
   assert.doesNotMatch(channels, /telegram-allowed-user-ids"[^>]+required/);
   const footer = app.slice(app.indexOf('<div className="sandbox-management-footer">'), app.indexOf("<details className=\"sandbox-json\""));
   assert.doesNotMatch(footer, /telegram|credential|channel/i);
