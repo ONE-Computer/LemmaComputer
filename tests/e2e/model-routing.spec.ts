@@ -45,8 +45,9 @@ test("administrator can maintain a local organization-route draft from a model",
   ]);
 });
 
-test("an incremental route draft counts only explicit assignments and keeps provider identity read-only", async ({ page }) => {
+test("an incremental route draft counts only explicit assignments and keeps provider identity internal", async ({ page }) => {
   const providerAccountId = "openai-primary";
+  let submittedProviderAccountId = "";
   const deployments = [
     { id: "openai-sol", providerAccountId, providerModelId: "gpt-5.6-sol", providerDeployment: "openai/gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
     { id: "openai-terra", providerAccountId, providerModelId: "gpt-5.6-terra", providerDeployment: "openai/gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
@@ -67,6 +68,11 @@ test("an incremental route draft counts only explicit assignments and keeps prov
     });
   });
   await page.route("**/api/v1/admin/ai-usage/rate-cards", async (route) => {
+    if (route.request().method() === "POST") {
+      submittedProviderAccountId = route.request().postDataJSON().providerAccountId;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "openai-sol-price-v2" }) });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -109,9 +115,11 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   const inspector = page.getByRole("complementary", { name: "Model details" });
   await inspector.getByRole("button", { name: "Add price version" }).click();
   const priceEditor = page.getByRole("dialog", { name: "New OpenAI GPT-5.6 Sol price version" });
-  await expect(priceEditor.getByLabel("Provider account ID")).toHaveValue(providerAccountId);
-  await expect(priceEditor.getByLabel("Provider account ID")).toHaveJSProperty("readOnly", true);
-  await priceEditor.getByRole("button", { name: "Close dialog" }).click();
+  await expect(priceEditor.getByLabel("Provider account ID")).toHaveCount(0);
+  await expect(priceEditor.getByLabel("Pricing currency")).toHaveValue("USD");
+  await priceEditor.getByLabel("Price approval reason").fill("Approved contract price update.");
+  await priceEditor.getByRole("button", { name: "Create price record" }).click();
+  await expect.poll(() => submittedProviderAccountId).toBe(providerAccountId);
 
   await inspector.getByRole("button", { name: "Assign route" }).click();
   const routeEditor = page.getByRole("dialog", { name: "Create a mapping draft" });
