@@ -119,6 +119,9 @@ const hashPricingRecord = async (record) => {
 };
 const routeDraftServiceClasses = ["lite", "balanced", "pro"];
 const routeDraftStorageKey = (scope) => scope?.tenantId && scope?.userId
+  ? `lemmacomputer.routing-mapping-draft:v2:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.userId)}`
+  : "";
+const legacyRouteDraftStorageKey = (scope) => scope?.tenantId && scope?.userId
   ? `lemmacomputer.routing-mapping-draft:v1:${encodeURIComponent(scope.tenantId)}:${encodeURIComponent(scope.userId)}`
   : "";
 const storedRouteDeployment = (value) => {
@@ -139,6 +142,7 @@ const readRouteDraft = (scope) => {
   const key = routeDraftStorageKey(scope);
   if (!key) return null;
   try {
+    window.localStorage.removeItem(legacyRouteDraftStorageKey(scope));
     const stored = window.localStorage.getItem(key);
     if (!stored) return null;
     const parsed = JSON.parse(stored);
@@ -146,14 +150,14 @@ const readRouteDraft = (scope) => {
       ? parsed.draft.deployments.map(storedRouteDeployment)
       : [];
     const classes = new Set(deployments.map((deployment) => deployment?.serviceClass));
-    if (parsed?.schemaVersion !== 1
+    if (parsed?.schemaVersion !== 2
       || typeof parsed?.draft?.revisionNote !== "string"
       || parsed.draft.revisionNote.trim().length < 8
       || parsed.draft.revisionNote.length > 500
       || deployments.some((deployment) => !deployment)
-      || deployments.length !== 3
-      || classes.size !== 3
-      || routeDraftServiceClasses.some((serviceClass) => !classes.has(serviceClass))) {
+      || deployments.length < 1
+      || deployments.length > routeDraftServiceClasses.length
+      || classes.size !== deployments.length) {
       window.localStorage.removeItem(key);
       return null;
     }
@@ -166,7 +170,8 @@ const writeRouteDraft = (scope, draft) => {
   const key = routeDraftStorageKey(scope);
   if (!key) return false;
   try {
-    window.localStorage.setItem(key, JSON.stringify({ schemaVersion: 1, savedAt: new Date().toISOString(), draft }));
+    window.localStorage.removeItem(legacyRouteDraftStorageKey(scope));
+    window.localStorage.setItem(key, JSON.stringify({ schemaVersion: 2, savedAt: new Date().toISOString(), draft }));
     return true;
   } catch {
     return false;
@@ -175,7 +180,10 @@ const writeRouteDraft = (scope, draft) => {
 const clearRouteDraft = (scope) => {
   const key = routeDraftStorageKey(scope);
   if (!key) return;
-  try { window.localStorage.removeItem(key); } catch { /* Browser storage may be unavailable. */ }
+  try {
+    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(legacyRouteDraftStorageKey(scope));
+  } catch { /* Browser storage may be unavailable. */ }
 };
 
 export {

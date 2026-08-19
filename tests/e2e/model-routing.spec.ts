@@ -41,7 +41,7 @@ test("administrator can maintain a local organization-route draft from a model",
   await expect(page.getByRole("status")).toContainText("Draft saved");
   await expect(page.getByRole("button", { name: "Review & publish" })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([
-    "lemmacomputer.routing-mapping-draft:v1:acme:alex-morgan",
+    "lemmacomputer.routing-mapping-draft:v2:acme:alex-morgan",
   ]);
 });
 
@@ -93,6 +93,12 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await page.route("**/api/v1/admin/routing/mappings/latest", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mapping: null }) });
   });
+  await page.addInitScript(() => {
+    localStorage.setItem("lemmacomputer.routing-mapping-draft:v1:acme:alex-morgan", JSON.stringify({
+      schemaVersion: 1,
+      draft: { revisionNote: "Legacy silently populated routes", deployments: [{ serviceClass: "lite" }, { serviceClass: "balanced" }, { serviceClass: "pro" }] },
+    }));
+  });
 
   await page.goto("/?view=ai-control-plane&section=models-providers");
 
@@ -123,6 +129,11 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await expect(inventory.locator(".models-routing-row").filter({ hasText: "OpenAI GPT-5.6 Sol" })).toContainText("Pro");
   await expect(inventory.locator(".models-routing-row").filter({ hasText: "OpenAI GPT-5.6 Terra" })).toContainText("Not assigned");
   await expect(inventory.locator(".models-routing-row").filter({ hasText: "OpenAI GPT-5.6 Luna" })).toContainText("Not assigned");
+  await page.reload();
+  await expect(readiness).toContainText("1 of 3 routes ready");
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([
+    "lemmacomputer.routing-mapping-draft:v2:acme:alex-morgan",
+  ]);
   await page.getByRole("button", { name: "Review & publish" }).click();
   const publishDialog = page.getByRole("dialog", { name: "Publish organization routes?" });
   await expect(publishDialog.getByRole("button", { name: "Publish route version" })).toBeDisabled();
