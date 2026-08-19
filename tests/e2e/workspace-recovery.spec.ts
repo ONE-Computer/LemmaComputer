@@ -359,6 +359,30 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   await expect(page.getByRole("radiogroup", { name: "Default model mode" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
 });
 
+test("workspace configuration shows only published organization routes", async ({ page }) => {
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        requestedServiceClass: "lite",
+        availableServiceClasses: payload.availableServiceClasses.filter(({ value }: { value: string }) => value === "lite" || value === "pro"),
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const modelRoutes = page.getByRole("radiogroup", { name: "Default model mode" });
+  await expect(modelRoutes.getByRole("radio")).toHaveCount(2);
+  await expect(modelRoutes.getByRole("radio", { name: /^Lite/ })).toBeChecked();
+  await expect(modelRoutes.getByRole("radio", { name: /^Pro/ })).toBeVisible();
+  await expect(modelRoutes.getByText("Balanced", { exact: true })).toHaveCount(0);
+});
+
 test("workspace configuration can save a base workspace with no applications or AI agents", async ({ page }) => {
   let savedConfiguration: Record<string, unknown> | null = null;
   await page.route("**/api/v1/sandbox-settings**", async (route) => {

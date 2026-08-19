@@ -92,7 +92,7 @@ test("a new organization has no policy ceiling and its administrator can create 
   } as unknown as ProtectedWorkspacePolicyAdministrationBoundary;
   const routingStore = {
     latestMappingVersion: async () => ({
-      deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({ serviceClass })),
+      deployments: ["lite", "pro"].map((serviceClass) => ({ serviceClass })),
     }),
   } as unknown as RoutingStore;
   let createdPolicy: RuntimePolicy | null = null;
@@ -145,7 +145,8 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), [
       "firefox", "google-chrome", "visual-studio-code", "obsidian",
     ]);
-    assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
+    assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "pro"]);
+    assert.equal(settings.json().requestedServiceClass, "lite", "the first published route becomes the safe workspace default when Balanced is unavailable");
     assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
     assert.equal(settings.json().securityGroup.defaultAction, "deny");
     assert.equal(settings.json().securityGroup.id, managedFallback.id);
@@ -178,6 +179,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.equal(created.statusCode, 201);
     assert.equal(created.json().state, "ready");
     assert.equal(createdPolicy?.egressMode, "restricted");
+    assert.equal(createdPolicy?.requestedServiceClass, "lite");
     assert.equal(createdPolicy?.egress?.defaultAction, "deny");
     assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
     assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, managedFallback.id);

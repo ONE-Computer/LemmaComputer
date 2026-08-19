@@ -28,7 +28,7 @@ const saved = (agentIds: SandboxSettingsRecord["agentIds"]): SandboxSettingsReco
 });
 
 test("a removed agent is reconciled to the still-allowed saved selection", () => {
-  const selection = compatibleSandboxSelection(document, saved(["claude-desktop", "claude-cli"]), false);
+  const selection = compatibleSandboxSelection(document, saved(["claude-desktop", "claude-cli"]), null);
 
   assert.deepEqual(selection, {
     profileId: "claude-desktop-standard-v1",
@@ -41,7 +41,7 @@ test("a removed agent is reconciled to the still-allowed saved selection", () =>
 });
 
 test("a workspace whose only selected agent was removed reconciles to the safer base workspace", () => {
-  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-cli"]), false), {
+  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-cli"]), null), {
     profileId: "claude-desktop-standard-v1",
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: null,
@@ -52,7 +52,7 @@ test("a workspace whose only selected agent was removed reconciles to the safer 
 });
 
 test("a legacy workspace without saved sandbox settings adopts the constrained policy defaults", () => {
-  assert.deepEqual(compatibleSandboxSelection(document, null, false), {
+  assert.deepEqual(compatibleSandboxSelection(document, null, null), {
     profileId: "claude-desktop-standard-v1",
     applicationIds: ["firefox"],
     modelAlias: "lemmacomputer-claude",
@@ -66,5 +66,17 @@ test("legacy saved settings without a service class adopt the constrained policy
   const legacy = saved(["claude-desktop"]);
   delete (legacy as Partial<SandboxSettingsRecord>).requestedServiceClass;
 
-  assert.equal(compatibleSandboxSelection(document, legacy, false)?.requestedServiceClass, "balanced");
+  assert.equal(compatibleSandboxSelection(document, legacy, null)?.requestedServiceClass, "balanced");
+});
+
+test("published organization routes constrain new and saved workspace selections", () => {
+  assert.deepEqual(compatibleSandboxSelection(document, null, ["lite", "pro"]), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox"],
+    modelAlias: "lemmacomputer-auto",
+    requestedServiceClass: "lite",
+    agentIds: ["claude-desktop"],
+    changed: false,
+  });
+  assert.equal(compatibleSandboxSelection(document, saved(["claude-desktop"]), ["lite", "pro"]), null);
 });

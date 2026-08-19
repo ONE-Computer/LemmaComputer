@@ -111,7 +111,7 @@ test("Phase 0.5 rejects Auto production enablement through the API contract", ()
     false,
   );
 });
-test("routing mappings require every stable service class", () => {
+test("routing mappings publish any non-empty set of configured service classes", () => {
   const deployment = {
     provider: "openai" as const,
     providerAccountId: "primary",
@@ -130,22 +130,17 @@ test("routing mappings require every stable service class", () => {
   };
   assert.ok(
     createRoutingMappingSchema.safeParse({
-      revisionNote: "Publish the first governed model map",
+      revisionNote: "Publish the configured organization routes",
       deployments: [
         { ...deployment, serviceClass: "lite" },
-        { ...deployment, serviceClass: "balanced" },
         { ...deployment, serviceClass: "pro" },
       ],
     }).success,
   );
   assert.equal(
     createRoutingMappingSchema.safeParse({
-      revisionNote: "Missing the premium service class",
-      deployments: [
-        { ...deployment, serviceClass: "lite" },
-        { ...deployment, serviceClass: "balanced" },
-        { ...deployment, serviceClass: "balanced" },
-      ],
+      revisionNote: "No organization routes configured",
+      deployments: [],
     }).success,
     false,
   );

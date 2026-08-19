@@ -6,6 +6,7 @@ const providerConfigurationCodes = new Set([
 const modelRouteConfigurationCodes = new Set([
   "MODEL_NOT_ASSIGNED",
   "MODEL_TIER_ROUTE_UNAVAILABLE",
+  "MODEL_ROUTES_NOT_PUBLISHED",
   "NO_ELIGIBLE_DEPLOYMENT",
 ]);
 

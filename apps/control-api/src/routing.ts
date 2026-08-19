@@ -53,17 +53,8 @@ export const createRoutingMappingSchema = z
           evaluationPassed: z.boolean(),
         }),
       )
-      .min(3)
+      .min(1)
       .max(100),
-  })
-  .superRefine((value, context) => {
-    for (const name of serviceClass.options)
-      if (!value.deployments.some((deployment) => deployment.serviceClass === name))
-        context.addIssue({
-          code: "custom",
-          path: ["deployments"],
-          message: `A ${name} deployment is required`,
-        });
   });
 const money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/);
 const rate = z.string().regex(/^(?:0|1)(?:\.\d{1,6})?$/);

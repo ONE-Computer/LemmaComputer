@@ -48,6 +48,7 @@ test("administrator can maintain a local organization-route draft from a model",
 test("an incremental route draft counts only explicit assignments and keeps provider identity internal", async ({ page }) => {
   const providerAccountId = "openai-primary";
   let submittedProviderAccountId = "";
+  let publishedServiceClasses: string[] = [];
   const deployments = [
     { id: "openai-sol", providerAccountId, providerModelId: "gpt-5.6-sol", providerDeployment: "openai/gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol" },
     { id: "openai-terra", providerAccountId, providerModelId: "gpt-5.6-terra", providerDeployment: "openai/gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra" },
@@ -99,6 +100,21 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await page.route("**/api/v1/admin/routing/mappings/latest", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mapping: null }) });
   });
+  await page.route("**/api/v1/admin/routing/mappings", async (route) => {
+    const input = route.request().postDataJSON();
+    publishedServiceClasses = input.deployments.map((deployment: { serviceClass: string }) => deployment.serviceClass);
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ mapping: {
+        id: "11111111-1111-4111-8111-111111111111",
+        tenantId: "acme",
+        createdBy: "alex-morgan",
+        createdAt: "2026-08-19T01:00:00.000Z",
+        ...input,
+      } }),
+    });
+  });
   await page.addInitScript(() => {
     localStorage.setItem("lemmacomputer.routing-mapping-draft:v1:acme:alex-morgan", JSON.stringify({
       schemaVersion: 1,
@@ -144,7 +160,9 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   ]);
   await page.getByRole("button", { name: "Review & publish" }).click();
   const publishDialog = page.getByRole("dialog", { name: "Publish organization routes?" });
-  await expect(publishDialog.getByRole("button", { name: "Publish route version" })).toBeDisabled();
+  await expect(publishDialog.getByRole("button", { name: "Publish 1 route" })).toBeEnabled();
+  await publishDialog.getByRole("button", { name: "Publish 1 route" }).click();
+  await expect.poll(() => publishedServiceClasses).toEqual(["pro"]);
 });
 
 test("legacy model-route URLs resolve to the unified maintenance surface", async ({ page }) => {

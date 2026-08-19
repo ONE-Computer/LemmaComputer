@@ -14,6 +14,7 @@ test("configuration recovery maps provider, model-route, and pricing codes to ex
     configurationRecoveryFor({ code: "MODEL_TIER_ROUTE_UNAVAILABLE" })?.href,
     "?view=ai-control-plane&section=models-providers&focus=route",
   );
+  assert.equal(configurationRecoveryFor({ code: "MODEL_ROUTES_NOT_PUBLISHED" })?.permission, "modelRoutes");
   assert.equal(
     configurationRecoveryFor({ code: "MODEL_TIER_PRICING_UNAVAILABLE" })?.href,
     "?view=ai-control-plane&section=models-providers&focus=pricing",

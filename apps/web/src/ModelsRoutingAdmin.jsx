@@ -177,7 +177,8 @@ export function ModelsRoutingAdmin({
   const routeReadiness = useMemo(() => organizationRouteReadiness(effectiveRoutes, inventory, cardById), [cardById, effectiveRoutes, inventory]);
   const readyRoutes = routeReadiness.filter((route) => route.ready).length;
   const issueCount = routeClasses.length - readyRoutes;
-  const routesReadyToPublish = routeReadiness.every((route) => route.ready);
+  const assignedRoutes = effectiveRoutes.filter(routeIsAssigned).length;
+  const routesReadyToPublish = assignedRoutes > 0 && assignedRoutes === readyRoutes;
 
   useEffect(() => {
     Promise.all([adminApi.rateCards(), adminApi.latestRoutingMapping()])
@@ -390,7 +391,7 @@ export function ModelsRoutingAdmin({
     {providerEditor && <ProviderEditor provider={providerEditor} busy={providerBusy} onClose={() => setProviderEditor(null)} onSave={onSaveProvider} />}
     {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={inventory} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
-    {publishOpen && <ModalDialog title="Publish organization routes?" description="This publishes an immutable route version. Team overrides remain pinned until they are changed separately." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Every route in this version must point to an enabled model with complete pricing.</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Publishing…" : "Publish route version"}</button></div></ModalDialog>}
+    {publishOpen && <ModalDialog title="Publish organization routes?" description="This publishes an immutable route version. Team overrides remain pinned until they are changed separately." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in workspace settings and policies.</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Publishing…" : `Publish ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}`}</button></div></ModalDialog>}
     {history && <HistoryDialog kind={history.kind} deployment={history.deployment} rateCards={rateCards} mapping={mapping} onClose={() => setHistory(null)} />}
   </div>;
 }

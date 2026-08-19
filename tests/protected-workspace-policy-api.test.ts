@@ -7,6 +7,7 @@ import {
   type EffectivePolicy,
   type IdentityPolicyStore,
   type OrganizationWorkspacePolicyVersionRecord,
+  type RoutingStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
 import {
@@ -85,6 +86,7 @@ const appFor = (
   controller = {} as ControllerClient,
   gateway?: GatewayClient,
   identityPolicyStore?: IdentityPolicyStore,
+  routingStore?: RoutingStore,
 ) => {
   const protectedWorkspacePolicy: ProtectedWorkspacePolicyAdministrationBoundary = {
     overview: async (inputTenantId) => {
@@ -112,6 +114,7 @@ const appFor = (
       customerProductAuthentication: authentication(actor),
       protectedWorkspacePolicy,
       ...(identityPolicyStore ? { identityPolicyStore } : {}),
+      ...(routingStore ? { routingStore } : {}),
       agentBridgeSecret: "protected-policy-api-agent-bridge-secret-at-least-32-characters",
     },
   );
@@ -174,6 +177,44 @@ test("organization policy administration exposes the full catalog and append-onl
       } },
       { method: "listOrganizationPolicyVersions", input: tenantId },
     ]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("workspace guardrails expose and accept only published organization routes", async () => {
+  const calls: Array<{ method: string; input: unknown }> = [];
+  const routingStore = {
+    latestMappingVersion: async () => ({
+      deployments: [{ serviceClass: "lite" }, { serviceClass: "pro" }],
+    }),
+  } as unknown as RoutingStore;
+  const app = appFor(
+    principal("administrator"),
+    calls,
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    undefined,
+    undefined,
+    routingStore,
+  );
+  const headers = { cookie: "lemmacomputer_session=valid", "x-lemmacomputer-proxy-token": proxyToken };
+  try {
+    const current = await app.inject({ method: "GET", url: "/v1/admin/protected-workspace-policy", headers });
+    assert.equal(current.statusCode, 200);
+    assert.deepEqual(current.json().catalog.constraints.serviceClasses.allow, ["lite", "pro"]);
+
+    const unavailableRoute = await app.inject({
+      method: "POST",
+      url: "/v1/admin/protected-workspace-policy/organization-versions",
+      headers,
+      payload: {
+        constraints: { serviceClasses: { allow: ["balanced"], deny: [] } },
+        revisionNote: "Try to allow an unpublished route",
+      },
+    });
+    assert.equal(unavailableRoute.statusCode, 400);
+    assert.equal(unavailableRoute.json().error.code, "WORKSPACE_SERVICE_CLASS_ROUTE_UNAVAILABLE");
   } finally {
     await app.close();
   }
