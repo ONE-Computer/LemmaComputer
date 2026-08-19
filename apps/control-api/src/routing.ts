@@ -53,7 +53,6 @@ export const createRoutingMappingSchema = z
           evaluationPassed: z.boolean(),
         }),
       )
-      .min(1)
       .max(100),
   });
 const money = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,12})?$/);

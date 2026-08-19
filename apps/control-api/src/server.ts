@@ -4171,9 +4171,33 @@ export function createControlServer(
   app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
+    const currentMapping = await security.routingStore?.latestMappingVersion(actor.tenantId) ?? null;
+    const retainedDeployments = currentMapping?.deployments.filter((deployment) => deployment.provider !== provider) ?? [];
+    const removesPublishedRoutes = Boolean(currentMapping?.deployments.some((deployment) => deployment.provider === provider));
     const removed = await requireProviderSettings().remove(actor, provider);
+    const mapping = removesPublishedRoutes
+      ? await security.routingStore!.createMappingVersion({
+          tenantId: actor.tenantId,
+          revisionNote: `Disconnect ${provider} provider and remove its organization routes`,
+          createdBy: actor.userId,
+          deployments: retainedDeployments.map((deployment) => ({
+            serviceClass: deployment.serviceClass,
+            provider: deployment.provider,
+            ...(deployment.providerAccountId ? { providerAccountId: deployment.providerAccountId } : {}),
+            providerModel: deployment.providerModel,
+            providerDeployment: deployment.providerDeployment,
+            ...(deployment.region ? { region: deployment.region } : {}),
+            ...(deployment.providerServiceTier ? { providerServiceTier: deployment.providerServiceTier } : {}),
+            ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
+            capabilities: deployment.capabilities,
+            approved: deployment.approved,
+            evaluationPassed: deployment.evaluationPassed,
+          })),
+        })
+      : currentMapping;
     return {
       deleted: true,
+      mapping,
       workspaceGrants: removed.workspaceGrants,
       restartRequired: removed.workspaceGrants.revoked > 0 || removed.workspaceGrants.failed > 0,
     };

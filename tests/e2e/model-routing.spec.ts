@@ -163,6 +163,70 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await expect(publishDialog.getByRole("button", { name: "Publish 1 route" })).toBeEnabled();
   await publishDialog.getByRole("button", { name: "Publish 1 route" }).click();
   await expect.poll(() => publishedServiceClasses).toEqual(["pro"]);
+
+  await inspector.getByRole("button", { name: "Remove from Pro" }).click();
+  await expect(readiness).toContainText("0 of 3 routes ready");
+  await page.getByRole("button", { name: "Review & publish" }).click();
+  const removalDialog = page.getByRole("dialog", { name: "Publish organization routes?" });
+  await expect(removalDialog).toContainText("makes every organization route unavailable");
+  await removalDialog.getByRole("button", { name: "Publish route removal" }).click();
+  await expect.poll(() => publishedServiceClasses).toEqual([]);
+});
+
+test("administrator can disconnect a provider account from the unified screen", async ({ page }) => {
+  let connected = true;
+  let deleteCalled = false;
+  const provider = () => ({
+    provider: "openai",
+    state: connected ? "active" : "not-configured",
+    selectedModelIds: connected ? ["gpt-5.6-luna"] : [],
+    deployments: connected ? [{
+      id: "openai-luna",
+      providerAccountId: "openai-primary",
+      providerModelId: "gpt-5.6-luna",
+      providerDeployment: "openai/gpt-5.6-luna",
+      displayName: "OpenAI GPT-5.6 Luna",
+    }] : [],
+    modelOptions: [{ id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna" }],
+    emissionsRegion: "sg",
+    lastTestedAt: "2026-08-19T01:00:00.000Z",
+  });
+  await page.route("**/api/v1/admin/provider-settings", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ providers: [provider()] }) });
+  });
+  await page.route("**/api/v1/admin/provider-settings/openai", async (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    deleteCalled = true;
+    connected = false;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        deleted: true,
+        mapping: { id: "77777777-7777-4777-8777-777777777777", deployments: [] },
+        workspaceGrants: { revoked: 1, failed: 0 },
+        restartRequired: true,
+      }),
+    });
+  });
+  await page.route("**/api/v1/admin/ai-usage/rate-cards", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rateCards: [] }) });
+  });
+  await page.route("**/api/v1/admin/routing/mappings/latest", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ mapping: null }) });
+  });
+
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  await page.getByRole("button", { name: "Manage account" }).click();
+  const providerDialog = page.getByRole("dialog", { name: "Manage OpenAI" });
+  await providerDialog.getByRole("button", { name: "Disconnect provider" }).click();
+  const confirmDialog = page.getByRole("dialog", { name: "Disconnect OpenAI?" });
+  await expect(confirmDialog).toContainText("stored API key and every organization route");
+  await confirmDialog.getByRole("button", { name: "Disconnect provider" }).click();
+
+  await expect.poll(() => deleteCalled).toBe(true);
+  await expect(page.getByRole("status").filter({ hasText: "OpenAI was disconnected" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Provider accounts and enabled models" })).toContainText("Not connected");
 });
 
 test("legacy model-route URLs resolve to the unified maintenance surface", async ({ page }) => {

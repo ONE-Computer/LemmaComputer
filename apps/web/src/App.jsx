@@ -7081,9 +7081,9 @@ export function App() {
 
   const deleteProviderSetting = async (provider) => {
     if (!await requestConfirmation({
-      title: "Delete " + providerTitle(provider) + " key?",
-      description: "The encrypted LiteLLM credential and all routes for this provider will be removed. Active workspace grants for that model will be revoked.",
-      confirmLabel: "Delete provider key",
+      title: "Disconnect " + providerTitle(provider) + "?",
+      description: "The stored API key and every organization route using this provider will be removed. Affected workspace grants are revoked; historical pricing and route versions remain available for audit.",
+      confirmLabel: "Disconnect provider",
       danger: true,
     })) return null;
     return runProviderAction(async () => {
@@ -7091,8 +7091,8 @@ export function App() {
       const providers = await refreshProviderSettings();
       return { ...result, provider: providers.find((item) => item.provider === provider) };
     }, (result) => setToast(result.restartRequired
-      ? "Provider key deleted. Affected workspace access was revoked; restart those workspaces."
-      : "Provider key deleted."));
+      ? "Provider disconnected. Affected workspace access was revoked; restart those workspaces."
+      : "Provider disconnected."));
   };
 
   const saveWorkspaceSettings = async (configuration) => {
@@ -8055,6 +8055,7 @@ export function App() {
               onSaveProvider={saveProviderSetting}
               onTestProvider={testProviderSetting}
               onDisableProvider={disableProviderSetting}
+              onDeleteProvider={deleteProviderSetting}
             />}
             {aiControlPlaneView === "teams-budgets" && canManageUsage && <TeamsAdminSection
               teams={adminTeams}

@@ -747,6 +747,14 @@ test(
         /canonical effective deployment price/,
       );
       assert.equal((await routing.adminReadModel(other, team.id)).policy, null);
+      const emptyMapping = await routing.createMappingVersion({
+        tenantId: tenant,
+        revisionNote: "Remove every active organization route",
+        createdBy: admin,
+        deployments: [],
+      });
+      assert.deepEqual(emptyMapping.deployments, []);
+      assert.equal((await routing.latestMappingVersion(tenant))?.id, emptyMapping.id);
     } finally {
       await Promise.all([
         pool.end(),

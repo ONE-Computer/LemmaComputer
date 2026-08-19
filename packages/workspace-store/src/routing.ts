@@ -311,8 +311,6 @@ export class PostgresRoutingStore implements RoutingStore {
   async createMappingVersion(
     input: Parameters<RoutingStore["createMappingVersion"]>[0],
   ): Promise<RoutingMappingVersion> {
-    if (input.deployments.length < 1)
-      throw new Error("A routing mapping requires at least one deployment");
     const client = await this.pool.connect();
     const mappingVersionId = randomUUID();
     try {

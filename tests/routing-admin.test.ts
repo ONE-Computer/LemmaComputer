@@ -111,7 +111,7 @@ test("Phase 0.5 rejects Auto production enablement through the API contract", ()
     false,
   );
 });
-test("routing mappings publish any non-empty set of configured service classes", () => {
+test("routing mappings publish any set of configured service classes, including an explicit empty version", () => {
   const deployment = {
     provider: "openai" as const,
     providerAccountId: "primary",
@@ -142,7 +142,7 @@ test("routing mappings publish any non-empty set of configured service classes",
       revisionNote: "No organization routes configured",
       deployments: [],
     }).success,
-    false,
+    true,
   );
 });
 test("mapping administration always uses the authenticated tenant", async () => {

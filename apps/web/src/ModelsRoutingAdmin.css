@@ -259,6 +259,25 @@
   font-weight: 650;
 }
 
+.models-routing-route-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.models-routing-route-actions .danger-button {
+  color: #8b2722;
+}
+
+.provider-account-actions {
+  align-items: center;
+}
+
+.provider-account-actions > .danger-button {
+  margin-right: auto;
+}
+
 .models-routing-text-action:hover,
 .models-routing-inline-link:hover,
 .models-routing-inspector-title button:hover {
