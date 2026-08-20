@@ -322,6 +322,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       LEMMACOMPUTER_MODEL_ALIAS: "claude-sonnet-4-6",
       LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS: "lemmacomputer-auto",
       LEMMACOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
+      LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES: "lite,pro",
       LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
       LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
@@ -347,9 +348,10 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     assert.equal(modelsResponse.status, 200, JSON.stringify(modelsDocument));
     assert.deepEqual(modelsDocument.data.map((model: { id: string }) => model.id), [
       "lemmacomputer-lite",
-      "lemmacomputer-balanced",
       "lemmacomputer-pro",
     ]);
+    assert.equal((await fetch(`http://127.0.0.1:${brokerPort}/v1/models/claude-sonnet-4-6-20260101`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${brokerPort}/v1/models/claude-sonnet-4-6-20260102`)).status, 404);
     for (let attempt = 0; attempt < 100 && renewalRequests === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -428,15 +430,8 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
         messages: [{ role: "user", content: "Use Balanced with governed reasoning." }],
       }),
     });
-    assert.equal(balancedResponse.status, 200, await balancedResponse.text());
-    assert.equal(bindingRequests, 3);
-    assert.equal(received[2]?.body?.model, "lemmacomputer-auto");
-    assert.equal("reasoning_effort" in received[2]!.body!, false);
-    assert.deepEqual(received[2]?.body?.metadata, {
-      lemmacomputer_task_binding: taskBinding("balanced", "medium"),
-      lemmacomputer_requested_service_class: "balanced",
-      lemmacomputer_requested_reasoning_effort: "medium",
-    });
+    assert.equal(balancedResponse.status, 400, "workspace policy rejects an unassigned model before Control routing");
+    assert.equal(bindingRequests, 2);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
     assert.doesNotMatch(stderr, /secret-value/);
@@ -452,7 +447,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       body: JSON.stringify({ model: "client-default", max_tokens: 1, messages: [] }),
     });
     assert.equal(afterEnd.status, 400, "headerless inference fails closed after the process identity ends");
-    assert.equal(bindingRequests, 3);
+    assert.equal(bindingRequests, 2);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");

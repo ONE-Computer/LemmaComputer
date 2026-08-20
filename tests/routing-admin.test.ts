@@ -177,7 +177,7 @@ test("mapping administration always uses the authenticated tenant", async () => 
     { operation: "create", tenantId: "tenant-a" },
   ]);
 });
-test("saving organization routes activates the ready routes for Teams without an override", async () => {
+test("saving organization routes activates one organization policy independent of Teams", async () => {
   const policies: Array<Parameters<RoutingStore["createPolicy"]>[0]> = [];
   const rollouts: Array<Parameters<RoutingStore["createRollout"]>[0]> = [];
   const mapping = {
@@ -227,12 +227,13 @@ test("saving organization routes activates the ready routes for Teams without an
   );
 
   assert.deepEqual(policies[0]?.identity.allowedServiceClasses, ["lite"]);
+  assert.equal(policies[0]?.teamId, null);
   assert.equal(policies[0]?.identity.safeDefault, "lite");
   assert.equal(policies[0]?.team, null);
   assert.equal(policies[0]?.serviceClassPolicies.lite.eligibleDeploymentIds[0], uuid.deployment);
   assert.deepEqual(rollouts[0], {
     tenantId: "tenant-a",
-    teamId: uuid.team,
+    teamId: null,
     policyVersionId: uuid.policy,
     mappingVersionId: uuid.mapping,
     mode: "disabled",

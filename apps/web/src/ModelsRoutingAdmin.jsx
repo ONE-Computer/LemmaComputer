@@ -312,7 +312,11 @@ export function ModelsRoutingAdmin({
       setDraft(null);
       clearRouteDraft(draftScope);
       setPublishOpen(false);
-      setNotice("Organization routes saved. Chat and workspace settings now use this version; Team overrides still narrow access where configured.");
+      const activation = result.workspaceActivation;
+      const needsAttention = Number(activation?.restartFailed ?? 0) + Number(activation?.actionRequired ?? 0);
+      setNotice(needsAttention
+        ? `Organization routes saved. ${needsAttention} ${needsAttention === 1 ? "workspace needs" : "workspaces need"} administrator attention; all other Chat and workspace settings now use this version.`
+        : "Organization routes saved. Chat and workspaces now use this version according to each workspace policy.");
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -429,7 +433,7 @@ export function ModelsRoutingAdmin({
     {providerEditor && <ProviderEditor provider={providerEditor} busy={providerBusy} onClose={() => setProviderEditor(null)} onSave={onSaveProvider} onDelete={deleteProvider} />}
     {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={inventory} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
-    {publishOpen && <ModalDialog title="Save organization routes?" description="Saving creates an immutable route version and immediately makes it the organization default. Existing Team overrides continue to narrow access where configured." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>{assignedRoutes ? "Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in Chat and workspace settings." : "Saving this removal makes every organization route unavailable in Chat and workspace settings."}</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Saving…" : assignedRoutes ? `Save ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}` : "Save route removal"}</button></div></ModalDialog>}
+    {publishOpen && <ModalDialog title="Save organization routes?" description="Saving creates an immutable route version and immediately updates Chat and every workspace according to its assigned workspace policy." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>{assignedRoutes ? "Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in Chat and workspace settings." : "Saving this removal makes every organization route unavailable in Chat and workspace settings."}</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Saving…" : assignedRoutes ? `Save ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}` : "Save route removal"}</button></div></ModalDialog>}
     {history && <HistoryDialog kind={history.kind} deployment={history.deployment} rateCards={rateCards} mapping={mapping} onClose={() => setHistory(null)} />}
   </div>;
 }

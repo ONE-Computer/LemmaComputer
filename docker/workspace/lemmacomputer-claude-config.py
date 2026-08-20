@@ -7,16 +7,21 @@ import sys
 
 
 def main() -> None:
-    if len(sys.argv) != 8:
+    if len(sys.argv) != 9:
         raise SystemExit(
             "usage: lemmacomputer-claude-config PATH MODEL TRANSPORT_MODEL "
-            "SERVICE_CLASS LABEL COWORK_ENABLED CODE_ENABLED"
+            "SERVICE_CLASS ALLOWED_SERVICE_CLASSES LABEL COWORK_ENABLED CODE_ENABLED"
         )
-    path, model, transport_model, default_service_class, label, cowork_enabled, code_enabled = sys.argv[1:]
+    path, model, transport_model, default_service_class, allowed_value, label, cowork_enabled, code_enabled = sys.argv[1:]
+    allowed_service_classes = [value for value in allowed_value.split(",") if value]
+    if not allowed_service_classes or any(value not in {"lite", "balanced", "pro"} for value in allowed_service_classes):
+        raise SystemExit("invalid allowed Claude model modes")
     if default_service_class == "auto":
-        default_service_class = "balanced"
+        default_service_class = "balanced" if "balanced" in allowed_service_classes else allowed_service_classes[0]
     if default_service_class not in {"lite", "balanced", "pro"}:
         raise SystemExit("invalid Claude model mode")
+    if default_service_class not in allowed_service_classes:
+        raise SystemExit("default Claude model mode is not allowed")
 
     if transport_model == "lemmacomputer-auto":
         # Claude Desktop 1.22209.3 rejects gateway model IDs that do not look
@@ -32,6 +37,7 @@ def main() -> None:
             ("claude-sonnet-4-6-20260102", "Balanced — organization route", "balanced"),
             ("claude-sonnet-4-6-20260103", "Pro — organization route", "pro"),
         ]
+        modes = [item for item in modes if item[2] in allowed_service_classes]
         modes.sort(key=lambda item: item[2] != default_service_class)
         inference_models = [{
             "name": name,

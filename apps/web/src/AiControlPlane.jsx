@@ -8,7 +8,7 @@ export const aiControlPlaneTabs = [
 ];
 
 export function AiControlPlane({ activeView, onViewChange, tabs = aiControlPlaneTabs, children }) {
-  const activeTab = activeView === "spend" ? "overview" : activeView === "team-routing" ? "teams-budgets" : activeView;
+  const activeTab = activeView === "spend" ? "overview" : activeView;
 
   return (
     <div className="secondary-screen ai-control-plane">

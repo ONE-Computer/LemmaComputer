@@ -256,7 +256,9 @@ export const internalRoutingObservationSchema = z
 export class RoutingAdministrationService {
   constructor(
     private readonly store: RoutingStore,
-    private readonly teams?: Pick<TeamStore, "listTeams">,
+    // Kept as an optional compatibility argument while callers roll forward;
+    // Teams no longer participate in organization route activation.
+    _teams?: Pick<TeamStore, "listTeams">,
   ) {}
   latestMapping(actor: Actor) {
     return this.store.latestMappingVersion(actor.tenantId);
@@ -296,8 +298,7 @@ export class RoutingAdministrationService {
     mapping: Awaited<ReturnType<RoutingStore["createMappingVersion"]>>,
     billingCurrency: string,
   ) {
-    if (!this.teams) return;
-    const available = mapping.deployments.filter((deployment) => (
+    const available = (mapping.deployments ?? []).filter((deployment) => (
       deployment.rateCardId
       && deployment.approved
       && deployment.evaluationPassed
@@ -334,54 +335,30 @@ export class RoutingAdministrationService {
       forceServiceClass: null,
       safeDefault: organizationDefault,
     };
-    for (const team of await this.teams.listTeams(actor.tenantId)) {
-      const current = await this.store.adminReadModel(actor.tenantId, team.id);
-      const priorTeamScope = current.policy?.team;
-      const narrowedClasses = priorTeamScope
-        ? priorTeamScope.allowedServiceClasses.filter((serviceClass) => availableClasses.includes(serviceClass))
-        : availableClasses;
-      // A Team override that excludes every newly-saved organization route
-      // remains intentionally unavailable instead of silently widening access.
-      if (!narrowedClasses.length) continue;
-      const teamDefault = narrowedClasses.includes(priorTeamScope?.safeDefault as typeof narrowedClasses[number])
-        ? priorTeamScope!.safeDefault
-        : narrowedClasses.includes(organizationDefault) ? organizationDefault : narrowedClasses[0]!;
-      const teamScope = priorTeamScope ? {
-        allowedServiceClasses: narrowedClasses,
-        allowedDeploymentIds: narrowedClasses.map((serviceClass) => deploymentByClass.get(serviceClass)!.id),
-        explicitSelectionAllowed: priorTeamScope.explicitSelectionAllowed,
-        forceServiceClass: priorTeamScope.forceServiceClass && narrowedClasses.includes(priorTeamScope.forceServiceClass)
-          ? priorTeamScope.forceServiceClass
-          : null,
-        safeDefault: teamDefault,
-      } : null;
-      const policyVersionId = await this.store.createPolicy({
-        tenantId: actor.tenantId,
-        teamId: team.id,
-        mappingVersionId: mapping.id,
-        billingCurrency,
-        serviceClassPolicies: {
-          lite: contractFor("lite"),
-          balanced: contractFor("balanced"),
-          pro: contractFor("pro"),
-        },
-        identity: organizationScope,
-        team: teamScope,
-        ...(current.policy?.requiredResidency ? { requiredResidency: current.policy.requiredResidency } : {}),
-        createdBy: actor.userId,
-      });
-      const fixedClass = teamScope?.safeDefault ?? organizationDefault;
-      await this.store.createRollout({
-        tenantId: actor.tenantId,
-        teamId: team.id,
-        policyVersionId,
-        mappingVersionId: mapping.id,
-        mode: "disabled",
-        fixedDeploymentId: deploymentByClass.get(fixedClass)!.id,
-        reason: "Organization routes saved and activated",
-        createdBy: actor.userId,
-      });
-    }
+    const policyVersionId = await this.store.createPolicy({
+      tenantId: actor.tenantId,
+      teamId: null,
+      mappingVersionId: mapping.id,
+      billingCurrency,
+      serviceClassPolicies: {
+        lite: contractFor("lite"),
+        balanced: contractFor("balanced"),
+        pro: contractFor("pro"),
+      },
+      identity: organizationScope,
+      team: null,
+      createdBy: actor.userId,
+    });
+    await this.store.createRollout({
+      tenantId: actor.tenantId,
+      teamId: null,
+      policyVersionId,
+      mappingVersionId: mapping.id,
+      mode: "disabled",
+      fixedDeploymentId: fallbackDeployment.id,
+      reason: "Organization routes saved and activated",
+      createdBy: actor.userId,
+    });
   }
   settings(actor: Actor, teamId: string) {
     return this.store.adminReadModel(actor.tenantId, teamId);
@@ -596,13 +573,16 @@ export class RoutingExecutionService {
     private readonly teams: Pick<TeamStore, "getCurrentDefaultSpendingTeam">,
     private readonly bindings: RoutingDecisionBindingAuthority,
     private readonly taskBindings: UsageTaskBindingAuthority,
-    private readonly budgets?: Pick<TeamBudgetStore, "getBudgetStatus">,
+    // Budget admission is enforced by the usage ledger after routing. Keep the
+    // compatibility argument while callers roll forward, but never turn a Team
+    // budget into route availability.
+    _budgets?: Pick<TeamBudgetStore, "getBudgetStatus">,
   ) {
     this.router = new DeterministicModelRouter(store);
   }
   private async resolveEffectivePolicy(
     tenantId: string,
-    teamId: string,
+    teamId: string | null,
     expectedUsage: UsageAmount[],
   ) {
     const resolved = await this.store.resolveEffectivePolicy(
@@ -616,46 +596,37 @@ export class RoutingExecutionService {
   }
   async serviceClassOptions(
     tenantId: string,
-    subjectId: string,
+    _subjectId?: string,
   ): Promise<Array<{
     value: "lite" | "balanced" | "pro";
     available: boolean;
-    reasonCode: "ready" | "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable";
+    reasonCode: "ready" | "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "route_unavailable";
   }>> {
     const values = ["lite", "balanced", "pro"] as const;
-    const unavailable = (reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable") => (
+    const unavailable = (reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "route_unavailable") => (
       values.map((value) => ({ value, available: false as const, reasonCode }))
     );
-    const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
-    if (!team) return unavailable("policy_denied");
     const resolved = await this.resolveEffectivePolicy(
       tenantId,
-      team.id,
+      null,
       chatTierReadinessUsage,
     );
     if (!resolved) return unavailable("route_unavailable");
     const policy = resolved.policy;
     const identityClasses = new Set(policy.identity.allowedServiceClasses);
     const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
-    const teamScope = policy.team ?? policy.identity;
-    const teamClasses = new Set(teamScope.allowedServiceClasses);
-    const teamDeployments = new Set(teamScope.allowedDeploymentIds);
     const explicitSelectionAllowed = policy.identity.explicitSelectionAllowed
-      && teamScope.explicitSelectionAllowed
-      && policy.identity.forceServiceClass === null
-      && teamScope.forceServiceClass === null;
+      && policy.identity.forceServiceClass === null;
     const approvedProviders = new Set(policy.approvedProviders);
-    const budgetEligible = new Set(policy.budgetEligibleDeploymentIds);
 
     return values.map((value) => {
-      if (!explicitSelectionAllowed || !identityClasses.has(value) || !teamClasses.has(value)) {
+      if (!explicitSelectionAllowed || !identityClasses.has(value)) {
         return { value, available: false, reasonCode: "policy_denied" as const };
       }
       const contract = policy.serviceClassPolicies[value];
       const policyEligible = policy.deployments.filter((deployment) => (
         deployment.serviceClass === value
         && identityDeployments.has(deployment.id)
-        && teamDeployments.has(deployment.id)
         && contract.eligibleDeploymentIds.includes(deployment.id)
         && deployment.approved
         && deployment.evaluationPassed
@@ -675,15 +646,12 @@ export class RoutingExecutionService {
       if (!priced.length) return { value, available: false, reasonCode: "pricing_unavailable" as const };
       const healthy = priced.filter((deployment) => deployment.healthy);
       if (!healthy.length) return { value, available: false, reasonCode: "provider_unavailable" as const };
-      if (!healthy.some((deployment) => budgetEligible.has(deployment.id))) {
-        return { value, available: false, reasonCode: "budget_unavailable" as const };
-      }
       return { value, available: true, reasonCode: "ready" as const };
     });
   }
   async reasoningOptions(
     tenantId: string,
-    subjectId: string,
+    _subjectId: string,
     adapter: AgentReasoningAdapterQualification,
   ): Promise<Record<
     "auto" | "lite" | "balanced" | "pro",
@@ -693,22 +661,16 @@ export class RoutingExecutionService {
       "auto" | "lite" | "balanced" | "pro",
       ResolvedReasoningEffort[]
     >;
-    const team = await this.teams.getCurrentDefaultSpendingTeam(tenantId, subjectId);
-    if (!team) return empty;
-    const resolved = await this.resolveEffectivePolicy(tenantId, team.id, [
+    const resolved = await this.resolveEffectivePolicy(tenantId, null, [
       { unit: "request", quantity: "1" },
     ]);
     if (!resolved) return empty;
     const policy = resolved.policy;
     const identityClasses = new Set(policy.identity.allowedServiceClasses);
     const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
-    const teamClasses = new Set(policy.team?.allowedServiceClasses ?? policy.identity.allowedServiceClasses);
-    const teamDeployments = new Set(policy.team?.allowedDeploymentIds ?? policy.identity.allowedDeploymentIds);
     const eligible = policy.deployments.filter((deployment) => (
       identityClasses.has(deployment.serviceClass)
-      && teamClasses.has(deployment.serviceClass)
       && identityDeployments.has(deployment.id)
-      && teamDeployments.has(deployment.id)
       && policy.approvedProviders.includes(deployment.provider)
       && deployment.approved
       && deployment.healthy
@@ -831,11 +793,11 @@ export class RoutingExecutionService {
       );
     let resolved = await this.resolveEffectivePolicy(
       input.tenantId,
-      team.id,
+      null,
       input.expectedUsage as UsageAmount[],
     );
     if (!resolved)
-      throw new Error("Governed routing is not configured for this Team");
+      throw new Error("Governed routing is not configured for this organization");
     // Phase 0.5 never executes Auto, including for a previously-persisted
     // rollout that predates this release posture. Explicit Lite/Balanced/Pro
     // requests still use the pinned policy and immutable route map below.
@@ -846,36 +808,15 @@ export class RoutingExecutionService {
     if (constrained.input !== reasoningConstrainedInput) {
       resolved = await this.resolveEffectivePolicy(
         input.tenantId,
-        team.id,
+        null,
         constrained.input.expectedUsage as UsageAmount[],
       );
       if (!resolved)
-        throw new Error("Governed routing is not configured for this Team");
+        throw new Error("Governed routing is not configured for this organization");
       if (input.requestedServiceClass === "auto") {
         resolved = { ...resolved, policy: { ...resolved.policy, mode: "disabled" } };
       }
       constrained = constrainOutputToPolicy(constrained.input, resolved.policy);
-    }
-    if (this.budgets && resolved.rollout.mode !== "disabled") {
-      const status = await this.budgets.getBudgetStatus(
-        input.tenantId,
-        team.id,
-      );
-      if (status.budget?.mode === "hard" && status.enforcement !== "override") {
-        if (status.priceStatus !== "priced" || status.remainingAmount === null)
-          resolved.policy.budgetEligibleDeploymentIds = [];
-        else
-          resolved.policy.budgetEligibleDeploymentIds =
-            resolved.policy.deployments
-              .filter(
-                (deployment) =>
-                  deployment.expectedCost?.currency ===
-                    status.budget!.currency &&
-                  scaled(deployment.expectedCost.amount) <=
-                    scaled(status.remainingAmount!),
-              )
-              .map(({ id }) => id);
-      }
     }
     const decision = await this.router.route(
       {

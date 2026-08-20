@@ -35,6 +35,7 @@ test("a removed agent is reconciled to the still-allowed saved selection", () =>
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: "lemmacomputer-claude",
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: ["claude-desktop"],
     changed: true,
   });
@@ -46,6 +47,7 @@ test("a workspace whose only selected agent was removed reconciles to the safer 
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: null,
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: [],
     changed: true,
   });
@@ -57,6 +59,7 @@ test("a legacy workspace without saved sandbox settings adopts the constrained p
     applicationIds: ["firefox"],
     modelAlias: "lemmacomputer-claude",
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: ["claude-desktop"],
     changed: false,
   });
@@ -75,6 +78,7 @@ test("published organization routes constrain new and saved workspace selections
     applicationIds: ["firefox"],
     modelAlias: "lemmacomputer-auto",
     requestedServiceClass: "lite",
+    allowedServiceClasses: ["lite", "pro"],
     agentIds: ["claude-desktop"],
     changed: false,
   });
@@ -87,6 +91,7 @@ test("an organization without published routes reconciles to a creatable base wo
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: null,
     requestedServiceClass: "balanced",
+    allowedServiceClasses: [],
     agentIds: [],
     changed: true,
   });
@@ -95,6 +100,7 @@ test("an organization without published routes reconciles to a creatable base wo
     applicationIds: ["firefox"],
     modelAlias: null,
     requestedServiceClass: "balanced",
+    allowedServiceClasses: [],
     agentIds: [],
     changed: false,
   });

@@ -21,7 +21,7 @@ import {
 export type RoutingRollout = {
   id: string;
   tenantId: string;
-  teamId: string;
+  teamId: string | null;
   policyVersionId: string;
   mappingVersionId: string;
   mode: RoutingMode;
@@ -171,7 +171,7 @@ export interface RoutingStore extends RoutingAffinityStore {
   latestMappingVersion(tenantId: string): Promise<RoutingMappingVersion | null>;
   createPolicy(input: {
     tenantId: string;
-    teamId: string;
+    teamId: string | null;
     mappingVersionId: string;
     billingCurrency: string;
     serviceClassPolicies: Record<ProductServiceClass, ServiceClassPolicy>;
@@ -191,7 +191,7 @@ export interface RoutingStore extends RoutingAffinityStore {
   }): Promise<RoutingEvidenceReview>;
   createRollout(input: {
     tenantId: string;
-    teamId: string;
+    teamId: string | null;
     policyVersionId: string;
     mappingVersionId: string;
     mode: RoutingMode;
@@ -220,7 +220,7 @@ export interface RoutingStore extends RoutingAffinityStore {
   }): Promise<{ id: string; status: "created" | "duplicate" }>;
   resolveEffectivePolicy(
     tenantId: string,
-    teamId: string,
+    teamId: string | null,
     expectedUsage: UsageAmount[],
   ): Promise<ResolvedRoutingPolicy | null>;
   decisionByRequest(
@@ -235,7 +235,7 @@ export interface RoutingStore extends RoutingAffinityStore {
 const rolloutFrom = (row: Record<string, unknown>): RoutingRollout => ({
   id: String(row.id),
   tenantId: String(row.tenant_id),
-  teamId: String(row.team_id),
+  teamId: row.team_id ? String(row.team_id) : null,
   policyVersionId: String(row.policy_version_id),
   mappingVersionId: String(row.mapping_version_id),
   mode: row.mode as RoutingMode,
@@ -473,13 +473,13 @@ export class PostgresRoutingStore implements RoutingStore {
       await client.query("BEGIN");
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-        [`routing-policy:${input.tenantId}:${input.teamId}`],
+        [`routing-policy:${input.tenantId}:${input.teamId ?? "organization"}`],
       );
       const [team, mapping] = await Promise.all([
-        client.query(
+        input.teamId ? client.query(
           "SELECT 1 FROM allocation_units WHERE tenant_id=$1 AND id=$2 AND status='active'",
           [input.tenantId, input.teamId],
-        ),
+        ) : Promise.resolve({ rowCount: 1 }),
         client.query(
           "SELECT 1 FROM ai_routing_mapping_versions WHERE tenant_id=$1 AND id=$2",
           [input.tenantId, input.mappingVersionId],
@@ -533,7 +533,7 @@ export class PostgresRoutingStore implements RoutingStore {
       );
       if (input.initializeFixedRollout) {
         const existingRollout = await client.query(
-          "SELECT 1 FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 LIMIT 1",
+          "SELECT 1 FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id IS NOT DISTINCT FROM $2::uuid LIMIT 1",
           [input.tenantId, input.teamId],
         );
         if (!existingRollout.rowCount) {
@@ -639,10 +639,10 @@ export class PostgresRoutingStore implements RoutingStore {
       await client.query("BEGIN");
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-        [`routing-rollout:${input.tenantId}:${input.teamId}`],
+        [`routing-rollout:${input.tenantId}:${input.teamId ?? "organization"}`],
       );
       const policy = await client.query(
-        "SELECT 1 FROM ai_routing_policy_versions WHERE tenant_id=$1 AND id=$2 AND team_id=$3 AND mapping_version_id=$4",
+        "SELECT 1 FROM ai_routing_policy_versions WHERE tenant_id=$1 AND id=$2 AND team_id IS NOT DISTINCT FROM $3::uuid AND mapping_version_id=$4",
         [
           input.tenantId,
           input.policyVersionId,
@@ -663,6 +663,8 @@ export class PostgresRoutingStore implements RoutingStore {
           "Fixed deployment does not belong to the rollout mapping",
         );
       if (input.mode === "enabled") {
+        if (!input.teamId)
+          throw new Error("Organization routing uses fixed explicit service classes");
         if (!input.evidenceReviewId)
           throw new Error(
             "Production routing requires a reviewed evidence record",
@@ -701,7 +703,7 @@ export class PostgresRoutingStore implements RoutingStore {
           );
       }
       const prior = await client.query(
-        "SELECT id FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC LIMIT 1",
+        "SELECT id FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at DESC LIMIT 1",
         [input.tenantId, input.teamId],
       );
       const id = randomUUID();
@@ -803,24 +805,50 @@ export class PostgresRoutingStore implements RoutingStore {
   }
   async resolveEffectivePolicy(
     tenantId: string,
-    teamId: string,
+    teamId: string | null,
     expectedUsage: UsageAmount[],
   ): Promise<ResolvedRoutingPolicy | null> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const rolloutResult = await client.query(
-        "SELECT * FROM ai_routing_rollout_versions WHERE tenant_id=$1 AND team_id=$2 ORDER BY created_at DESC LIMIT 1",
+      let rolloutResult = await client.query(
+        `SELECT rollout.*
+           FROM ai_routing_rollout_versions rollout
+          WHERE rollout.tenant_id=$1
+            AND rollout.team_id IS NOT DISTINCT FROM $2::uuid
+            AND rollout.mapping_version_id=(
+              SELECT id FROM ai_routing_mapping_versions
+               WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1
+            )
+          ORDER BY rollout.created_at DESC,rollout.id DESC LIMIT 1`,
         [tenantId, teamId],
       );
+      // Expand-compatible read for mappings published before organization-level
+      // rollouts existed. Legacy activation copied the organization identity
+      // scope into each Team policy; ignore its Team narrowing here. A later
+      // mapping save writes the new organization form.
+      if (!rolloutResult.rowCount && teamId === null) {
+        rolloutResult = await client.query(
+          `SELECT rollout.*
+             FROM ai_routing_rollout_versions rollout
+            WHERE rollout.tenant_id=$1
+              AND rollout.team_id IS NOT NULL
+              AND rollout.mapping_version_id=(
+                SELECT id FROM ai_routing_mapping_versions
+                 WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1
+              )
+            ORDER BY rollout.created_at DESC,rollout.id DESC LIMIT 1`,
+          [tenantId],
+        );
+      }
       if (!rolloutResult.rowCount) {
         await client.query("COMMIT");
         return null;
       }
       const rollout = rolloutFrom(rolloutResult.rows[0]);
       const policyResult = await client.query(
-        "SELECT * FROM ai_routing_policy_versions WHERE tenant_id=$1 AND id=$2 AND team_id=$3 AND mapping_version_id=$4",
-        [tenantId, rollout.policyVersionId, teamId, rollout.mappingVersionId],
+        "SELECT * FROM ai_routing_policy_versions WHERE tenant_id=$1 AND id=$2 AND team_id IS NOT DISTINCT FROM $3::uuid AND mapping_version_id=$4",
+        [tenantId, rollout.policyVersionId, rollout.teamId, rollout.mappingVersionId],
       );
       if (!policyResult.rowCount)
         throw new Error("Active routing rollout policy is invalid");
@@ -899,7 +927,7 @@ export class PostgresRoutingStore implements RoutingStore {
           billingCurrency: String(policyRow.billing_currency),
           serviceClassPolicies: policyRow.service_class_policies,
           identity: policyRow.identity_scope,
-          team: policyRow.team_scope,
+          team: teamId === null ? null : policyRow.team_scope,
           deployments,
           budgetEligibleDeploymentIds,
           approvedProviders: [

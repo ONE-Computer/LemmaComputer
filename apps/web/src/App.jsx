@@ -39,7 +39,6 @@ import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, aut
 import { SpendDashboard } from "./SpendDashboard.jsx";
 import { PersonalAiOverview } from "./PersonalAiOverview.jsx";
 import { UsageDataHealth } from "./UsageDataHealth.jsx";
-import { RoutingAdmin } from "./RoutingAdmin.jsx";
 import { ModelsRoutingAdmin } from "./ModelsRoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
@@ -341,7 +340,7 @@ const settingsViewFromLocation = () => {
   return settingsViewBySection[settingsSectionFromLocation()] ?? "overview";
 };
 const accountSecurityOpenFromLocation = () => settingsSectionFromLocation() === "security";
-const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend", "team-routing"]);
+const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id), "spend"]);
 const aiControlPlaneViewFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
   const view = params.get("section") ?? "overview";
@@ -1812,7 +1811,7 @@ function TeamBudgetDialog({ team, onClose }) {
   </ModalDialog>;
 }
 
-function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault, onOpenRoutingOverrides }) {
+function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUpdate, onArchive, onAssignMember, onRemoveMember, onSetDefault }) {
   const [editor, setEditor] = useState(null);
   const [budgetTeam, setBudgetTeam] = useState(null);
   const [memberUserId, setMemberUserId] = useState("");
@@ -1838,7 +1837,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
     <section className="admin-team-section" aria-labelledby="admin-teams-heading">
       <div className="admin-team-heading">
         <div><p>Spend allocation</p><h2 id="admin-teams-heading">Teams</h2><span>Team membership decides where AI usage is charged. It does not grant workspace, model, tool, connector, or administrator access.</span></div>
-        <div className="admin-team-heading-actions"><button className="secondary-button compact-button" type="button" onClick={onOpenRoutingOverrides}>Routing overrides</button><button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button></div>
+        <div className="admin-team-heading-actions"><button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button></div>
       </div>
       {loading ? <p className="admin-team-empty">Loading Teams…</p> : !teams.length ? <p className="admin-team-empty">No Teams have been created yet.</p> : <div className="admin-team-list">
         {teams.map((team) => <article key={team.id}>
@@ -7233,8 +7232,6 @@ export function App() {
     const requestedView = aiControlPlaneViews.has(normalizedView) ? normalizedView : "overview";
     const nextView = requestedView === "spend" && canReadUsage
       ? requestedView
-      : requestedView === "team-routing" && (canManagePolicy || canManageUsage)
-        ? requestedView
       : availableAiControlPlaneTabs.some((tab) => tab.id === requestedView)
         ? requestedView
         : availableAiControlPlaneTabs[0]?.id ?? "overview";
@@ -8095,9 +8092,7 @@ export function App() {
               onAssignMember={assignAdminTeamMember}
               onRemoveMember={removeAdminTeamMember}
               onSetDefault={setAdminDefaultTeam}
-              onOpenRoutingOverrides={() => selectAiControlPlaneView("team-routing")}
             />}
-            {aiControlPlaneView === "team-routing" && (canManagePolicy || canManageUsage) && <RoutingAdmin onBack={() => selectAiControlPlaneView("teams-budgets")} draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
           </AiControlPlane>
         )}
         {activeNav === "Settings" && <SettingsScreen

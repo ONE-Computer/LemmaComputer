@@ -368,6 +368,8 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
     { unit: "output_token", amountPerUnit: "12", unitScale: "1000000" },
   ];
   let readinessUsage: UsageAmount[] = [];
+  let teamLookups = 0;
+  let budgetLookups = 0;
   const pricedRoutes = (expectedUsage: UsageAmount[]) => {
     readinessUsage = expectedUsage;
     return routes.map((route) => {
@@ -384,7 +386,9 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
   };
   const service = new RoutingExecutionService(
     {
-      resolveEffectivePolicy: async (_tenantId, _teamId, expectedUsage) => ({
+      resolveEffectivePolicy: async (_tenantId, teamId, expectedUsage) => {
+        assert.equal(teamId, null, "route availability resolves at organization scope");
+        return ({
         policy: {
           billingCurrency: "USD",
           identity: {
@@ -395,8 +399,8 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
             safeDefault: "balanced",
           },
           team: {
-            allowedServiceClasses: ["lite", "balanced", "pro"],
-            allowedDeploymentIds: routes.map((route) => route.id),
+            allowedServiceClasses: ["balanced"],
+            allowedDeploymentIds: [routes[1]!.id],
             explicitSelectionAllowed: true,
             forceServiceClass: null,
             safeDefault: "balanced",
@@ -409,11 +413,18 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
           approvedProviders: ["openai", "anthropic"],
           budgetEligibleDeploymentIds: routes.map((route) => route.id),
         },
-      }),
+      }); },
     } as unknown as RoutingStore,
-    { getCurrentDefaultSpendingTeam: async () => ({ id: "team-1" }) } as Pick<TeamStore, "getCurrentDefaultSpendingTeam">,
+    { getCurrentDefaultSpendingTeam: async () => {
+      teamLookups += 1;
+      return null;
+    } } as Pick<TeamStore, "getCurrentDefaultSpendingTeam">,
     new RoutingDecisionBindingAuthority("chat-tier-options-secret-at-least-32-characters"),
     new UsageTaskBindingAuthority("chat-tier-options-secret-at-least-32-characters"),
+    { getBudgetStatus: async () => {
+      budgetLookups += 1;
+      throw new Error("route availability must not read a Team budget");
+    } },
   );
 
   assert.deepEqual(await service.serviceClassOptions("acme", "alex"), [
@@ -425,4 +436,6 @@ test("chat tier options expose only policy-allowed and route-ready explicit tier
     { unit: "input_uncached_token", quantity: "1" },
     { unit: "output_token", quantity: "1" },
   ]);
+  assert.equal(teamLookups, 0, "a Team is a cost entity and cannot change route availability");
+  assert.equal(budgetLookups, 0, "hard Team budgets fail during usage admission, not route discovery");
 });
