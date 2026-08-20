@@ -37,6 +37,7 @@ const routingCapabilities = z.strictObject({
 export const createRoutingMappingSchema = z
   .strictObject({
     revisionNote: z.string().trim().min(8).max(500),
+    billingCurrency: z.string().regex(/^[A-Z]{3}$/).default("USD"),
     deployments: z
       .array(
         z.strictObject({
@@ -253,15 +254,18 @@ export const internalRoutingObservationSchema = z
       });
   });
 export class RoutingAdministrationService {
-  constructor(private readonly store: RoutingStore) {}
+  constructor(
+    private readonly store: RoutingStore,
+    private readonly teams?: Pick<TeamStore, "listTeams">,
+  ) {}
   latestMapping(actor: Actor) {
     return this.store.latestMappingVersion(actor.tenantId);
   }
-  createMapping(
+  async createMapping(
     actor: Actor,
-    input: z.infer<typeof createRoutingMappingSchema>,
+    input: z.input<typeof createRoutingMappingSchema>,
   ) {
-    return this.store.createMappingVersion({
+    const mapping = await this.store.createMappingVersion({
       tenantId: actor.tenantId,
       revisionNote: input.revisionNote,
       createdBy: actor.userId,
@@ -284,6 +288,100 @@ export class RoutingAdministrationService {
         ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
       })),
     });
+    await this.activateOrganizationDefault(actor, mapping, input.billingCurrency ?? "USD");
+    return mapping;
+  }
+  private async activateOrganizationDefault(
+    actor: Actor,
+    mapping: Awaited<ReturnType<RoutingStore["createMappingVersion"]>>,
+    billingCurrency: string,
+  ) {
+    if (!this.teams) return;
+    const available = mapping.deployments.filter((deployment) => (
+      deployment.rateCardId
+      && deployment.approved
+      && deployment.evaluationPassed
+    ));
+    if (!available.length) return;
+    const availableClasses = [...new Set(available.map(({ serviceClass }) => serviceClass))];
+    const deploymentByClass = new Map(available.map((deployment) => [deployment.serviceClass, deployment]));
+    const organizationDefault = availableClasses.includes("balanced") ? "balanced" : availableClasses[0]!;
+    const fallbackDeployment = deploymentByClass.get(organizationDefault)!;
+    const contractFor = (serviceClass: "lite" | "balanced" | "pro") => {
+      const deployment = deploymentByClass.get(serviceClass) ?? fallbackDeployment;
+      return {
+        capabilityFloor: {
+          vision: deployment.capabilities.vision,
+          tools: deployment.capabilities.tools,
+          streaming: deployment.capabilities.streaming,
+          contextTokens: deployment.capabilities.contextTokens,
+          outputTokens: deployment.capabilities.outputTokens,
+        },
+        evaluationThreshold: "0.800000",
+        qualityPosture: serviceClass === "pro" ? "premium" as const : "standard" as const,
+        costPosture: serviceClass === "lite" ? "lowest" as const : "balanced" as const,
+        latencyPosture: "balanced" as const,
+        requiredModalities: ["text" as const],
+        requiredResidency: deployment.capabilities.residency,
+        eligibleDeploymentIds: [deployment.id],
+        safeDefault: serviceClass === organizationDefault,
+      };
+    };
+    const organizationScope = {
+      allowedServiceClasses: availableClasses,
+      allowedDeploymentIds: available.map(({ id }) => id),
+      explicitSelectionAllowed: true,
+      forceServiceClass: null,
+      safeDefault: organizationDefault,
+    };
+    for (const team of await this.teams.listTeams(actor.tenantId)) {
+      const current = await this.store.adminReadModel(actor.tenantId, team.id);
+      const priorTeamScope = current.policy?.team;
+      const narrowedClasses = priorTeamScope
+        ? priorTeamScope.allowedServiceClasses.filter((serviceClass) => availableClasses.includes(serviceClass))
+        : availableClasses;
+      // A Team override that excludes every newly-saved organization route
+      // remains intentionally unavailable instead of silently widening access.
+      if (!narrowedClasses.length) continue;
+      const teamDefault = narrowedClasses.includes(priorTeamScope?.safeDefault as typeof narrowedClasses[number])
+        ? priorTeamScope!.safeDefault
+        : narrowedClasses.includes(organizationDefault) ? organizationDefault : narrowedClasses[0]!;
+      const teamScope = priorTeamScope ? {
+        allowedServiceClasses: narrowedClasses,
+        allowedDeploymentIds: narrowedClasses.map((serviceClass) => deploymentByClass.get(serviceClass)!.id),
+        explicitSelectionAllowed: priorTeamScope.explicitSelectionAllowed,
+        forceServiceClass: priorTeamScope.forceServiceClass && narrowedClasses.includes(priorTeamScope.forceServiceClass)
+          ? priorTeamScope.forceServiceClass
+          : null,
+        safeDefault: teamDefault,
+      } : null;
+      const policyVersionId = await this.store.createPolicy({
+        tenantId: actor.tenantId,
+        teamId: team.id,
+        mappingVersionId: mapping.id,
+        billingCurrency,
+        serviceClassPolicies: {
+          lite: contractFor("lite"),
+          balanced: contractFor("balanced"),
+          pro: contractFor("pro"),
+        },
+        identity: organizationScope,
+        team: teamScope,
+        ...(current.policy?.requiredResidency ? { requiredResidency: current.policy.requiredResidency } : {}),
+        createdBy: actor.userId,
+      });
+      const fixedClass = teamScope?.safeDefault ?? organizationDefault;
+      await this.store.createRollout({
+        tenantId: actor.tenantId,
+        teamId: team.id,
+        policyVersionId,
+        mappingVersionId: mapping.id,
+        mode: "disabled",
+        fixedDeploymentId: deploymentByClass.get(fixedClass)!.id,
+        reason: "Organization routes saved and activated",
+        createdBy: actor.userId,
+      });
+    }
   }
   settings(actor: Actor, teamId: string) {
     return this.store.adminReadModel(actor.tenantId, teamId);

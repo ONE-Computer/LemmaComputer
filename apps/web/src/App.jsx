@@ -3445,6 +3445,31 @@ function WorkspaceAiReadinessNotice({ title, canManage }) {
   </div>;
 }
 
+const workspaceBuildSteps = [
+  "Securing the workspace boundary",
+  "Applying approved apps and model routes",
+  "Starting governed services",
+  "Checking the final connections",
+];
+
+function WorkspaceCreationProgress({ name }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setStep((current) => (current + 1) % workspaceBuildSteps.length), 1600);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <div className="workspace-creation-progress-layer">
+    <section className="workspace-creation-progress" role="status" aria-live="polite" aria-busy="true">
+      <span className="workspace-creation-spinner"><ArrowClockwise24Regular aria-hidden="true" /></span>
+      <span className="workspace-creation-eyebrow">Building workspace</span>
+      <h2>{name}</h2>
+      <p>{workspaceBuildSteps[step]}…</p>
+      <span className="workspace-creation-stream" aria-hidden="true">identity · policy · network · agents · storage</span>
+      <small>You can leave this with us. The workspace will appear as soon as preparation begins.</small>
+    </section>
+  </div>;
+}
+
 function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
@@ -3538,7 +3563,7 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       </header>
       {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong><ConfigurationErrorDetail error={error} access={configurationAccess} /></span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
+        <form className="sandbox-management-form" aria-busy={saving || undefined} onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a Restricted workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows Restricted workspace access. This does not choose your AI agent."}</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
@@ -3629,13 +3654,14 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · {applicationIds.length || agentIds.length ? `${applicationIds.length} app${applicationIds.length === 1 ? "" : "s"} · ${agentIds.length} AI agent${agentIds.length === 1 ? "" : "s"}` : "base workspace"}</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview || (!aiSetupReady && agentIds.length > 0)}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <button className="primary-button" type="submit" aria-busy={saving || undefined} disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview || (!aiSetupReady && agentIds.length > 0)}>{saving && <ArrowClockwise24Regular className="workspace-inline-spinner" aria-hidden="true" />}{saving ? creatingWorkspace ? "Building workspace…" : "Saving configuration…" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
     </div>
+    {saving && creatingWorkspace && <WorkspaceCreationProgress name={workspaceName({ grantId: selectedGrantId })} />}
     {pendingProfile && <ConfirmDialog title={`Change to ${pendingProfile.displayName}?`} description="The current custom security group is not compatible with this workspace type. Continuing will return network access to the new workspace type default." confirmLabel="Change workspace type" onConfirm={() => { setProfileId(pendingProfile.id); setSecurityGroupVersionId("inherit"); setPendingProfileId(""); }} onCancel={() => setPendingProfileId("")} />}
   </>;
 }

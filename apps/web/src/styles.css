@@ -1239,6 +1239,96 @@ textarea:focus-visible,
   font-size: 15px;
 }
 
+.workspace-inline-spinner {
+  animation: workspace-spin 900ms linear infinite;
+}
+
+.workspace-creation-progress-layer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(247 247 244 / 82%);
+  backdrop-filter: blur(8px);
+}
+
+.workspace-creation-progress {
+  display: grid;
+  width: min(480px, 100%);
+  justify-items: center;
+  gap: 9px;
+  padding: 40px 42px;
+  border: 1px solid #d9dee5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(22 44 72 / 16%);
+  color: #172334;
+  text-align: center;
+}
+
+.workspace-creation-spinner {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: #edf4fc;
+  color: var(--navy);
+}
+
+.workspace-creation-spinner svg {
+  width: 27px;
+  height: 27px;
+  animation: workspace-spin 900ms linear infinite;
+}
+
+.workspace-creation-eyebrow {
+  color: #617185;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.workspace-creation-progress h2,
+.workspace-creation-progress p {
+  margin: 0;
+}
+
+.workspace-creation-progress h2 {
+  font-size: 28px;
+  letter-spacing: -.03em;
+}
+
+.workspace-creation-progress p {
+  min-height: 24px;
+  color: #324d6d;
+  font-size: 15px;
+}
+
+.workspace-creation-stream {
+  margin-top: 6px;
+  color: #8a96a5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: .02em;
+  animation: breathe 1.2s ease-in-out infinite;
+}
+
+.workspace-creation-progress small {
+  max-width: 360px;
+  color: #6a7581;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@keyframes workspace-spin {
+  to { transform: rotate(360deg); }
+}
+
 .sandbox-json {
   border: 1px solid #dededb;
   border-radius: 8px;

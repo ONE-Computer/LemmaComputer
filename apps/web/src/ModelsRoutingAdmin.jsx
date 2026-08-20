@@ -256,7 +256,8 @@ export function ModelsRoutingAdmin({
     };
     setDraft(next);
     writeRouteDraft(draftScope, next);
-    setNotice(`${serviceClassLabels[selectedRoute.serviceClass]} was removed from the draft. Review and publish to apply the change to workspaces.`);
+    setNotice(`${serviceClassLabels[selectedRoute.serviceClass]} was removed from the pending changes. Save the change to update Chat and workspace settings.`);
+    setPublishOpen(true);
   };
   const deleteProvider = async (provider) => {
     const result = await onDeleteProvider(provider);
@@ -275,24 +276,32 @@ export function ModelsRoutingAdmin({
     setDraft(next);
     writeRouteDraft(draftScope, next);
     setMappingEditor(null);
-    setNotice("Draft saved. Review and publish it when the organization routes are ready.");
+    setNotice("Route changes are ready. Save them to make the new routes available across the organization.");
+    setPublishOpen(true);
   };
-  const mappingInput = (value) => ({
-    revisionNote: value.revisionNote,
-    deployments: value.deployments.filter(routeIsAssigned).map((deployment) => ({
-      serviceClass: deployment.serviceClass,
-      provider: deployment.provider,
-      ...(deployment.providerAccountId?.trim() ? { providerAccountId: deployment.providerAccountId.trim() } : {}),
-      providerModel: deployment.providerModel.trim(),
-      providerDeployment: deployment.providerDeployment.trim(),
-      ...(deployment.region ? { region: deployment.region } : {}),
-      ...(deployment.providerServiceTier ? { providerServiceTier: deployment.providerServiceTier } : {}),
-      ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
-      capabilities: deployment.capabilities,
-      approved: deployment.approved,
-      evaluationPassed: deployment.evaluationPassed,
-    })),
-  });
+  const mappingInput = (value) => {
+    const assigned = value.deployments.filter(routeIsAssigned);
+    const currencies = [...new Set(assigned
+      .map((deployment) => cardById.get(deployment.rateCardId)?.currency)
+      .filter(Boolean))];
+    return {
+      revisionNote: value.revisionNote,
+      billingCurrency: currencies[0] ?? "USD",
+      deployments: assigned.map((deployment) => ({
+        serviceClass: deployment.serviceClass,
+        provider: deployment.provider,
+        ...(deployment.providerAccountId?.trim() ? { providerAccountId: deployment.providerAccountId.trim() } : {}),
+        providerModel: deployment.providerModel.trim(),
+        providerDeployment: deployment.providerDeployment.trim(),
+        ...(deployment.region ? { region: deployment.region } : {}),
+        ...(deployment.providerServiceTier ? { providerServiceTier: deployment.providerServiceTier } : {}),
+        ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
+        capabilities: deployment.capabilities,
+        approved: deployment.approved,
+        evaluationPassed: deployment.evaluationPassed,
+      })),
+    };
+  };
   const publishMapping = async () => {
     if (!draft) return;
     setBusy(true);
@@ -303,7 +312,7 @@ export function ModelsRoutingAdmin({
       setDraft(null);
       clearRouteDraft(draftScope);
       setPublishOpen(false);
-      setNotice("Organization route version published. Existing Team overrides remain unchanged.");
+      setNotice("Organization routes saved. Chat and workspace settings now use this version; Team overrides still narrow access where configured.");
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -354,6 +363,7 @@ export function ModelsRoutingAdmin({
         };
         setDraft(next);
         writeRouteDraft(draftScope, next);
+        setPublishOpen(true);
       }
       setPriceEditor(null);
       setNotice(`Price version ${shortId(created.id)} created${source?.length ? " and added to the draft" : ""}.`);
@@ -366,10 +376,11 @@ export function ModelsRoutingAdmin({
   return <div className="models-routing-screen">
     <header className="models-routing-heading">
       <div><p>Models & routing</p><h2>Models & routing</h2><span>Enable approved models and maintain how they are priced and routed across your organization.</span></div>
-      <div className="models-routing-version"><span>{mapping?.id ? `Published ${shortId(mapping.id)}` : "No published version"}{draft ? " · 1 draft change" : ""}</span>{canManageRouting && <button className="secondary-button" type="button" disabled={busy || !draft} onClick={() => setPublishOpen(true)}>Review & publish</button>}</div>
+      <div className="models-routing-version"><span>{mapping?.id ? `Saved ${shortId(mapping.id)}` : "No saved routes"}{draft ? " · Unsaved changes" : ""}</span>{canManageRouting && <button className="primary-button" type="button" disabled={busy || !draft} onClick={() => setPublishOpen(true)}>Save changes</button>}</div>
     </header>
     {(error || providerError) && <div className="workspace-error" role="alert"><span><strong>Models and routing unavailable</strong>{error || providerError}</span></div>}
     {notice && <div className="models-routing-notice" role="status"><CheckmarkCircle20Regular aria-hidden="true" /><span>{notice}</span></div>}
+    {draft && <div className="models-routing-pending" role="note"><Info20Regular aria-hidden="true" /><span><strong>Unsaved route changes</strong><small>Save changes to update Chat, workspace configuration, and the organization routing default.</small></span>{canManageRouting && <button className="primary-button" type="button" disabled={busy} onClick={() => setPublishOpen(true)}>Save changes</button>}</div>}
     {focus && <div className="models-routing-focus" role="note"><Info20Regular aria-hidden="true" /><span><strong>{focus === "provider" ? "Connect a provider account" : focus === "pricing" ? "Complete model pricing" : "Complete the organization route"}</strong>{focus === "provider" ? "Use one provider API key across every enabled model from that provider." : focus === "pricing" ? "The first enabled model missing complete pricing is selected. Add its required rates before routing it." : "The first unassigned model is selected. Assign priced models to the Lite, Balanced, and Pro organization defaults."}</span></div>}
     <div className="models-routing-layout">
       <main className="models-routing-main">
@@ -410,7 +421,7 @@ export function ModelsRoutingAdmin({
           <div className="models-routing-model-id"><span>Model ID (LemmaComputer)</span><strong>{selected.id}</strong></div>
           <section><div className="models-routing-inspector-title"><strong>Availability</strong>{canManageProviders && selectedProvider && <button type="button" onClick={() => setProviderEditor(selectedProvider)}>Edit</button>}</div><span className="models-routing-ready"><CheckmarkCircle20Regular aria-hidden="true" />Enabled</span><p>This approved model is enabled for your organization.</p></section>
           <section><div className="models-routing-inspector-title"><strong>Pricing</strong><Info20Regular aria-hidden="true" /></div>{selectedCoverage.complete ? <span className="models-routing-ready"><CheckmarkCircle20Regular aria-hidden="true" />{rateLabel(selectedCard, "input_uncached_token")} input · {rateLabel(selectedCard, "output_token")} output</span> : <span className="models-routing-gap"><ErrorCircle20Regular aria-hidden="true" />Pricing missing</span>}<p>{selectedCoverage.complete ? "Current immutable rates shown per 1M tokens." : "Add input, output, cache-read, and cache-write prices to make this model routable."}</p>{canManagePricing && <button className="secondary-button" type="button" onClick={() => openPricing(selected)}>{selectedCard ? "Add price version" : "Add pricing"}</button>}<button className="models-routing-inline-link" type="button" onClick={() => setHistory({ kind: "pricing", deployment: selected })}>View pricing history</button></section>
-          <section><div className="models-routing-inspector-title"><strong>Organization route</strong><Info20Regular aria-hidden="true" /></div>{selectedRoute ? <span className={selectedCoverage.complete ? "models-routing-ready" : "models-routing-gap"}>{selectedCoverage.complete ? <CheckmarkCircle20Regular aria-hidden="true" /> : <ErrorCircle20Regular aria-hidden="true" />}{serviceClassLabels[selectedRoute.serviceClass]}</span> : <span className="models-routing-gap"><ErrorCircle20Regular aria-hidden="true" />Not assigned</span>}<p>{selectedCoverage.complete ? "Assign this model to Lite, Balanced, or Pro in the organization route draft." : "Pricing must exist before a route using this model can be published."}</p>{canManageRouting && <div className="models-routing-route-actions"><button className="secondary-button" type="button" disabled={!inventory.length} onClick={openMappingEditor}>{selectedRoute ? "Change route" : "Assign route"}</button>{selectedRoute && <button className="models-routing-inline-link danger-button" type="button" onClick={removeSelectedRoute}>Remove from {serviceClassLabels[selectedRoute.serviceClass]}</button>}</div>}<button className="models-routing-inline-link" type="button" onClick={() => setHistory({ kind: "routes", deployment: selected })}>View route versions</button></section>
+          <section><div className="models-routing-inspector-title"><strong>Organization route</strong><Info20Regular aria-hidden="true" /></div>{selectedRoute ? <span className={selectedCoverage.complete ? "models-routing-ready" : "models-routing-gap"}>{selectedCoverage.complete ? <CheckmarkCircle20Regular aria-hidden="true" /> : <ErrorCircle20Regular aria-hidden="true" />}{serviceClassLabels[selectedRoute.serviceClass]}</span> : <span className="models-routing-gap"><ErrorCircle20Regular aria-hidden="true" />Not assigned</span>}<p>{selectedCoverage.complete ? "Assign this model to Lite, Balanced, or Pro in the organization route changes." : "Pricing must exist before a route using this model can be saved."}</p>{canManageRouting && <div className="models-routing-route-actions"><button className="secondary-button" type="button" disabled={!inventory.length} onClick={openMappingEditor}>{selectedRoute ? "Change route" : "Assign route"}</button>{selectedRoute && <button className="models-routing-inline-link danger-button" type="button" onClick={removeSelectedRoute}>Remove from {serviceClassLabels[selectedRoute.serviceClass]}</button>}</div>}<button className="models-routing-inline-link" type="button" onClick={() => setHistory({ kind: "routes", deployment: selected })}>View route versions</button></section>
           <section><div className="models-routing-inspector-title"><strong>Health</strong></div><p>Test the shared provider account connection for this model.</p>{canManageProviders && selectedProvider?.state === "active" && <button className="secondary-button" type="button" disabled={providerBusy} onClick={() => onTestProvider(selected.provider)}>Test model</button>}<small>Last tested {displayDate(selectedProvider?.lastTestedAt)}</small></section>
         </> : <div className="models-routing-inspector-empty"><Info20Regular aria-hidden="true" /><strong>Select an enabled model</strong><span>Pricing, organization route use, and health appear here.</span></div>}
       </aside>
@@ -418,7 +429,7 @@ export function ModelsRoutingAdmin({
     {providerEditor && <ProviderEditor provider={providerEditor} busy={providerBusy} onClose={() => setProviderEditor(null)} onSave={onSaveProvider} onDelete={deleteProvider} />}
     {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={inventory} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
-    {publishOpen && <ModalDialog title="Publish organization routes?" description="This publishes an immutable route version. Team overrides remain pinned until they are changed separately." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>{assignedRoutes ? "Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in workspace settings and policies." : "Publishing this removal makes every organization route unavailable to new workspace settings and policies."}</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Publishing…" : assignedRoutes ? `Publish ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}` : "Publish route removal"}</button></div></ModalDialog>}
+    {publishOpen && <ModalDialog title="Save organization routes?" description="Saving creates an immutable route version and immediately makes it the organization default. Existing Team overrides continue to narrow access where configured." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>{assignedRoutes ? "Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in Chat and workspace settings." : "Saving this removal makes every organization route unavailable in Chat and workspace settings."}</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Saving…" : assignedRoutes ? `Save ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}` : "Save route removal"}</button></div></ModalDialog>}
     {history && <HistoryDialog kind={history.kind} deployment={history.deployment} rateCards={rateCards} mapping={mapping} onClose={() => setHistory(null)} />}
   </div>;
 }

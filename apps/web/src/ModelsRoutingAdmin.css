@@ -56,7 +56,7 @@
   white-space: nowrap;
 }
 
-.models-routing-version .secondary-button {
+.models-routing-version .primary-button {
   width: auto;
 }
 
@@ -94,6 +94,37 @@
   width: 19px;
   height: 19px;
   flex: 0 0 auto;
+}
+
+.models-routing-pending {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border: 1px solid #d7c58c;
+  border-radius: 9px;
+  background: #fffaf0;
+  color: #5e4a1f;
+}
+
+.models-routing-pending > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.models-routing-pending > span {
+  display: grid;
+  gap: 2px;
+}
+
+.models-routing-pending small {
+  color: #75633c;
+  font-size: 12px;
+}
+
+.models-routing-pending .primary-button {
+  width: auto;
 }
 
 .models-routing-layout {

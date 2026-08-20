@@ -19,7 +19,7 @@ test("models, pricing, and organization routes form one continuous maintenance s
   await expect(page.getByRole("region", { name: "Provider accounts and enabled models" })).toContainText("GLM-5");
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Pricing");
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Organization route");
-  await expect(page.getByRole("button", { name: "Review & publish" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await page.screenshot({ path: "test-results/models-routing-unified.png" });
   expect(consoleErrors).toEqual([]);
 });
@@ -36,10 +36,13 @@ test("administrator can maintain a local organization-route draft from a model",
   await expect(editor.getByLabel("Balanced provider deployment")).toBeVisible();
   await expect(editor.getByLabel("Pro provider deployment")).toBeVisible();
   await editor.getByLabel("Mapping revision note").fill("Review organization defaults after the model inventory update.");
-  await editor.getByRole("button", { name: "Save local draft" }).click();
+  await editor.getByRole("button", { name: "Continue" }).click();
 
-  await expect(page.getByRole("status")).toContainText("Draft saved");
-  await expect(page.getByRole("button", { name: "Review & publish" })).toBeEnabled();
+  const saveDialog = page.getByRole("dialog", { name: "Save organization routes?" });
+  await expect(saveDialog).toBeVisible();
+  await saveDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Route changes are ready" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save changes" }).first()).toBeEnabled();
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([
     "lemmacomputer.routing-mapping-draft:v2:acme:alex-morgan",
   ]);
@@ -145,7 +148,8 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await routeEditor.getByLabel("Pro provider deployment").click();
   await page.getByRole("option", { name: "OpenAI GPT-5.6 Sol · OpenAI" }).click();
   await routeEditor.getByLabel("Mapping revision note").fill("Use Sol for the Pro route.");
-  await routeEditor.getByRole("button", { name: "Save local draft" }).click();
+  await routeEditor.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("dialog", { name: "Save organization routes?" }).getByRole("button", { name: "Cancel" }).click();
 
   await expect(readiness).toContainText("1 of 3 routes ready");
   await expect(readiness).toContainText("2 organization routes still need an assigned model with complete pricing");
@@ -158,18 +162,17 @@ test("an incremental route draft counts only explicit assignments and keeps prov
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("lemmacomputer.routing-mapping-draft:")))).toEqual([
     "lemmacomputer.routing-mapping-draft:v2:acme:alex-morgan",
   ]);
-  await page.getByRole("button", { name: "Review & publish" }).click();
-  const publishDialog = page.getByRole("dialog", { name: "Publish organization routes?" });
-  await expect(publishDialog.getByRole("button", { name: "Publish 1 route" })).toBeEnabled();
-  await publishDialog.getByRole("button", { name: "Publish 1 route" }).click();
+  await page.getByRole("button", { name: "Save changes" }).first().click();
+  const publishDialog = page.getByRole("dialog", { name: "Save organization routes?" });
+  await expect(publishDialog.getByRole("button", { name: "Save 1 route" })).toBeEnabled();
+  await publishDialog.getByRole("button", { name: "Save 1 route" }).click();
   await expect.poll(() => publishedServiceClasses).toEqual(["pro"]);
 
   await inspector.getByRole("button", { name: "Remove from Pro" }).click();
   await expect(readiness).toContainText("0 of 3 routes ready");
-  await page.getByRole("button", { name: "Review & publish" }).click();
-  const removalDialog = page.getByRole("dialog", { name: "Publish organization routes?" });
+  const removalDialog = page.getByRole("dialog", { name: "Save organization routes?" });
   await expect(removalDialog).toContainText("makes every organization route unavailable");
-  await removalDialog.getByRole("button", { name: "Publish route removal" }).click();
+  await removalDialog.getByRole("button", { name: "Save route removal" }).click();
   await expect.poll(() => publishedServiceClasses).toEqual([]);
 });
 

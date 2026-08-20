@@ -907,15 +907,29 @@ export function createControlServer(
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new LemmaComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
-  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
+  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore,security.teamStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
-  const chatServiceClassOptionsFor = async (owner: IdentityContext) => routingExecution
-    ? routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
-    : [
+  const publishedWorkspaceServiceClassesFor = async (tenantId: string): Promise<ExplicitWorkspaceServiceClass[] | null> => {
+    if (!security.routingStore) return null;
+    const routeMapping = await security.routingStore.latestMappingVersion(tenantId);
+    return workspaceServiceClasses
+      .filter(({ value }) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === value))
+      .map(({ value }) => value);
+  };
+  const chatServiceClassOptionsFor = async (owner: IdentityContext) => {
+    const options = routingExecution
+      ? await routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
+      : [
         { value: "lite" as const, available: false, reasonCode: "route_unavailable" as const },
         { value: "balanced" as const, available: true, reasonCode: "ready" as const },
         { value: "pro" as const, available: false, reasonCode: "route_unavailable" as const },
       ];
+    const published = await publishedWorkspaceServiceClassesFor(owner.tenantId);
+    if (published === null) return options;
+    return options.map((option) => published.includes(option.value)
+      ? option
+      : { ...option, available: false as const, reasonCode: "route_unavailable" as const });
+  };
   const requireChatServiceClass = async (
     owner: IdentityContext,
     serviceClass: "lite" | "balanced" | "pro",
@@ -1449,13 +1463,6 @@ export function createControlServer(
       ?? (Array.isArray(document?.workspaceProfiles) ? document.workspaceProfiles.find((candidate) => sandboxProfiles.some((profile) => profile.id === candidate)) : undefined)
       ?? document?.workspaceProfile
       ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
-  };
-  const publishedWorkspaceServiceClassesFor = async (tenantId: string): Promise<ExplicitWorkspaceServiceClass[] | null> => {
-    if (!security.routingStore) return null;
-    const routeMapping = await security.routingStore?.latestMappingVersion(tenantId);
-    return workspaceServiceClasses
-      .filter(({ value }) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === value))
-      .map(({ value }) => value);
   };
   const protectedWorkspacePolicyOverviewFor = async (tenantId: string) => {
     const [overview, publishedServiceClasses] = await Promise.all([

@@ -204,6 +204,8 @@ test("workspace deletion separates runtime removal from durable-content retentio
 test("an authenticated member can create and manage only their own workspace", async ({ page }) => {
   const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d71";
   let createdWorkspace = null;
+  let releaseCreation = () => {};
+  const creationReleased = new Promise<void>((resolve) => { releaseCreation = resolve; });
 
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     json: {
@@ -220,6 +222,7 @@ test("an authenticated member can create and manage only their own workspace", a
       return;
     }
     const input = route.request().postDataJSON();
+    await creationReleased;
     createdWorkspace = {
       id: workspaceId,
       grantId: input.grantId,
@@ -273,6 +276,14 @@ test("an authenticated member can create and manage only their own workspace", a
   await expect(page.getByText("Qualification workspace (legacy)", { exact: true })).toHaveCount(0);
   await expect(page.getByText("open workspace for non-sensitive work", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const progress = page.locator(".workspace-creation-progress");
+  await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute("aria-busy", "true");
+  await expect(progress.getByRole("heading", { name: "Demo Workspace" })).toBeVisible();
+  await expect(progress).toContainText(/Securing the workspace boundary|Applying approved apps and model routes|Starting governed services|Checking the final connections/);
+  await expect(page.getByRole("button", { name: "Building workspace…" })).toBeDisabled();
+  releaseCreation();
 
   const card = page.getByRole("article", { name: "Demo Workspace" });
   await expect(card).toContainText("Preparing");

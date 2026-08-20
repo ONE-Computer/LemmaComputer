@@ -223,7 +223,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
     && editor.prices.output_token !== "";
   return <ModalDialog
     title={`New ${serviceClassLabels[editor.deployment.serviceClass] ?? editor.deployment.displayName ?? "model"} price version`}
-    description="Create immutable pricing evidence for this provider deployment and attach it to a local mapping draft. This does not change a current Team policy."
+    description="Create immutable pricing evidence for this provider deployment and attach it to the pending organization route changes."
     eyebrow="Rate card"
     labelledBy="route-pricing-title"
     onClose={busy ? () => undefined : onClose}
@@ -240,7 +240,7 @@ function PricingEditor({ editor, busy, onChange, onClose, onCreate }) {
       <label className="modal-field"><span>Effective from</span><input aria-label="Price effective from" type="datetime-local" value={editor.effectiveFrom} disabled={busy} onChange={(event) => onChange({ ...editor, effectiveFrom: event.target.value })} /></label>
       <label className="modal-field route-price-reason"><span>Approval reason</span><textarea aria-label="Price approval reason" value={editor.overrideReason} disabled={busy} onChange={(event) => onChange({ ...editor, overrideReason: event.target.value })} /></label>
     </div>
-    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>The new record is staged in a local mapping draft. Publish that mapping version separately before a Team policy can adopt it.</span></div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>If this model is already routed, save the pending route changes to make the new price version active.</span></div>
     <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !canCreate} onClick={onCreate}>{busy ? "Creating…" : "Create price record"}</button></div>
   </ModalDialog>;
 }
@@ -263,7 +263,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
   const valid = revisionValid && deploymentsValid;
   return <ModalDialog
     title="Create a mapping draft"
-    description="Edit the private provider deployment behind each stable employee alias. Saving keeps the draft in this browser until you publish a new immutable mapping version."
+    description="Edit the provider deployment behind each stable model mode. Continue to review and save the routes for your organization."
     eyebrow="Model routes"
     labelledBy="route-mapping-editor-title"
     onClose={busy ? () => undefined : onClose}
@@ -303,8 +303,8 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
       })}
     </div>
     {!valid && <div className="route-editor-validation" role="status" aria-live="polite"><Info20Regular aria-hidden="true" /><span>{!revisionValid ? revisionLength ? `Add ${remainingRevisionCharacters} more character${remainingRevisionCharacters === 1 ? "" : "s"} to the revision note to save this draft.` : `Add a revision note of at least ${minimumRevisionLength} characters to save this draft.` : assignedDeployments.length ? "Finish or clear the incomplete provider assignment." : "Assign at least one organization route to save this draft."}</span></div>}
-    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>Publishing creates an immutable version for Team policy adoption. It does not activate or repoint any current Team route.</span></div>
-    <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Save local draft</button></div>
+    <div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>After you continue, save the changes to update Chat and workspace settings. An immutable version remains available for audit.</span></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={busy || !valid} onClick={onSave}>Continue</button></div>
   </ModalDialog>;
 }
 

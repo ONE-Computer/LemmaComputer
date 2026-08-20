@@ -177,6 +177,70 @@ test("mapping administration always uses the authenticated tenant", async () => 
     { operation: "create", tenantId: "tenant-a" },
   ]);
 });
+test("saving organization routes activates the ready routes for Teams without an override", async () => {
+  const policies: Array<Parameters<RoutingStore["createPolicy"]>[0]> = [];
+  const rollouts: Array<Parameters<RoutingStore["createRollout"]>[0]> = [];
+  const mapping = {
+    id: uuid.mapping,
+    tenantId: "tenant-a",
+    revisionNote: "Make Lite the organization default route",
+    createdBy: "admin",
+    createdAt: new Date("2026-08-20T00:00:00.000Z"),
+    deployments: [{
+      id: uuid.deployment,
+      serviceClass: "lite" as const,
+      provider: "openai" as const,
+      providerAccountId: "primary",
+      providerModel: "gpt-5.6-luna",
+      providerDeployment: "openai/gpt-5.6-luna",
+      region: null,
+      providerServiceTier: null,
+      rateCardId: uuid.review,
+      capabilities: { vision: true, tools: true, streaming: true, contextTokens: 128000, outputTokens: 16000, residency: ["sg"] },
+      approved: true,
+      evaluationPassed: true,
+    }],
+  };
+  const store = {
+    createMappingVersion: async () => mapping,
+    adminReadModel: async () => ({ teamId: uuid.team, policy: null, rollout: null, review: null, deployments: [] }),
+    createPolicy: async (input: Parameters<RoutingStore["createPolicy"]>[0]) => {
+      policies.push(input);
+      return uuid.policy;
+    },
+    createRollout: async (input: Parameters<RoutingStore["createRollout"]>[0]) => {
+      rollouts.push(input);
+      return {};
+    },
+  } as unknown as RoutingStore;
+  const teams = {
+    listTeams: async () => [{ id: uuid.team }],
+  } as unknown as Pick<import("@lemmacomputer/workspace-store").TeamStore, "listTeams">;
+
+  await new RoutingAdministrationService(store, teams).createMapping(
+    { tenantId: "tenant-a", userId: "admin" },
+    {
+      revisionNote: mapping.revisionNote,
+      billingCurrency: "USD",
+      deployments: mapping.deployments.map(({ id: _id, ...deployment }) => deployment),
+    },
+  );
+
+  assert.deepEqual(policies[0]?.identity.allowedServiceClasses, ["lite"]);
+  assert.equal(policies[0]?.identity.safeDefault, "lite");
+  assert.equal(policies[0]?.team, null);
+  assert.equal(policies[0]?.serviceClassPolicies.lite.eligibleDeploymentIds[0], uuid.deployment);
+  assert.deepEqual(rollouts[0], {
+    tenantId: "tenant-a",
+    teamId: uuid.team,
+    policyVersionId: uuid.policy,
+    mappingVersionId: uuid.mapping,
+    mode: "disabled",
+    fixedDeploymentId: uuid.deployment,
+    reason: "Organization routes saved and activated",
+    createdBy: "admin",
+  });
+});
 test("mapping administration derives effort capability from canonical managed-provider models", async () => {
   let captured: Parameters<RoutingStore["createMappingVersion"]>[0] | undefined;
   const store = {
