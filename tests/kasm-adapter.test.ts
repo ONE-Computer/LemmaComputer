@@ -946,7 +946,12 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       CgroupPermissions: "rwm",
     }]);
     const workspaceVolume = "lemmacomputer-workspace-home-b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508-g1";
-    assert.deepEqual(host.Mounts, [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }]);
+    assert.deepEqual(host.Mounts, [{
+      Type: "volume",
+      Source: workspaceVolume,
+      Target: "/home/kasm-user",
+      VolumeOptions: { NoCopy: true },
+    }]);
     const volumeCreate = requests.find((item) => item.path === "/volumes/create")!;
     assert.equal(volumeCreate.body.Name, workspaceVolume);
     const serialized = JSON.stringify(sandboxCreate.body);
@@ -1320,5 +1325,21 @@ test("local Kasm allowlists bounded entrypoint validation without exposing arbit
     "Hermes Agent CLI MODEL_ALIAS is invalid",
     "persistent crontab has unsafe ownership, mode, or size",
   ]) assert.equal(diagnostic(`prefix\n${message}\nsuffix`), message);
+  assert.equal(
+    diagnostic('{"event":"workspace_startup_phase","phase":"selected-agent-runtimes","status":"begin"}'),
+    "Workspace startup phase selected-agent-runtimes did not complete.",
+  );
+  assert.equal(
+    diagnostic('{"event":"workspace_startup_phase","phase":"persistent-home","status":"failed","durationMs":12}'),
+    "Workspace startup phase persistent-home did not complete.",
+  );
+  assert.equal(
+    diagnostic('{"event":"workspace_startup_phase","phase":"kasm-profile","status":"complete","durationMs":8}'),
+    undefined,
+  );
+  assert.equal(
+    diagnostic('{"event":"workspace_startup_phase","phase":"kasm-profile","status":"failed","durationMs":8}\nKasm profile initialization failed'),
+    "Kasm profile initialization failed",
+  );
   assert.equal(diagnostic("provider secret=do-not-surface"), undefined);
 });

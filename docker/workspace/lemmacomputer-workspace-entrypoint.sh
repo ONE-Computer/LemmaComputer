@@ -38,6 +38,30 @@ claude_code_dir="/home/kasm-user/.config/Claude-3p/claude-code/${claude_code_ver
 claude_code_binary="${claude_code_dir}/claude"
 claude_code_marker="${claude_code_dir}/.verified"
 launcher_dir="/usr/local/share/lemmacomputer/applications"
+startup_phase_name=""
+startup_phase_started_ms=0
+
+startup_now_ms() {
+  date +%s%3N
+}
+
+startup_phase_begin() {
+  startup_phase_name="$1"
+  startup_phase_started_ms="$(startup_now_ms)"
+  printf '{"event":"workspace_startup_phase","phase":"%s","status":"begin"}\n' "$startup_phase_name"
+}
+
+startup_phase_finish() {
+  local status="$1"
+  local finished_ms
+  local duration_ms
+  finished_ms="$(startup_now_ms)"
+  duration_ms=$((finished_ms - startup_phase_started_ms))
+  printf '{"event":"workspace_startup_phase","phase":"%s","status":"%s","durationMs":%d}\n' \
+    "$startup_phase_name" "$status" "$duration_ms"
+  startup_phase_name=""
+  startup_phase_started_ms=0
+}
 
 agent_enabled() {
   [[ ",${LEMMACOMPUTER_ENABLED_AGENTS}," == *",$1,"* ]]
@@ -238,12 +262,23 @@ fi
 # home. Run it to completion before LemmaComputer writes configuration or starts
 # any agent process. Starting agents first lets them race Kasm's `cp -rp` over
 # ~/.local and can restart the whole desktop nondeterministically.
-if ! chown -R 1000:1000 /home/kasm-user \
-  || ! setpriv --reuid=1000 --regid=1000 --init-groups \
-    /dockerstartup/kasm_default_profile.sh /bin/true; then
+startup_phase_begin persistent-home
+if ! /usr/local/libexec/lemmacomputer-workspace-home-init /home/kasm-user 1000 1000; then
+  startup_phase_finish failed
+  echo "Persistent workspace home initialization failed" >&2
+  exit 75
+fi
+startup_phase_finish complete
+
+startup_phase_begin kasm-profile
+if ! setpriv --reuid=1000 --regid=1000 --init-groups \
+  /dockerstartup/kasm_default_profile.sh /bin/true; then
+  startup_phase_finish failed
   echo "Kasm profile initialization failed" >&2
   exit 75
 fi
+startup_phase_finish complete
+startup_phase_begin managed-configuration
 
 for clipboard_boolean in \
   "$LEMMACOMPUTER_CLIPBOARD_ENABLED" \
@@ -613,13 +648,15 @@ fi
 
 for hermes_home in /home/kasm-user/.hermes /home/kasm-user/.hermes-desktop; do
   [[ -d "$hermes_home" ]] || continue
-  # Hermes creates runtime logs, sessions, and curator state beneath its home.
-  # Some imports initialize those paths while this management entrypoint is
-  # still root, so reconcile the complete tree before handing it to the user.
-  chown -R 1000:1000 "$hermes_home"
-  find "$hermes_home" -type d -exec chmod 0700 {} +
+  # Configuration writers explicitly own the files they replace and Hermes
+  # writes runtime state as UID/GID 1000. Repair only the managed directory
+  # boundary; sessions, logs, caches, and employee files remain untouched.
+  chown 1000:1000 "$hermes_home"
+  chmod 0700 "$hermes_home"
 done
-chown -R 1000:1000 /home/kasm-user/.config /home/kasm-user/Desktop
+chown 1000:1000 /home/kasm-user/.config /home/kasm-user/Desktop
+startup_phase_finish complete
+startup_phase_begin agent-brokers
 
 start_agent_broker() {
   local prefix="$1"
@@ -691,11 +728,13 @@ for enabled_agent in "${enabled_agents[@]}"; do
     codex-cli) broker_port=4317 ;;
   esac
   for _ in $(seq 1 50); do
-    if curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null; then break; fi
+    if curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null 2>&1; then break; fi
     sleep 0.1
   done
   curl -fsS "http://127.0.0.1:${broker_port}/healthz" >/dev/null
 done
+startup_phase_finish complete
+startup_phase_begin selected-agent-runtimes
 
 if agent_enabled hermes-claw; then
   install -d -o 1000 -g 1000 -m 0700 /home/kasm-user/.hermes/logs
@@ -730,7 +769,7 @@ if agent_enabled hermes-claw; then
   # Leave enough room for Hermes' own required-MCP retries without allowing a
   # disconnected connector to terminate the workspace bootstrap.
   for _ in $(seq 1 600); do
-    if curl -fsS "http://127.0.0.1:8652/health" >/dev/null; then break; fi
+    if curl -fsS "http://127.0.0.1:8652/health" >/dev/null 2>&1; then break; fi
     sleep 0.1
   done
   curl -fsS "http://127.0.0.1:8652/health" >/dev/null
@@ -771,7 +810,7 @@ start_sdk_chat_adapter() {
       >>"/run/lemmacomputer/${agent}-chat.log" 2>&1 &
   printf '%s\n' "$!" > "/run/lemmacomputer/${agent}-chat.pid"
   for _ in $(seq 1 200); do
-    if curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null; then break; fi
+    if curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then break; fi
     sleep 0.1
   done
   curl -fsS -H "authorization: Bearer ${api_key}" "http://127.0.0.1:${port}/health" >/dev/null
@@ -803,6 +842,8 @@ if agent_enabled codex-cli; then
     "$codex_chat_api_key"
   unset LEMMACOMPUTER_CODEX_CHAT_API_KEY codex_chat_api_key
 fi
+startup_phase_finish complete
+startup_phase_begin scheduling
 
 cron_supervisor_pid=""
 if [[ "$LEMMACOMPUTER_EXECUTION_MODE" == "disposable-open" ]]; then
@@ -853,6 +894,8 @@ else
 fi
 
 [[ -z "$cron_supervisor_pid" ]] || kill -0 "$cron_supervisor_pid"
+startup_phase_finish complete
+startup_phase_begin desktop-runtime
 touch /run/lemmacomputer/workspace-ready
 
 exec setpriv --reuid=1000 --regid=1000 --init-groups \

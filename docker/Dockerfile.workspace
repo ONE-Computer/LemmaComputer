@@ -256,6 +256,7 @@ COPY --chmod=0644 docker/workspace/lemmacomputer_work_trace.py /usr/local/libexe
 COPY docker/workspace/lemmacomputer-agent-chat.py /usr/local/libexec/lemmacomputer-agent-chat
 COPY docker/workspace/lemmacomputer-hermes-config.py /usr/local/libexec/lemmacomputer-hermes-config
 COPY docker/workspace/lemmacomputer-claude-config.py /usr/local/libexec/lemmacomputer-claude-config
+COPY --chmod=0755 docker/workspace/lemmacomputer-workspace-home-init.sh /usr/local/libexec/lemmacomputer-workspace-home-init
 COPY docker/workspace/lemmacomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/lemmacomputer-kasm-clipboard.js
 COPY docker/workspace/lemmacomputer-workspace-entrypoint.sh /usr/local/sbin/lemmacomputer-workspace-entrypoint
 COPY docker/workspace/claude-desktop.desktop /usr/local/share/lemmacomputer/applications/lemmacomputer-claude-desktop.desktop
@@ -277,6 +278,9 @@ COPY docker/workspace/hermes-desktop.desktop /usr/local/share/lemmacomputer/appl
 COPY docker/workspace/lemmacomputer-crontab /usr/local/bin/lemmacomputer-crontab
 COPY docker/workspace/lemmacomputer-cron-run /usr/local/bin/lemmacomputer-cron-run
 COPY docker/workspace/SCHEDULING.md /usr/local/share/lemmacomputer/SCHEDULING.md
+# The Kasm profile is immutable image content copied into a fresh volume by
+# UID/GID 1000. Normalize it once at build time instead of repairing every
+# persistent-home entry on every workspace start.
 RUN chmod 0755 \
       /usr/local/libexec/lemmacomputer-egress-broker \
       /usr/local/libexec/lemmacomputer-gateway-proxy \
@@ -310,7 +314,7 @@ RUN chmod 0755 \
     && test "$(dpkg-query -W -f='${Version}' cron)" = "3.0pl1-137ubuntu3" \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \
     && printf '%s\n' '<script src="app/lemmacomputer-kasm-clipboard.js"></script>' >> /usr/share/kasmvnc/www/index.html \
-    && chown -R 1000:1000 /home/kasm-default-profile/Desktop /home/kasm-default-profile/.config
+    && chown -R 1000:1000 /home/kasm-default-profile
 
 # Probe frequently only while Docker still considers the container to be
 # starting. A successful check exits the start period immediately, after which

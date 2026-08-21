@@ -581,7 +581,16 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
           ...(electronSandboxRequired ? [`apparmor=${ELECTRON_WORKSPACE_APPARMOR_PROFILE}`] : []),
           ...(seccompProfile ? ["seccomp=" + seccompProfile] : []),
         ],
-        Mounts: [{ Type: "volume", Source: workspaceVolume, Target: "/home/kasm-user" }],
+        Mounts: [{
+          Type: "volume",
+          Source: workspaceVolume,
+          Target: "/home/kasm-user",
+          // A workspace volume is initialized by the entrypoint from the
+          // normalized Kasm profile. Docker's default copy-up would seed a new
+          // volume from the image's incidental /home/kasm-user contents before
+          // the ownership contract can run.
+          VolumeOptions: { NoCopy: true },
+        }],
         ...(coworkEnabled ? {
           Devices: [
             {
@@ -1442,11 +1451,20 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       /invalid clipboard (?:policy boolean|size policy)/,
       /unrecognized Claude model assignment/,
       /persistent crontab (?:has unsafe ownership, mode, or size|contains unsupported control characters)/,
+      /Persistent workspace home initialization failed/,
       /Kasm profile initialization failed/,
     ];
     for (const pattern of patterns) {
       const match = logs.match(pattern);
       if (match) return match[0];
+    }
+    const phaseEvents = [...logs.matchAll(
+      /\{"event":"workspace_startup_phase","phase":"([a-z-]+)","status":"(begin|complete|failed)"(?:,"durationMs":\d+)?\}/g,
+    )];
+    const latestPhase = phaseEvents.at(-1);
+    const phaseName = latestPhase?.[1];
+    if (phaseName && latestPhase?.[2] !== "complete") {
+      return `Workspace startup phase ${phaseName} did not complete.`;
     }
     return undefined;
   }
