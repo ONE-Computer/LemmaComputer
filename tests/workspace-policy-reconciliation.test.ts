@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SandboxSettingsRecord } from "@lemmacomputer/workspace-store";
-import { compatibleSandboxSelection } from "../apps/control-api/src/server.js";
+import {
+  compatibleSandboxSelection,
+  shouldPersistCompatibleSandboxSelection,
+} from "../apps/control-api/src/server.js";
 
 const document = {
   workspaceProfile: "claude-desktop-standard-v1",
@@ -104,4 +107,29 @@ test("an organization without published routes reconciles to a creatable base wo
     agentIds: [],
     changed: false,
   });
+});
+
+test("temporary route removal suspends agents without deleting the saved selection", () => {
+  const desired = {
+    ...saved(["hermes-claw"]),
+    modelAlias: "lemmacomputer-auto" as const,
+    requestedServiceClass: "lite" as const,
+  };
+  const suspended = compatibleSandboxSelection(document, desired, []);
+
+  assert.ok(suspended);
+  assert.deepEqual(suspended.agentIds, []);
+  assert.equal(suspended.modelAlias, null);
+  assert.equal(suspended.changed, true);
+  assert.equal(
+    shouldPersistCompatibleSandboxSelection(suspended, []),
+    false,
+    "route availability must not overwrite desired workspace agents",
+  );
+
+  const restored = compatibleSandboxSelection(document, desired, ["lite"]);
+  assert.ok(restored);
+  assert.deepEqual(restored.agentIds, ["hermes-claw"]);
+  assert.equal(restored.modelAlias, "lemmacomputer-auto");
+  assert.equal(restored.requestedServiceClass, "lite");
 });

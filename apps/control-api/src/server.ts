@@ -344,6 +344,11 @@ export const compatibleSandboxSelection = (
   };
 };
 
+export const shouldPersistCompatibleSandboxSelection = (
+  selection: CompatibleSandboxSelection,
+  publishedServiceClasses: readonly ExplicitWorkspaceServiceClass[] | null,
+) => selection.changed && publishedServiceClasses?.length !== 0;
+
 const constrainAssigned = <T extends string>(
   configured: unknown,
   constraint: { allow?: readonly T[]; deny: readonly T[] } | undefined,
@@ -1511,7 +1516,11 @@ export function createControlServer(
           409,
         );
       }
-      if (saved && selection.changed && store.saveSandboxSettings) {
+      if (
+        saved
+        && shouldPersistCompatibleSandboxSelection(selection, publishedServiceClasses)
+        && store.saveSandboxSettings
+      ) {
         await store.saveSandboxSettings(value.identity, {
           grantId,
           profileId: selection.profileId,
