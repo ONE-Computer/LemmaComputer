@@ -823,7 +823,10 @@ export class RoutingExecutionService {
         requestId: constrained.input.requestId,
         tenantId: constrained.input.tenantId,
         userId: constrained.input.subjectId,
-        teamId: team.id,
+        // Organization routing is scoped independently of the Team used for
+        // cost attribution. The real spending Team is persisted below, but it
+        // must not turn an organization policy into a Team-scoped policy.
+        teamId: resolved.policy.teamId,
         taskId: task.taskId,
         requestedServiceClass: constrained.input.requestedServiceClass,
         boundedSignals: constrained.input.boundedSignals,

@@ -330,6 +330,142 @@ test("legacy managed routes gain only exact code-owned reasoning qualifications"
   assert.equal(projected.deployments[1]?.capabilities.reasoning, null);
 });
 
+test("organization routing keeps Team as cost attribution only", async () => {
+  const secret = "organization-routing-cost-team-secret-at-least-32-characters";
+  const taskBindings = new UsageTaskBindingAuthority(secret);
+  const taskBinding = taskBindings.issue({
+    tenantId: "acme",
+    subjectId: "alex",
+    workspaceId: "workspace-1",
+    agentId: "hermes-cli",
+    contextKind: "chat",
+    taskId: "task-1",
+    requestedServiceClass: "lite",
+  });
+  const deployment = {
+    id: "deployment-lite",
+    provider: "openai" as const,
+    model: "openai/gpt-5.6-luna",
+    deployment: "openai/gpt-5.6-luna",
+    serviceClass: "lite" as const,
+    mappingVersionId: "mapping-1",
+    rateCardId: "rate-lite",
+    expectedCost: { amount: "0.000001", currency: "USD" },
+    capabilities: {
+      vision: true,
+      tools: true,
+      streaming: true,
+      contextTokens: 256000,
+      outputTokens: 16000,
+      residency: [],
+      reasoning: null,
+    },
+    approved: true,
+    healthy: true,
+    evaluationPassed: true,
+  };
+  const scope = {
+    allowedServiceClasses: ["lite" as const],
+    allowedDeploymentIds: [deployment.id],
+    explicitSelectionAllowed: true,
+    forceServiceClass: null,
+    safeDefault: "lite" as const,
+  };
+  const serviceClassPolicy = {
+    capabilityFloor: {
+      vision: false,
+      tools: false,
+      streaming: false,
+      contextTokens: 1,
+      outputTokens: 1,
+    },
+    evaluationThreshold: "qualified",
+    qualityPosture: "economy" as const,
+    costPosture: "lowest" as const,
+    latencyPosture: "fast" as const,
+    requiredModalities: ["text" as const],
+    requiredResidency: [],
+    eligibleDeploymentIds: [deployment.id],
+    safeDefault: true,
+  };
+  let recordedTeamId: string | undefined;
+  const service = new RoutingExecutionService(
+    {
+      decisionByRequest: async () => null,
+      resolveEffectivePolicy: async (_tenantId, teamId) => {
+        assert.equal(teamId, null, "route selection resolves at organization scope");
+        return {
+          rollout: {
+            id: "rollout-1",
+            tenantId: "acme",
+            teamId: null,
+            policyVersionId: "policy-1",
+            mappingVersionId: "mapping-1",
+            mode: "disabled",
+            fixedDeploymentId: deployment.id,
+            createdAt: new Date(),
+          },
+          policy: {
+            tenantId: "acme",
+            teamId: null,
+            policyVersionId: "policy-1",
+            mappingVersionId: "mapping-1",
+            mode: "disabled",
+            fixedDeploymentId: deployment.id,
+            billingCurrency: "USD",
+            serviceClassPolicies: {
+              lite: serviceClassPolicy,
+              balanced: serviceClassPolicy,
+              pro: serviceClassPolicy,
+            },
+            identity: scope,
+            team: null,
+            deployments: [deployment],
+            budgetEligibleDeploymentIds: [deployment.id],
+            approvedProviders: ["openai"],
+          },
+        };
+      },
+      recordDecision: async (input) => {
+        recordedTeamId = input.teamId;
+        return { status: "created" as const, id: "decision-1" };
+      },
+    } as unknown as RoutingStore,
+    {
+      getCurrentDefaultSpendingTeam: async () => ({
+        id: "cost-team-1",
+        displayName: "Everyone",
+        costCenterCode: null,
+        isRolloutFallback: false,
+      }),
+    },
+    new RoutingDecisionBindingAuthority(secret),
+    taskBindings,
+  );
+
+  const result = await service.decide({
+    schemaVersion: 1,
+    tenantId: "acme",
+    subjectId: "alex",
+    workspaceId: "workspace-1",
+    agentId: "hermes-cli",
+    taskBinding,
+    requestId: "request-1",
+    requestedServiceClass: "lite",
+    boundedSignals: [],
+    estimatedInputTokens: 1,
+    requiredCapabilities: {},
+    expectedUsage: [
+      { unit: "input_uncached_token", quantity: "1" },
+      { unit: "output_token", quantity: "1" },
+    ],
+  });
+
+  assert.equal(result.status, "created");
+  assert.equal(result.executedDeploymentId, deployment.id);
+  assert.equal(recordedTeamId, "cost-team-1", "the Team remains on the cost decision record");
+});
+
 test("chat tier options expose only policy-allowed and route-ready explicit tiers", async () => {
   const routes = [
     {
