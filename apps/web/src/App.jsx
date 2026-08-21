@@ -39,7 +39,7 @@ import { operationApi, workspaceApi, sandboxApi, connectionApi, approvalApi, aut
 import { SpendDashboard } from "./SpendDashboard.jsx";
 import { PersonalAiOverview } from "./PersonalAiOverview.jsx";
 import { UsageDataHealth } from "./UsageDataHealth.jsx";
-import { RoutingAdmin } from "./RoutingAdmin.jsx";
+import { ModelsRoutingAdmin } from "./ModelsRoutingAdmin.jsx";
 import { AiControlPlane, aiControlPlaneTabs } from "./AiControlPlane.jsx";
 import { AiControlPlaneOverview } from "./AiControlPlaneOverview.jsx";
 import { emissionsRegionOptions } from "./ai-emissions.js";
@@ -57,6 +57,7 @@ import { ActivityPanel, ActivityToggle } from "./ActivityPanel.jsx";
 import { providerModelCapabilityLabels } from "./provider-inventory.js";
 import { customerPasskeyApi } from "./customer-auth-client.js";
 import { reconcileWorkspaceInventory, replaceWorkspaceInInventory } from "./workspace-inventory.js";
+import { configurationRecoveryFor, errorMessage } from "./configuration-recovery.js";
 import {
   protectedOrganizationConstraintsFromEditor,
   protectedPolicyAllowed,
@@ -118,6 +119,18 @@ const chatServiceClassOptions = [
   { value: "balanced", label: "Balanced · everyday work" },
   { value: "pro", label: "Pro · highest capability" },
 ];
+
+function ConfigurationErrorDetail({ error, access }) {
+  const recovery = configurationRecoveryFor(error);
+  if (!recovery) return <span>{errorMessage(error)}</span>;
+  const canManage = Boolean(access?.[recovery.permission]);
+  return <span className="configuration-recovery-detail">
+    <span>{recovery.message}</span>
+    {canManage
+      ? <a className="configuration-recovery-link" href={recovery.href}>{recovery.action}</a>
+      : <span>{recovery.contact}</span>}
+  </span>;
+}
 const chatServiceClassLabel = Object.fromEntries(chatServiceClassOptions.map((item) => [item.value, item.label.split(" · ")[0]]));
 const chatServiceClassValues = new Set(chatServiceClassOptions.map((item) => item.value));
 const chatServiceClassUnavailableCopy = {
@@ -331,6 +344,7 @@ const aiControlPlaneViews = new Set([...aiControlPlaneTabs.map((tab) => tab.id),
 const aiControlPlaneViewFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
   const view = params.get("section") ?? "overview";
+  if (params.get("view") === "ai-control-plane" && (view === "model-routes" || view === "pricing")) return "models-providers";
   return params.get("view") === "ai-control-plane" && aiControlPlaneViews.has(view) ? view : "overview";
 };
 const chatSessionFromLocation = () => {
@@ -532,7 +546,7 @@ function WorkspaceDeletionDialog({ request, onChange, onConfirm, onClose }) {
   );
 }
 
-function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
+function WorkspaceScreen({ section, workspaces, loading, apiError, configurationAccess, actionWorkspaceId, canCreateWorkspace, canManageWorkspace, canManageAnyWorkspace, canManagePolicy, canManageNetworkAccess, onSectionChange, onOpen, onRestart, onStop, onDelete, onCreate, onManage, workspaceMembers, adminLoading, workspaceError, workspaceBusyId, onWorkspaceCommand, onWorkspaceNetworkChanged, onCreateSecurityGroup, policyUsers, onGuardrailsSaved }) {
   const organizationSection = section === "organization" && canManageAnyWorkspace;
   const policySection = section === "policies" && canManagePolicy;
   return (
@@ -562,7 +576,7 @@ function WorkspaceScreen({ section, workspaces, loading, apiError, actionWorkspa
         : policySection ? <ProtectedWorkspacePolicySection users={policyUsers} workspaceMembers={workspaceMembers} onReviewWorkspaces={canManageAnyWorkspace ? () => onSectionChange("organization") : undefined} onSaved={onGuardrailsSaved} />
           : <>
 
-      {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong>{apiError}</span></div>}
+      {apiError && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace service unavailable</strong><ConfigurationErrorDetail error={apiError} access={configurationAccess} /></span></div>}
 
       {loading ? (
         <div className="workspace-overview-empty" role="status">Loading your workspaces…</div>
@@ -1823,7 +1837,7 @@ function TeamsAdminSection({ teams, users, loading, busy, onLoad, onCreate, onUp
     <section className="admin-team-section" aria-labelledby="admin-teams-heading">
       <div className="admin-team-heading">
         <div><p>Spend allocation</p><h2 id="admin-teams-heading">Teams</h2><span>Team membership decides where AI usage is charged. It does not grant workspace, model, tool, connector, or administrator access.</span></div>
-        <button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button>
+        <div className="admin-team-heading-actions"><button className="primary-button compact-button" type="button" onClick={openCreate}>Add Team</button></div>
       </div>
       {loading ? <p className="admin-team-empty">Loading Teams…</p> : !teams.length ? <p className="admin-team-empty">No Teams have been created yet.</p> : <div className="admin-team-list">
         {teams.map((team) => <article key={team.id}>
@@ -2532,7 +2546,7 @@ function ProtectedWorkspacePolicySection({ users, workspaceMembers, onReviewWork
         <ProtectedPolicyResourceEditor legend="Workspace types" description="Choose which workspace types members may use. Restricted workspaces reach only approved destinations; Internet workspaces reach the public web except blocked destinations. Per-workspace exceptions are managed in Network access." values={protectedPolicyAllowed(available.workspaceProfiles).filter((value) => protectedPolicyAssignableProfileIds.has(value))} labels={protectedPolicyProfileNames} selected={editor.workspaceProfiles} onChange={(workspaceProfiles) => setEditor({ ...editor, workspaceProfiles })} />
         <ProtectedPolicyResourceEditor legend="Agents" description="Choose the approved agent experiences members may select." values={protectedPolicyAllowed(available.agents)} labels={protectedPolicyAgentNames} selected={editor.agents} onChange={(agents) => setEditor({ ...editor, agents })} planned={protectedPolicyPlannedAgents} />
         <ProtectedPolicyResourceEditor legend="Applications" description="Members remain free to choose from these approved workspace applications." values={protectedPolicyAllowed(available.applications)} labels={applicationNames} selected={editor.applications} onChange={(applications) => setEditor({ ...editor, applications })} />
-        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose the Lite, Balanced, and Pro service levels members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
+        <ProtectedPolicyResourceEditor legend="Service levels" description="Choose which published organization routes members may request." values={protectedPolicyAllowed(available.serviceClasses).filter((value) => protectedPolicyAssignableServiceClasses.has(value))} labels={protectedPolicyServiceClassNames} selected={editor.serviceClasses} onChange={(serviceClasses) => setEditor({ ...editor, serviceClasses })} />
         <fieldset className="workspace-policy-editor-group workspace-policy-editor-limits"><legend>AI usage and data transfer</legend><p>Set organization-wide ceilings for thinking and text clipboard transfer.</p><div className="workspace-policy-limit-grid">
           <label><span>Maximum thinking</span><SelectMenu value={editor.maximumReasoningEffort} ariaLabel="Maximum thinking level" options={[...(editor.maximumReasoningEffort ? [] : [{ value: "", label: "Choose a thinking level", disabled: true }]), ...protectedPolicyReasoningOptions.filter((value) => protectedPolicyReasoningRank[value] <= protectedPolicyReasoningRank[available.maximumReasoningEffort]).map((value) => ({ value, label: protectedPolicyReasoningName(value) }))]} onValueChange={(maximumReasoningEffort) => setEditor({ ...editor, maximumReasoningEffort })} /></label>
           <label><span>Clipboard limit (KB)</span><input type="number" min="1" max={Math.round(available.clipboard.maxBytes / 1024)} value={editor.clipboardMaxKb} onChange={(event) => setEditor({ ...editor, clipboardMaxKb: Number(event.target.value) })} /></label>
@@ -3417,7 +3431,45 @@ const explicitWorkspaceServiceClass = (value, options) => (
     : options.some((option) => option.value === "balanced") ? "balanced" : options[0]?.value ?? "balanced"
 );
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
+function WorkspaceAiReadinessNotice({ title, canManage }) {
+  return <div className="workspace-ai-readiness" role="status">
+    <Info24Regular aria-hidden="true" />
+    <span>
+      <strong>{title}</strong>
+      <span>AI needs a connected provider model with complete pricing and a published organization route available to this workspace.</span>
+      {canManage
+        ? <a className="workspace-inline-recovery-link" href="?view=ai-control-plane&section=models-providers">Review models &amp; routing</a>
+        : <span>Contact your administrator to finish the organization’s models and routing.</span>}
+    </span>
+  </div>;
+}
+
+const workspaceBuildSteps = [
+  "Securing the workspace boundary",
+  "Applying approved apps and model routes",
+  "Starting governed services",
+  "Checking the final connections",
+];
+
+function WorkspaceCreationProgress({ name }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setStep((current) => (current + 1) % workspaceBuildSteps.length), 1600);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <div className="workspace-creation-progress-layer">
+    <section className="workspace-creation-progress" role="status" aria-live="polite" aria-busy="true">
+      <span className="workspace-creation-spinner"><ArrowClockwise24Regular aria-hidden="true" /></span>
+      <span className="workspace-creation-eyebrow">Building workspace</span>
+      <h2>{name}</h2>
+      <p>{workspaceBuildSteps[step]}…</p>
+      <span className="workspace-creation-stream" aria-hidden="true">identity · policy · network · agents · storage</span>
+      <small>You can leave this with us. The workspace will appear as soon as preparation begins.</small>
+    </section>
+  </div>;
+}
+
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState(null);
@@ -3427,6 +3479,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [pendingProfileId, setPendingProfileId] = useState("");
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
+  const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
+  const aiSetupReady = Boolean(availableServiceClasses.length && settings?.availableModels?.length);
+  const canManageAiSetup = Boolean(configurationAccess?.provider || configurationAccess?.modelRoutes || configurationAccess?.pricing);
 
   useEffect(() => {
     if (!settings) return;
@@ -3435,11 +3490,11 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       : null;
     setProfileId(supportedDefault?.id ?? settings.profileId);
     setApplicationIds(settings.applicationIds);
-    setModelAlias(settings.modelAlias);
+    setModelAlias(aiSetupReady ? settings.modelAlias : null);
     setRequestedServiceClass(explicitWorkspaceServiceClass(settings.requestedServiceClass, explicitWorkspaceServiceClassOptions(settings)));
-    setAgentIds(settings.agentIds);
+    setAgentIds(aiSetupReady ? settings.agentIds : []);
     setSecurityGroupVersionId(settings.securityGroup?.assignmentSource === "custom" ? settings.securityGroup.id : "inherit");
-  }, [creatingWorkspace, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
+  }, [creatingWorkspace, aiSetupReady, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
 
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
@@ -3455,18 +3510,20 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const toggleApplication = (applicationId) => setApplicationIds((current) => (
     current.includes(applicationId) ? current.filter((id) => id !== applicationId) : [...current, applicationId]
   ));
-  const toggleAgent = (agentId) => setAgentIds((current) => {
-    if (current.includes(agentId)) {
-      const next = current.filter((id) => id !== agentId);
-      if (next.length === 0) setModelAlias(null);
-      return next;
-    }
-    if (current.length === 0) setModelAlias(settings.modelAlias ?? settings.availableModels[0]?.alias ?? null);
-    return [...current, agentId];
-  });
+  const toggleAgent = (agentId) => {
+    if (!aiSetupReady) return;
+    setAgentIds((current) => {
+      if (current.includes(agentId)) {
+        const next = current.filter((id) => id !== agentId);
+        if (next.length === 0) setModelAlias(null);
+        return next;
+      }
+      if (current.length === 0) setModelAlias(settings.modelAlias ?? settings.availableModels[0]?.alias ?? null);
+      return [...current, agentId];
+    });
+  };
   const selectedProfile = settings?.availableProfiles.find((profile) => profile.id === profileId) ?? settings?.profile;
   const disposableOpen = selectedProfile?.executionMode === "disposable-open";
-  const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
   const selectableProfiles = settings?.availableProfiles.filter((profile) => profile.id !== "kasm-persistent-standard" || (!creatingWorkspace && profile.id === settings.profileId)) ?? [];
   const openProfileAvailable = selectableProfiles.some((profile) => profile.executionMode === "disposable-open");
   const supportedProfileSelected = selectableProfiles.some((profile) => profile.id === profileId);
@@ -3503,9 +3560,9 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
       </header>
-      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong>{error}</span></div>}
+      {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Workspace configuration unavailable</strong><ConfigurationErrorDetail error={error} access={configurationAccess} /></span></div>}
       {loading || !settings ? <p className="sandbox-loading">Loading workspace configuration…</p> : (
-        <form className="sandbox-management-form" onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
+        <form className="sandbox-management-form" aria-busy={saving || undefined} onSubmit={(event) => { event.preventDefault(); onSave({ grantId: settings.grantId, profileId, applicationIds, modelAlias: agentIds.length ? modelAlias : null, requestedServiceClass, agentIds, ...(canManageFirewall ? { securityGroupVersionId } : {}) }); }}>
           <section className="sandbox-management-section" aria-labelledby="workspace-profile-heading">
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><ShieldCheckmark24Regular aria-hidden="true" /></span><span><h2 id="workspace-profile-heading">Workspace access</h2><p>{openProfileAvailable ? "Choose a Restricted workspace for organization work or an Internet workspace for non-sensitive work. This does not choose your AI agent." : "Your organization currently allows Restricted workspace access. This does not choose your AI agent."}</p></span></div>
             <fieldset className="workspace-profile-options"><legend className="sr-only">Workspace access mode</legend>{selectableProfiles.map((profile) => {
@@ -3535,15 +3592,16 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             <div className="application-roadmap two-column" aria-label="Planned application catalog">{pendingApplications.map((application) => <div key={application.name}><span><strong>{application.name}</strong><small>{application.type}</small></span><span className="coming-soon">Coming soon</span><p>{application.detail}</p></div>)}</div>
           </section>
 
-          <section className="sandbox-management-section" aria-labelledby="sandbox-agents-heading">
+          <section className={`sandbox-management-section${aiSetupReady ? "" : " workspace-ai-section-unavailable"}`} aria-labelledby="sandbox-agents-heading" aria-disabled={!aiSetupReady || undefined}>
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-agents-heading">AI agents</h2><p>Add AI agents only when they are needed. Each selected agent receives a separate governed identity, model grant, and tool scope.</p></span></div>
+            {!aiSetupReady && <WorkspaceAiReadinessNotice title="AI agents unavailable" canManage={canManageAiSetup} />}
             <div className="agent-family-grid">{agentChoices.map((family) => <section className="agent-family" key={family.family}><h3>{family.family}</h3>{family.choices.map((choice) => {
               const agent = choice.catalogId ? settings.availableAgents.find((item) => item.id === choice.catalogId) : null;
               const selected = agent && agentIds.includes(agent.id);
               const unavailableCopy = unavailableAgentCopy(choice);
-              return agent ? <label className={`agent-choice${selected ? " selected" : ""}`} key={choice.name}><input type="checkbox" checked={selected} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
+              return agent ? <label className={`agent-choice${selected ? " selected" : ""}${aiSetupReady ? "" : " disabled"}`} key={choice.name}><input type="checkbox" checked={selected} disabled={!aiSetupReady} onChange={() => toggleAgent(agent.id)} /><span className="agent-check" aria-hidden="true">{selected && <Checkmark16Filled />}</span><span><strong>{choice.name}</strong><small>{agent.displayName} · v{agent.clientVersion}</small><em>{agent.description}</em></span></label> : <div className="agent-choice unavailable" key={choice.name}><span><strong>{choice.name}</strong><small>{unavailableCopy.status}</small><em>{unavailableCopy.detail}</em></span></div>;
             })}</section>)}</div>
-            {!agentIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No AI agents selected. This workspace does not require a model provider or receive AI credentials.</p>}
+            {aiSetupReady && !agentIds.length && <p className="workspace-profile-note"><Info24Regular aria-hidden="true" />No AI agents selected. This workspace does not require a model provider or receive AI credentials.</p>}
           </section>
 
           {showChannels && agentIds.length > 0 && <TelegramChannelSection
@@ -3559,9 +3617,10 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
             onCreateCredential={onCreateCredential}
           />}
 
-          {agentIds.length > 0 && <section className="sandbox-management-section" aria-labelledby="sandbox-model-heading">
+          {(agentIds.length > 0 || !aiSetupReady) && <section className={`sandbox-management-section${aiSetupReady ? "" : " workspace-ai-section-unavailable"}`} aria-labelledby="sandbox-model-heading" aria-disabled={!aiSetupReady || undefined}>
             <div className="sandbox-management-heading"><span className="sandbox-section-icon"><Bot24Regular aria-hidden="true" /></span><span><h2 id="sandbox-model-heading">Default model mode</h2><p>Choose the default quality and cost mode for this workspace. You can choose a different mode for each conversation in Chat.</p></span></div>
-            <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>
+            {!aiSetupReady && <WorkspaceAiReadinessNotice title="Model modes unavailable" canManage={canManageAiSetup} />}
+            {aiSetupReady && <div className="model-options sandbox-model-options" role="radiogroup" aria-labelledby="sandbox-model-heading">{availableServiceClasses.map((serviceClass) => <label className={requestedServiceClass === serviceClass.value ? "selected" : ""} key={serviceClass.value}><input type="radio" name="model-route" value={serviceClass.value} checked={requestedServiceClass === serviceClass.value} onChange={() => setRequestedServiceClass(serviceClass.value)} /><span><strong>{serviceClass.displayName}</strong><small>{serviceClass.description}</small></span>{requestedServiceClass === serviceClass.value && <CheckmarkCircle24Regular aria-hidden="true" />}</label>)}</div>}
           </section>}
 
           <section className="sandbox-management-section" aria-labelledby="sandbox-security-heading">
@@ -3594,13 +3653,14 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
 
           <div className="sandbox-management-footer">
             <div><strong>{creatingWorkspace ? "Ready to create" : "Workspace manifest"}</strong><small>Schema v2 · {selectedProfile?.displayName} · {applicationIds.length || agentIds.length ? `${applicationIds.length} app${applicationIds.length === 1 ? "" : "s"} · ${agentIds.length} AI agent${agentIds.length === 1 ? "" : "s"}` : "base workspace"}</small></div>
-            <button className="primary-button" type="submit" disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview}>{saving ? creatingWorkspace ? "Creating workspace" : "Saving configuration" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
+            <button className="primary-button" type="submit" aria-busy={saving || undefined} disabled={(!creatingWorkspace && !dirty) || saving || !canChange || !supportedProfileSelected || selectedSecurityGroup?.needsReview || (!aiSetupReady && agentIds.length > 0)}>{saving && <ArrowClockwise24Regular className="workspace-inline-spinner" aria-hidden="true" />}{saving ? creatingWorkspace ? "Building workspace…" : "Saving configuration…" : creatingWorkspace ? "Create workspace" : "Save configuration"}</button>
           </div>
           {!canChange && <p className="sandbox-stop-note"><Info24Regular aria-hidden="true" />Stop this workspace before changing its access mode, applications, agents, or service level. Security-group changes apply live.</p>}
           <details className="sandbox-json"><summary>View workspace manifest JSON</summary><pre>{JSON.stringify(settings.manifest, null, 2)}</pre></details>
         </form>
       )}
     </div>
+    {saving && creatingWorkspace && <WorkspaceCreationProgress name={workspaceName({ grantId: selectedGrantId })} />}
     {pendingProfile && <ConfirmDialog title={`Change to ${pendingProfile.displayName}?`} description="The current custom security group is not compatible with this workspace type. Continuing will return network access to the new workspace type default." confirmLabel="Change workspace type" onConfirm={() => { setProfileId(pendingProfile.id); setSecurityGroupVersionId("inherit"); setPendingProfileId(""); }} onCancel={() => setPendingProfileId("")} />}
   </>;
 }
@@ -4391,9 +4451,9 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
               <span>{configured ? `${connection.allowedUserCount} approved ${connection.allowedUserCount === 1 ? "sender" : "senders"} · token version ${connection.tokenVersion}` : "One dedicated bot credential can be attached to this workspace."}</span>
             </div>
             {!workspaceExists ? (
-              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>Available after creation</strong>Create this workspace without a channel, then return here if you want to connect Telegram.</span></div>
+              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>Available after creation</strong><span>Create this workspace without a channel, then return here to attach Telegram.</span><a className="workspace-inline-recovery-link" href="?view=settings&section=credentials">Set up a Telegram credential</a></span></div>
             ) : !agentOptions.length ? (
-              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>No eligible agent</strong>Save Hermes Agent, Claude CLI, or Codex CLI in this workspace configuration first.</span></div>
+              <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>No eligible agent</strong><span>Save Hermes Agent, Claude CLI, or Codex CLI in this workspace configuration first.</span><a className="workspace-inline-recovery-link" href="#sandbox-agents-heading">Review AI agents</a></span></div>
             ) : <>
               {availableCredentials.length ? <label>
                 <span>Credential</span>
@@ -4741,13 +4801,14 @@ function ChatConversation({
   onFork,
   archived = false,
   sourceWorkspaceName = "",
+  configurationAccess,
 }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [historyState, setHistoryState] = useState("ready");
-  const [historyError, setHistoryError] = useState("");
+  const [historyError, setHistoryError] = useState(null);
   const [historyReload, setHistoryReload] = useState(0);
   const [chatActionsOpen, setChatActionsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -4841,14 +4902,14 @@ function ChatConversation({
       setAttachments([]);
       setAttachmentError("");
       setHistoryState("ready");
-      setHistoryError("");
+      setHistoryError(null);
       clearError();
       return undefined;
     }
     if (loadedSessionRef.current === sessionId) return undefined;
     let active = true;
     setHistoryState("loading");
-    setHistoryError("");
+    setHistoryError(null);
     setSelectedActivityTurnId("");
     setMessages([]);
     chatApi.messages(sessionId)
@@ -4860,7 +4921,7 @@ function ChatConversation({
       })
       .catch((requestError) => {
         if (!active) return;
-        setHistoryError(requestError.message);
+        setHistoryError(requestError);
         setHistoryState("error");
       });
     return () => { active = false; };
@@ -4975,7 +5036,7 @@ function ChatConversation({
         ]);
         onSessionCreated?.(threadId, sessionId);
       } catch (requestError) {
-        setHistoryError(requestError.message);
+        setHistoryError(requestError);
         setHistoryState("error");
         return;
       }
@@ -5009,7 +5070,7 @@ function ChatConversation({
       .then(() => {
         if (sessionRef.current === sessionId) setHistoryReload((value) => value + 1);
       })
-      .catch((requestError) => setHistoryError(requestError.message));
+      .catch((requestError) => setHistoryError(requestError));
   };
 
   const visibleMessages = messages.filter((item) => item.role === "user" || item.role === "assistant");
@@ -5129,7 +5190,7 @@ function ChatConversation({
       {(error || historyError) && (
         <div className="workspace-error chat-error" role="alert">
           <Info24Regular aria-hidden="true" />
-          <span>{error?.message || historyError}</span>
+          <ConfigurationErrorDetail error={error || historyError} access={configurationAccess} />
           {historyError && (
             <button type="button" className="chat-error-retry" onClick={() => setHistoryReload((value) => value + 1)}>
               Try again
@@ -5332,6 +5393,7 @@ export function ChatScreen({
   onLoadOlder,
   newThreadRequest = 0,
   onRunningSessionIdsChange,
+  configurationAccess,
 }) {
   const [agents, setAgents] = useState([]);
   const [serviceClassAvailability, setServiceClassAvailability] = useState([]);
@@ -5397,7 +5459,7 @@ export function ChatScreen({
       setSessionNextCursor(page.nextCursor ?? null);
       publishHistoryMetadata(page.nextCursor ?? null, false);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError);
       publishHistoryMetadata(sessionNextCursor, false);
     } finally {
       if (append) setSessionLoadingMore(false);
@@ -5485,7 +5547,7 @@ export function ChatScreen({
       .catch((requestError) => {
         if (!active) return;
         setStatus("error");
-        setError(requestError.message);
+        setError(requestError);
       });
     return () => { active = false; };
   }, [workspace?.id, workspaceState, reload]);
@@ -5509,7 +5571,7 @@ export function ChatScreen({
       .catch((requestError) => {
         if (!active) return;
         setStatus("error");
-        setError(requestError.message);
+        setError(requestError);
       });
     return () => { active = false; };
   }, [workspace?.id, workspaceState, activeAgentId, reload]);
@@ -5599,7 +5661,7 @@ export function ChatScreen({
       onAgentChange?.(workspace.id, catalogId);
       onSessionChange(created.id);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError);
     }
   };
   const selectRequestedServiceClass = (serviceClass) => {
@@ -5694,7 +5756,9 @@ export function ChatScreen({
                   ? `${agentName} is not responding in this workspace. Restart it once to apply the latest managed agent runtime.`
                   : offline
                     ? `Start the workspace to bring ${agentName}, its sessions, and its connections online.`
-                    : error || `${agentName} is temporarily unavailable.`}</p>
+                    : error
+                      ? <ConfigurationErrorDetail error={error} access={configurationAccess} />
+                      : `${agentName} is temporarily unavailable.`}</p>
             {status !== "loading" && !unavailable && (
               <div className="chat-recovery-actions">
                 <button
@@ -5767,6 +5831,7 @@ export function ChatScreen({
               onFork={forkThread}
               archived={archived}
               sourceWorkspaceName={savedSession ? workspaceName({ grantId: savedSession.workspaceGrantId }) : ""}
+              configurationAccess={configurationAccess}
             />
           </div>;
         })}
@@ -5806,7 +5871,7 @@ export function App() {
   const [siteBusyId, setSiteBusyId] = useState("");
   const [reviewedSkills, setReviewedSkills] = useState([]);
   const [workspaceActionId, setWorkspaceActionId] = useState("");
-  const [apiError, setApiError] = useState("");
+  const [apiError, setApiError] = useState(null);
   const [schedules, setSchedules] = useState([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [scheduleBusyId, setScheduleBusyId] = useState("");
@@ -5881,7 +5946,7 @@ export function App() {
   const [sandboxSaving, setSandboxSaving] = useState(false);
   const [sandboxCreateOpen, setSandboxCreateOpen] = useState(false);
   const [selectedSandboxGrantId, setSelectedSandboxGrantId] = useState(null);
-  const [sandboxError, setSandboxError] = useState("");
+  const [sandboxError, setSandboxError] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [workspaceDeletion, setWorkspaceDeletion] = useState(null);
   const [revisionPromptOpen, setRevisionPromptOpen] = useState(false);
@@ -5910,11 +5975,14 @@ export function App() {
   const canManageUsage = hasCapability("usage.manage");
   const canReadAudit = hasCapability("audit.read");
   const canOpenAiControlPlane = canReadUsage || canManageUsage || canManageAnyProvider || canManagePolicy;
+  const configurationAccess = {
+    provider: canManageAnyProvider,
+    modelRoutes: canManagePolicy || hasCapability("provider.manage"),
+    pricing: canManageUsage,
+  };
   const availableAiControlPlaneTabs = aiControlPlaneTabs.filter((tab) => ({
     overview: canReadUsage,
-    "models-providers": canManageAnyProvider,
-    "model-routes": canManagePolicy || hasCapability("provider.manage"),
-    pricing: canReadUsage || canManageUsage,
+    "models-providers": canManageAnyProvider || canManagePolicy || canReadUsage || canManageUsage,
     "teams-budgets": canManageUsage,
     "data-health": canReadUsage || canManageUsage,
   }[tab.id]));
@@ -6159,7 +6227,7 @@ export function App() {
   };
 
   const showApiError = (error) => {
-    setApiError(error.message);
+    setApiError(error);
     setToast("");
   };
 
@@ -6240,7 +6308,7 @@ export function App() {
 
   useEffect(() => {
     const providerPageOpen = activeNav === "AI control plane" && aiControlPlaneView === "models-providers";
-    if (!session || !providerPageOpen || !canManageAnyProvider) return undefined;
+    if (!session || !providerPageOpen) return undefined;
     let active = true;
     setProviderSettingsLoading(true);
     adminApi.providerSettings()
@@ -6248,7 +6316,7 @@ export function App() {
       .catch((error) => { if (active) setProviderSettingsError(error.message); })
       .finally(() => { if (active) setProviderSettingsLoading(false); });
     return () => { active = false; };
-  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id, canManageAnyProvider]);
+  }, [activeNav, aiControlPlaneView, settingsView, session?.user.id]);
 
   useEffect(() => {
     if (!session || activeNav !== "Sites") return undefined;
@@ -6434,8 +6502,8 @@ export function App() {
     const selectedWorkspace = homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId);
     setSandboxLoading(true);
     sandboxApi.settings(selectedSandboxGrantId)
-      .then((value) => { setSandboxSettings(value); setSandboxError(""); })
-      .catch((error) => setSandboxError(error.message))
+      .then((value) => { setSandboxSettings(value); setSandboxError(null); })
+      .catch((error) => setSandboxError(error))
       .finally(() => setSandboxLoading(false));
     if (selectedWorkspace) {
       setTelegramLoading(true);
@@ -7038,9 +7106,9 @@ export function App() {
 
   const deleteProviderSetting = async (provider) => {
     if (!await requestConfirmation({
-      title: "Delete " + providerTitle(provider) + " key?",
-      description: "The encrypted LiteLLM credential and all routes for this provider will be removed. Active workspace grants for that model will be revoked.",
-      confirmLabel: "Delete provider key",
+      title: "Disconnect " + providerTitle(provider) + "?",
+      description: "The stored API key and every organization route using this provider will be removed. Affected workspace grants are revoked; historical pricing and route versions remain available for audit.",
+      confirmLabel: "Disconnect provider",
       danger: true,
     })) return null;
     return runProviderAction(async () => {
@@ -7048,8 +7116,8 @@ export function App() {
       const providers = await refreshProviderSettings();
       return { ...result, provider: providers.find((item) => item.provider === provider) };
     }, (result) => setToast(result.restartRequired
-      ? "Provider key deleted. Affected workspace access was revoked; restart those workspaces."
-      : "Provider key deleted."));
+      ? "Provider disconnected. Affected workspace access was revoked; restart those workspaces."
+      : "Provider disconnected."));
   };
 
   const saveWorkspaceSettings = async (configuration) => {
@@ -7080,7 +7148,7 @@ export function App() {
         window.requestAnimationFrame(() => mainContentRef.current?.focus());
       }
     } catch (error) {
-      setSandboxError(error.message);
+      setSandboxError(error);
     } finally {
       setSandboxSaving(false);
     }
@@ -7160,7 +7228,8 @@ export function App() {
 
 
   const selectAiControlPlaneView = (view = "overview", historyMode = "push") => {
-    const requestedView = aiControlPlaneViews.has(view) ? view : "overview";
+    const normalizedView = view === "model-routes" || view === "pricing" ? "models-providers" : view;
+    const requestedView = aiControlPlaneViews.has(normalizedView) ? normalizedView : "overview";
     const nextView = requestedView === "spend" && canReadUsage
       ? requestedView
       : availableAiControlPlaneTabs.some((tab) => tab.id === requestedView)
@@ -7172,6 +7241,7 @@ export function App() {
     url.searchParams.set("view", "ai-control-plane");
     if (nextView === "overview") url.searchParams.delete("section");
     else url.searchParams.set("section", nextView);
+    url.searchParams.delete("focus");
     url.searchParams.delete("chat");
     const nextLocation = `${url.pathname}${url.search}`;
     if (historyMode === "replace") window.history.replaceState({}, "", nextLocation);
@@ -7856,6 +7926,7 @@ export function App() {
             workspaces={homeWorkspaces}
             loading={homeWorkspacesLoading}
             apiError={apiError}
+            configurationAccess={configurationAccess}
             actionWorkspaceId={workspaceActionId}
             canCreateWorkspace={hasCapability("workspace.create")}
             canManageWorkspace={(workspaceId) => hasScopedCapability("workspace.manage", "workspace", workspaceId) || hasScopedCapability("workspace.manage_own", "workspace", workspaceId)}
@@ -7930,6 +8001,7 @@ export function App() {
           historyHasMore={chatHistoryHasMore}
           historyLoadingMore={chatHistoryLoadingMore}
           onLoadOlder={() => setChatHistoryLoadRequest((value) => value + 1)}
+          configurationAccess={configurationAccess}
         />}
         {activeNav === "Workspace" && selectedSandboxGrantId && <WorkspaceConfigurationScreen
           settings={sandboxSettings}
@@ -7937,6 +8009,7 @@ export function App() {
           loading={sandboxLoading}
           saving={sandboxSaving}
           error={sandboxError}
+          configurationAccess={configurationAccess}
           selectedGrantId={selectedSandboxGrantId}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
@@ -7987,23 +8060,26 @@ export function App() {
           <AiControlPlane activeView={aiControlPlaneView} onViewChange={selectAiControlPlaneView} tabs={availableAiControlPlaneTabs}>
             {aiControlPlaneView === "overview" && canReadUsage && <AiControlPlaneOverview
               onOpenSpend={() => selectAiControlPlaneView("spend")}
-              onOpenRouting={() => selectAiControlPlaneView("model-routes")}
-              onOpenPricing={() => selectAiControlPlaneView("pricing")}
+              onOpenRouting={() => selectAiControlPlaneView("models-providers")}
+              onOpenPricing={() => selectAiControlPlaneView("models-providers")}
             />}
             {aiControlPlaneView === "spend" && canReadUsage && <SpendDashboard onBack={() => selectAiControlPlaneView("overview")} />}
-            {aiControlPlaneView === "data-health" && (canReadUsage || canManageUsage) && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("pricing")} />}
-            {aiControlPlaneView === "models-providers" && canManageAnyProvider && <ProviderSettingsScreen
+            {aiControlPlaneView === "data-health" && (canReadUsage || canManageUsage) && <UsageDataHealth onOpenPricing={() => selectAiControlPlaneView("models-providers")} />}
+            {aiControlPlaneView === "models-providers" && <ModelsRoutingAdmin
               providers={providerSettings}
-              loading={providerSettingsLoading}
-              busy={providerSettingsBusy}
-              error={providerSettingsError}
-              onSave={saveProviderSetting}
-              onTest={testProviderSetting}
-              onDisable={disableProviderSetting}
-              onDelete={deleteProviderSetting}
+              providerLoading={providerSettingsLoading}
+              providerBusy={providerSettingsBusy}
+              providerError={providerSettingsError}
+              canManageProviders={canManageAnyProvider}
+              canManageRouting={canManagePolicy || hasCapability("provider.manage")}
+              canManagePricing={canManageUsage}
+              focus={new URLSearchParams(window.location.search).get("focus")}
+              draftScope={{ tenantId: session.tenant.id, userId: session.user.id }}
+              onSaveProvider={saveProviderSetting}
+              onTestProvider={testProviderSetting}
+              onDisableProvider={disableProviderSetting}
+              onDeleteProvider={deleteProviderSetting}
             />}
-            {aiControlPlaneView === "model-routes" && (canManagePolicy || hasCapability("provider.manage")) && <RoutingAdmin draftScope={{ tenantId: session.tenant.id, userId: session.user.id }} />}
-            {aiControlPlaneView === "pricing" && (canReadUsage || canManageUsage) && <RoutingAdmin section="pricing" />}
             {aiControlPlaneView === "teams-budgets" && canManageUsage && <TeamsAdminSection
               teams={adminTeams}
               users={adminUsers}

@@ -81,6 +81,14 @@ test("a new organization has no policy ceiling and its administrator can create 
   const identityPolicyStore = {
     getPrincipal: async (userId: string) => userId === administrator.userId ? administrator : null,
     getEffectivePolicy: async (userId: string) => userId === administrator.userId ? legacyPolicy : null,
+    listUsers: async () => [{
+      userId: administrator.userId,
+      email: administrator.email,
+      displayName: administrator.displayName,
+      roles: administrator.roles,
+      status: "active",
+      effectivePolicy: legacyPolicy,
+    }],
     getWorkspaceEgressSecurityGroup: async ({ profileId }: { profileId: string }) => {
       egressLookups += 1;
       return profileId === "disposable-open-v1" ? fullWebFallback : managedFallback;
@@ -90,16 +98,45 @@ test("a new organization has no policy ceiling and its administrator can create 
   const protectedWorkspacePolicy = {
     currentOrganizationPolicy: async () => null,
   } as unknown as ProtectedWorkspacePolicyAdministrationBoundary;
+  let routeVersion = 1;
+  let currentMapping = {
+    id: "11111111-1111-4111-8111-111111111111",
+    tenantId: identity.tenantId,
+    revisionNote: "Initial Lite route",
+    createdBy: administrator.userId,
+    createdAt: new Date("2026-08-12T08:00:00.000Z"),
+    deployments: [{ serviceClass: "lite" as const }],
+  };
   const routingStore = {
-    latestMappingVersion: async () => ({
-      deployments: ["lite", "balanced", "pro"].map((serviceClass) => ({ serviceClass })),
-    }),
+    latestMappingVersion: async () => currentMapping,
+    createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => {
+      routeVersion += 1;
+      currentMapping = {
+        id: `11111111-1111-4111-8111-${String(routeVersion).padStart(12, "0")}`,
+        tenantId: input.tenantId,
+        revisionNote: input.revisionNote,
+        createdBy: input.createdBy,
+        createdAt: new Date("2026-08-12T09:00:00.000Z"),
+        deployments: input.deployments.map((deployment, index) => ({
+          ...deployment,
+          id: `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`,
+          providerAccountId: deployment.providerAccountId ?? null,
+          region: deployment.region ?? null,
+          providerServiceTier: deployment.providerServiceTier ?? null,
+          rateCardId: deployment.rateCardId ?? null,
+        })),
+      };
+      return currentMapping;
+    },
+    createPolicy: async () => "33333333-3333-4333-8333-333333333333",
+    createRollout: async () => ({}),
   } as unknown as RoutingStore;
-  let createdPolicy: RuntimePolicy | null = null;
+  const createdPolicies: RuntimePolicy[] = [];
   let createdEgressProxy: EgressProxyGrant | undefined;
+  let destroyedWorkspaces = 0;
   const controller = {
     create: async (input: Parameters<ControllerClient["create"]>[0]) => {
-      createdPolicy = input.policy;
+      createdPolicies.push(input.policy);
       createdEgressProxy = input.egressProxy;
       return { providerId: `sandbox-${input.workspaceId}`, state: "ready" as const, failureCode: null };
     },
@@ -107,7 +144,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     status: async (providerId: string) => ({ providerId, state: "ready" as const, failureCode: null }),
     open: async () => ({ launchUrl: "http://gateway/workspace", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
     destroy: async () => undefined,
-    destroyWorkspace: async () => undefined,
+    destroyWorkspace: async () => { destroyedWorkspaces += 1; },
     purgeWorkspace: async () => undefined,
   } satisfies ControllerClient;
   const store = new MemoryWorkspaceStore();
@@ -145,7 +182,8 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), [
       "firefox", "google-chrome", "visual-studio-code", "obsidian",
     ]);
-    assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite", "balanced", "pro"]);
+    assert.deepEqual(settings.json().availableServiceClasses.map((entry: { value: string }) => entry.value), ["lite"]);
+    assert.equal(settings.json().requestedServiceClass, "lite", "the first published route becomes the safe workspace default when Balanced is unavailable");
     assert.equal(settings.json().manifest.sandbox.egressMode, "restricted");
     assert.equal(settings.json().securityGroup.defaultAction, "deny");
     assert.equal(settings.json().securityGroup.id, managedFallback.id);
@@ -177,8 +215,10 @@ test("a new organization has no policy ceiling and its administrator can create 
     });
     assert.equal(created.statusCode, 201);
     assert.equal(created.json().state, "ready");
-    assert.equal(createdPolicy?.egressMode, "restricted");
-    assert.equal(createdPolicy?.egress?.defaultAction, "deny");
+    assert.equal(createdPolicies[0]?.egressMode, "restricted");
+    assert.equal(createdPolicies[0]?.requestedServiceClass, "lite");
+    assert.deepEqual(createdPolicies[0]?.allowedServiceClasses, ["lite"]);
+    assert.equal(createdPolicies[0]?.egress?.defaultAction, "deny");
     assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
     assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, managedFallback.id);
 
@@ -187,6 +227,37 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.equal(currentAfterCreate.statusCode, 200);
     assert.ok(egressLookups > lookupsBeforeCurrent, "an existing workspace still evaluates its current runtime policy");
     assert.equal(currentAfterCreate.json().profile.egressMode, "restricted");
+
+    const savedRoutes = await app.inject({
+      method: "POST",
+      url: "/v1/admin/routing/mappings",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        revisionNote: "Add Pro while retaining Lite",
+        billingCurrency: "USD",
+        deployments: ["lite", "pro"].map((serviceClass, index) => ({
+          serviceClass,
+          provider: "openai",
+          providerAccountId: "primary",
+          providerModel: serviceClass === "lite" ? "gpt-5.6-luna" : "gpt-5.6-sol",
+          providerDeployment: `openai/${serviceClass}`,
+          rateCardId: `44444444-4444-4444-8444-${String(index + 1).padStart(12, "0")}`,
+          capabilities: { vision: true, tools: true, streaming: true, contextTokens: 128000, outputTokens: 16000, residency: ["sg"] },
+          approved: true,
+          evaluationPassed: true,
+        })),
+      },
+    });
+    assert.equal(savedRoutes.statusCode, 201);
+    assert.deepEqual(savedRoutes.json().workspaceActivation, {
+      restarted: 1,
+      restartFailed: 0,
+      appliesOnNextStart: 0,
+      actionRequired: 0,
+    });
+    assert.equal(destroyedWorkspaces, 1);
+    assert.equal(createdPolicies.length, 2);
+    assert.deepEqual(createdPolicies[1]?.allowedServiceClasses, ["lite", "pro"]);
   } finally {
     await app.close();
   }

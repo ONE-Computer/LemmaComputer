@@ -48,7 +48,7 @@ import { SitesService } from "./sites.js";
 import { AgentProcessLifecycleService, callerSuppliedAgentInstanceId } from "./agent-process-lifecycle.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
-import {RoutingAdministrationService,RoutingExecutionService,changeRoutingRolloutSchema,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema,saveRoutingPolicySchema,saveRoutingReviewSchema} from "./routing.js";
+import {RoutingAdministrationService,RoutingExecutionService,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema} from "./routing.js";
 import { createCustomerAuthentication, createCustomerSsoAuthentication, customerAuthenticationBasePath, customerAuthenticationControlPath, parseVersionedBetterAuthSecrets, registerCustomerAuthenticationRoutes, type CustomerAuthentication } from "./customer-authentication.js";
 import { CaptureTransactionalEmailAdapter, createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
 import {
@@ -267,6 +267,7 @@ export type CompatibleSandboxSelection = {
   applicationIds: SandboxApplicationId[];
   modelAlias: SandboxModelAlias | null;
   requestedServiceClass: ExplicitWorkspaceServiceClass;
+  allowedServiceClasses: ExplicitWorkspaceServiceClass[];
   agentIds: AgentCatalogId[];
   changed: boolean;
 };
@@ -274,7 +275,7 @@ export type CompatibleSandboxSelection = {
 export const compatibleSandboxSelection = (
   document: Record<string, unknown>,
   saved: Awaited<ReturnType<NonNullable<WorkspaceStore["getSandboxSettings"]>>> | null | undefined,
-  governedRoutingAvailable: boolean,
+  publishedServiceClasses: readonly ExplicitWorkspaceServiceClass[] | null,
 ): CompatibleSandboxSelection | null => {
   const profiles = Array.isArray(document.workspaceProfiles)
     ? document.workspaceProfiles.filter((value): value is SandboxProfileId => sandboxProfiles.some((profile) => profile.id === value))
@@ -286,36 +287,50 @@ export const compatibleSandboxSelection = (
   const models = Array.isArray(document.modelAliases)
     ? document.modelAliases.filter((value): value is SandboxModelAlias => sandboxModels.some((model) => model.alias === value))
     : ["lemmacomputer-assistant"] as SandboxModelAlias[];
-  const serviceClasses = assignedWorkspaceServiceClasses(document);
+  const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
+  const serviceClasses = publishedServiceClasses === null
+    ? assignedServiceClasses
+    : assignedServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
+  const governedRoutingEnabled = publishedServiceClasses !== null;
+  const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
   const profileId = saved
     ? profiles.includes(saved.profileId) ? saved.profileId : null
     : profiles[0] ?? null;
   const applicationIds = saved
     ? saved.applicationIds.filter((id) => applications.includes(id))
     : defaultApplicationIds(document, applications);
-  const agentIds = saved
-    ? saved.agentIds.filter((id) => agents.includes(id))
-    : defaultAgentIds(document, agents);
+  const agentIds = governedRoutingEnabled && !governedRoutingAvailable
+    ? []
+    : saved
+      ? saved.agentIds.filter((id) => agents.includes(id))
+      : defaultAgentIds(document, agents);
   const modelAlias = agentIds.length === 0
     ? null
-    : governedRoutingAvailable
-      ? "lemmacomputer-auto" as const
+    : governedRoutingEnabled
+      ? governedRoutingAvailable ? "lemmacomputer-auto" as const : null
       : saved?.modelAlias && models.includes(saved.modelAlias)
-        ? saved.modelAlias
-        : models[0] ?? null;
-  const requestedServiceClass = saved
-    ? saved.requestedServiceClass === undefined
-      ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
-      : serviceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
+          ? saved.modelAlias
+          : models[0] ?? null;
+  const requestedServiceClass = serviceClasses.length
+    ? saved
+      ? saved.requestedServiceClass === undefined
+        ? explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
+        : serviceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
+          ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
+          : null
+      : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses)
+    : agentIds.length === 0
+      ? saved && assignedServiceClasses.includes(saved.requestedServiceClass as ExplicitWorkspaceServiceClass)
         ? saved.requestedServiceClass as ExplicitWorkspaceServiceClass
-        : null
-    : explicitWorkspaceServiceClass(document.defaultServiceClass, serviceClasses);
+        : explicitWorkspaceServiceClass(document.defaultServiceClass, assignedServiceClasses)
+      : null;
   if (!profileId || (agentIds.length > 0 && !modelAlias) || !requestedServiceClass) return null;
   return {
     profileId,
     applicationIds,
     modelAlias,
     requestedServiceClass,
+    allowedServiceClasses: serviceClasses,
     agentIds,
     changed: Boolean(saved && (
       saved.profileId !== profileId
@@ -328,6 +343,11 @@ export const compatibleSandboxSelection = (
     )),
   };
 };
+
+export const shouldPersistCompatibleSandboxSelection = (
+  selection: CompatibleSandboxSelection,
+  publishedServiceClasses: readonly ExplicitWorkspaceServiceClass[] | null,
+) => selection.changed && publishedServiceClasses?.length !== 0;
 
 const constrainAssigned = <T extends string>(
   configured: unknown,
@@ -894,29 +914,49 @@ export function createControlServer(
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new LemmaComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
-  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore):undefined;
+  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore,security.teamStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
-  const chatServiceClassOptionsFor = async (owner: IdentityContext) => routingExecution
-    ? routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
-    : [
+  const publishedWorkspaceServiceClassesFor = async (tenantId: string): Promise<ExplicitWorkspaceServiceClass[] | null> => {
+    if (!security.routingStore) return null;
+    if (!routingExecution) {
+      const routeMapping = await security.routingStore.latestMappingVersion(tenantId);
+      return workspaceServiceClasses
+        .filter(({ value }) => routeMapping?.deployments.some((deployment) => deployment.serviceClass === value))
+        .map(({ value }) => value);
+    }
+    return (await routingExecution.serviceClassOptions(tenantId))
+      .filter((option) => option.available)
+      .map((option) => option.value);
+  };
+  const chatServiceClassOptionsFor = async (owner: IdentityContext, policy?: RuntimePolicy) => {
+    const options = routingExecution
+      ? await routingExecution.serviceClassOptions(owner.tenantId, owner.subjectId)
+      : [
         { value: "lite" as const, available: false, reasonCode: "route_unavailable" as const },
         { value: "balanced" as const, available: true, reasonCode: "ready" as const },
         { value: "pro" as const, available: false, reasonCode: "route_unavailable" as const },
       ];
+    const allowed = policy?.allowedServiceClasses;
+    return allowed
+      ? options.map((option) => allowed.includes(option.value)
+          ? option
+          : { ...option, available: false as const, reasonCode: "policy_denied" as const })
+      : options;
+  };
   const requireChatServiceClass = async (
     owner: IdentityContext,
     serviceClass: "lite" | "balanced" | "pro",
+    policy?: RuntimePolicy,
   ) => {
-    const option = (await chatServiceClassOptionsFor(owner)).find((candidate) => candidate.value === serviceClass);
+    const option = (await chatServiceClassOptionsFor(owner, policy)).find((candidate) => candidate.value === serviceClass);
     if (option?.available) return;
-    const reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "budget_unavailable" | "route_unavailable" = option && !option.available
+    const reasonCode: "policy_denied" | "pricing_unavailable" | "provider_unavailable" | "route_unavailable" = option && !option.available
       ? option.reasonCode === "ready" ? "route_unavailable" : option.reasonCode
       : "route_unavailable";
     const failures: Record<typeof reasonCode, readonly [string, string, number, boolean]> = {
       policy_denied: ["MODEL_TIER_DENIED", "That model tier is not allowed by your organization", 403, false],
       pricing_unavailable: ["MODEL_TIER_PRICING_UNAVAILABLE", "Pricing is not ready for that model tier", 422, false],
       provider_unavailable: ["MODEL_TIER_PROVIDER_UNAVAILABLE", "That model tier is temporarily unavailable", 503, true],
-      budget_unavailable: ["MODEL_TIER_BUDGET_UNAVAILABLE", "That model tier is unavailable under the current Team budget", 422, false],
       route_unavailable: ["MODEL_TIER_ROUTE_UNAVAILABLE", "No ready route is available for that model tier", 503, true],
     };
     const failure = failures[reasonCode];
@@ -1437,27 +1477,50 @@ export function createControlServer(
       ?? document?.workspaceProfile
       ?? testRuntimePolicy.workspaceProfile) as SandboxProfileId;
   };
-  const governedRoutingAvailableFor = async (tenantId: string) => {
-    const routeMapping = await security.routingStore?.latestMappingVersion(tenantId);
-    return ["lite", "balanced", "pro"].every((serviceClass) => (
-      routeMapping?.deployments.some((deployment) => deployment.serviceClass === serviceClass)
-    ));
+  const protectedWorkspacePolicyOverviewFor = async (tenantId: string) => {
+    const [overview, publishedServiceClasses] = await Promise.all([
+      requireProtectedWorkspacePolicy().overview(tenantId),
+      publishedWorkspaceServiceClassesFor(tenantId),
+    ]);
+    if (publishedServiceClasses === null) return overview;
+    return {
+      ...overview,
+      catalog: {
+        ...overview.catalog,
+        constraints: {
+          ...overview.catalog.constraints,
+          serviceClasses: { allow: publishedServiceClasses, deny: [] },
+        },
+      },
+    };
   };
   const policyForGrant = async (value: SessionPrincipal, effective: EffectivePolicy | null, grantId = "personal") => {
     let policy = testRuntimePolicy;
     if (effective) {
       const saved = await store.getSandboxSettings?.(value.identity, grantId);
-      const governedRoutingAvailable = await governedRoutingAvailableFor(value.tenantId);
+      const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(value.tenantId);
+      const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
       const document = effective.document as Record<string, unknown>;
-      const selection = compatibleSandboxSelection(document, saved, governedRoutingAvailable);
+      const selection = compatibleSandboxSelection(document, saved, publishedServiceClasses);
       if (!selection) {
+        if (publishedServiceClasses?.length === 0) {
+          throw new LemmaComputerError(
+            "MODEL_ROUTES_NOT_PUBLISHED",
+            "No organization model routes have been published for this workspace",
+            409,
+          );
+        }
         throw new LemmaComputerError(
           "WORKSPACE_POLICY_SELECTION_REQUIRED",
           "This workspace has a saved selection that is no longer allowed. Review its agents and applications before starting it again.",
           409,
         );
       }
-      if (saved && selection.changed && store.saveSandboxSettings) {
+      if (
+        saved
+        && shouldPersistCompatibleSandboxSelection(selection, publishedServiceClasses)
+        && store.saveSandboxSettings
+      ) {
         await store.saveSandboxSettings(value.identity, {
           grantId,
           profileId: selection.profileId,
@@ -1479,6 +1542,7 @@ export function createControlServer(
           governedRoutingAvailable ? ["lemmacomputer-auto"] : [],
         ),
         requestedServiceClass: selection.requestedServiceClass,
+        allowedServiceClasses: selection.allowedServiceClasses,
       };
       if (document.maximumEgressMode === "restricted" && policy.egressMode !== "restricted") {
         throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the organization policy", 403);
@@ -1602,6 +1666,75 @@ export function createControlServer(
       })),
     };
   };
+  const reconcileTenantWorkspaceRoutePolicies = async (tenantId: string, routeVersionId: string, correlationId: string) => {
+    const workspaces = await store.listTenantCurrent(tenantId);
+    const restartableStates = new Set<WorkspaceState>(["ready", "open", "provisioning", "restarting"]);
+    if (!workspaces.length) {
+      return { restarted: 0, restartFailed: 0, appliesOnNextStart: 0, actionRequired: 0 };
+    }
+    if (!security.identityPolicyStore) {
+      const stopped = await Promise.allSettled(workspaces
+        .filter((workspace) => restartableStates.has(workspace.state))
+        .map((workspace) => service.suspendForPolicyChange(identityContextSchema.parse({
+          tenantId,
+          subjectId: workspace.subjectId,
+          audience: "lemmacomputer-control",
+        }), workspace.id)));
+      return {
+        restarted: 0,
+        restartFailed: stopped.filter((result) => result.status === "rejected").length,
+        appliesOnNextStart: workspaces.filter((workspace) => !restartableStates.has(workspace.state)).length,
+        actionRequired: workspaces.length,
+      };
+    }
+    const users = await security.identityPolicyStore.listUsers(tenantId);
+    const usersById = new Map(users.map((user) => [user.userId, user]));
+    const results = await Promise.all(workspaces.map(async (workspace) => {
+      const shouldRestart = restartableStates.has(workspace.state);
+      const user = usersById.get(workspace.subjectId);
+      const owner = user?.effectivePolicy
+        ? await security.identityPolicyStore!.getPrincipal(workspace.subjectId)
+        : null;
+      if (!user?.effectivePolicy || !owner || owner.tenantId !== tenantId) {
+        if (shouldRestart) {
+          await service.suspendForPolicyChange(identityContextSchema.parse({
+            tenantId,
+            subjectId: workspace.subjectId,
+            audience: "lemmacomputer-control",
+          }), workspace.id).catch(() => undefined);
+        }
+        return "action_required" as const;
+      }
+      let policy: RuntimePolicy;
+      try {
+        ({ policy } = await policyForGrant(owner, user.effectivePolicy, workspace.grantId));
+      } catch {
+        if (shouldRestart) await service.suspendForPolicyChange(owner.identity, workspace.id).catch(() => undefined);
+        return "action_required" as const;
+      }
+      if (!shouldRestart) return "applies_on_next_start" as const;
+      try {
+        await service.suspendForPolicyChange(owner.identity, workspace.id, { restartPending: true });
+        await service.create(
+          owner.identity,
+          policy,
+          workspace.grantId,
+          `organization-routes:${routeVersionId}:${workspace.id}`,
+          `${correlationId}:organization-routes:${workspace.id}`,
+        );
+        return "restarted" as const;
+      } catch (error) {
+        app.log.warn({ err: error, workspaceId: workspace.id }, "workspace did not restart after organization routes changed");
+        return "restart_failed" as const;
+      }
+    }));
+    return {
+      restarted: results.filter((result) => result === "restarted").length,
+      restartFailed: results.filter((result) => result === "restart_failed").length,
+      appliesOnNextStart: results.filter((result) => result === "applies_on_next_start").length,
+      actionRequired: results.filter((result) => result === "action_required").length,
+    };
+  };
   const usesManagedProvider = (policy: RuntimePolicy, provider: ManagedProviderName) => (
     (policy.agents === undefined
       ? policy.modelAlias ? [policy.modelAlias] : []
@@ -1637,8 +1770,7 @@ export function createControlServer(
     }, { revoked: 0, failed: 0 });
   };
   const requirePolicy = async (request: object) => {
-    const { principal: value, effective } = await assignedPolicy(request);
-    return policyForGrant(value, effective);
+    await assignedPolicy(request);
   };
   const requireWorkspacePolicy = async (request: object, workspaceId: string) => {
     requirePermission(request, "workspace.use", { type: "workspace", resourceId: workspaceId });
@@ -2105,7 +2237,7 @@ export function createControlServer(
     }
     const agentInstanceId = await requireAgentInstance(request, actor);
     if (input.requestedServiceClass !== "auto") {
-      await requireChatServiceClass(owner, input.requestedServiceClass);
+      await requireChatServiceClass(owner, input.requestedServiceClass, policy);
     }
     const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
     const catalogId = assigned?.catalogId ?? ({
@@ -2881,22 +3013,16 @@ export function createControlServer(
   });
   app.post("/v1/admin/routing/mappings",async(request,reply)=>{
     const actor=requirePermission(request,"provider.manage");const mapping=await requireRouting().createMapping(actor,createRoutingMappingSchema.parse(request.body??{}));
-    reply.header("cache-control","no-store");return reply.code(201).send({mapping});
+    const workspaceActivation=await reconcileTenantWorkspaceRoutePolicies(actor.tenantId,mapping.id,request.id);
+    reply.header("cache-control","no-store");return reply.code(201).send({mapping,workspaceActivation});
   });
-  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing",async(request)=>{const actor=requirePermission(request,"policy.manage");return requireRouting().settings(actor,z.uuid().parse(request.params.teamId));});
-  app.put<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/policy",async(request)=>{const actor=requirePermission(request,"policy.manage");return requireRouting().savePolicy(actor,z.uuid().parse(request.params.teamId),saveRoutingPolicySchema.parse(request.body??{}));});
-  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/reviews",async(request,reply)=>{const actor=requirePermission(request,"policy.manage");const review=await requireRouting().review(actor,z.uuid().parse(request.params.teamId),saveRoutingReviewSchema.parse(request.body??{}));return reply.code(201).send({review});});
-  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/rollout",async(request,reply)=>{const actor=requirePermission(request,"policy.manage");const rollout=await requireRouting().rollout(actor,z.uuid().parse(request.params.teamId),changeRoutingRolloutSchema.parse(request.body??{}));return reply.code(201).send({rollout});});
-  app.post<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/kill-switch",async(request,reply)=>{
-    const actor=requirePermission(request,"policy.manage");const body=z.strictObject({reason:z.string().trim().min(8).max(1000)}).parse(request.body??{});const rollout=await requireRouting().killSwitch(actor,z.uuid().parse(request.params.teamId),body.reason);return reply.code(201).send({rollout});
-  });
-  app.get<{Params:{teamId:string}}>("/v1/admin/teams/:teamId/routing/shadow-report",async(request)=>{const actor=requirePermission(request,"audit.read");return requireRouting().report(actor,z.uuid().parse(request.params.teamId));});
   app.get<{Params:{decisionId:string}}>("/v1/admin/routing/decisions/:decisionId",async(request,reply)=>{const actor=requirePermission(request,"audit.read");const decision=await requireRouting().decision(actor,z.uuid().parse(request.params.decisionId));if(!decision)return reply.code(404).send({error:{code:"ROUTING_DECISION_NOT_FOUND",message:"Routing decision not found",correlationId:request.id,retryable:false}});return decision;});
   app.get("/v1/admin/users", async (request) => {
     const actor = requirePermission(request, "organization.manage_members");
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
-    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
+    const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
     return {
       delegableBuiltInRoles: delegableBuiltInRolesFor(actor),
       users: await Promise.all(users.map(async (user) => {
@@ -2955,7 +3081,8 @@ export function createControlServer(
     if (!security.identityPolicyStore) throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503);
     const users = await security.identityPolicyStore.listUsers(actor.tenantId);
     const organizationPolicy = await security.protectedWorkspacePolicy?.currentOrganizationPolicy?.(actor.tenantId) ?? null;
-    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
+    const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
     const managesOrganization = allowsPermission(actor, "workspace.manage");
     const members = (await Promise.all(users.map(async (user) => {
       const targetIdentity = identityContextSchema.parse({
@@ -2991,7 +3118,7 @@ export function createControlServer(
               ? "offline"
               : "healthy";
         const selection = targetEffective
-          ? compatibleSandboxSelection(targetEffective.document as Record<string, unknown>, settings, governedRoutingAvailable)
+          ? compatibleSandboxSelection(targetEffective.document as Record<string, unknown>, settings, publishedServiceClasses)
           : null;
         const policyRuntime = !targetEffective || !selection
           ? { state: "action_required" as const, reasonCode: "WORKSPACE_POLICY_SELECTION_REQUIRED" }
@@ -3660,7 +3787,7 @@ export function createControlServer(
   });
   app.get("/v1/admin/protected-workspace-policy", async (request) => {
     const actor = requirePermission(request, "policy.manage");
-    return requireProtectedWorkspacePolicy().overview(actor.tenantId);
+    return protectedWorkspacePolicyOverviewFor(actor.tenantId);
   });
   app.get("/v1/admin/protected-workspace-policy/organization-versions", async (request) => {
     const actor = requirePermission(request, "policy.manage");
@@ -3689,6 +3816,14 @@ export function createControlServer(
       throw new LemmaComputerError(
         "WORKSPACE_REASONING_LEVEL_NOT_SELECTABLE",
         "Maximum thinking must be Low, Medium, or High",
+        400,
+      );
+    }
+    const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    if (publishedServiceClasses !== null && input.constraints.serviceClasses?.allow?.some((serviceClass) => !publishedServiceClasses.includes(serviceClass as ExplicitWorkspaceServiceClass))) {
+      throw new LemmaComputerError(
+        "WORKSPACE_SERVICE_CLASS_ROUTE_UNAVAILABLE",
+        "Workspace guardrails may include only published organization routes",
         400,
       );
     }
@@ -4123,9 +4258,33 @@ export function createControlServer(
   app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
+    const currentMapping = await security.routingStore?.latestMappingVersion(actor.tenantId) ?? null;
+    const retainedDeployments = currentMapping?.deployments.filter((deployment) => deployment.provider !== provider) ?? [];
+    const removesPublishedRoutes = Boolean(currentMapping?.deployments.some((deployment) => deployment.provider === provider));
     const removed = await requireProviderSettings().remove(actor, provider);
+    const mapping = removesPublishedRoutes
+      ? await security.routingStore!.createMappingVersion({
+          tenantId: actor.tenantId,
+          revisionNote: `Disconnect ${provider} provider and remove its organization routes`,
+          createdBy: actor.userId,
+          deployments: retainedDeployments.map((deployment) => ({
+            serviceClass: deployment.serviceClass,
+            provider: deployment.provider,
+            ...(deployment.providerAccountId ? { providerAccountId: deployment.providerAccountId } : {}),
+            providerModel: deployment.providerModel,
+            providerDeployment: deployment.providerDeployment,
+            ...(deployment.region ? { region: deployment.region } : {}),
+            ...(deployment.providerServiceTier ? { providerServiceTier: deployment.providerServiceTier } : {}),
+            ...(deployment.rateCardId ? { rateCardId: deployment.rateCardId } : {}),
+            capabilities: deployment.capabilities,
+            approved: deployment.approved,
+            evaluationPassed: deployment.evaluationPassed,
+          })),
+        })
+      : currentMapping;
     return {
       deleted: true,
+      mapping,
       workspaceGrants: removed.workspaceGrants,
       restartRequired: removed.workspaceGrants.revoked > 0 || removed.workspaceGrants.failed > 0,
     };
@@ -4581,24 +4740,38 @@ export function createControlServer(
     const availableProfiles = sandboxProfiles.filter((profile) => assignedProfiles.includes(profile.id));
     const assignedApplications = assignedApplicationIds(document);
     const availableApplications = sandboxApplications.filter((application) => assignedApplications.includes(application.id));
-    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
-    const assignedServiceClasses = assignedWorkspaceServiceClasses(document);
-    const availableModels = sandboxModels.filter((model) => governedRoutingAvailable ? model.alias === "lemmacomputer-auto" : assignedModels.includes(model.alias));
+    const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
+    const policyServiceClasses = assignedWorkspaceServiceClasses(document);
+    const assignedServiceClasses = publishedServiceClasses === null
+      ? policyServiceClasses
+      : policyServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
+    const governedRoutingEnabled = publishedServiceClasses !== null;
+    const availableModels = sandboxModels.filter((model) => governedRoutingEnabled
+      ? governedRoutingAvailable && model.alias === "lemmacomputer-auto"
+      : assignedModels.includes(model.alias));
     const availableAgents = ownedAgentCatalog.filter((agent) => availableAgentIds.includes(agent.id));
-    if (!availableProfiles.length || !assignedServiceClasses.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile or model tier", 500);
+    if (!availableProfiles.length) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported sandbox profile", 500);
     const saved = await store.getSandboxSettings?.(actor.identity, grantId);
     const savedProfile = saved ? sandboxProfiles.find((profile) => profile.id === saved.profileId) : undefined;
     const selectedProfile = savedProfile ?? availableProfiles[0]!;
     const profileId = selectedProfile.id;
     const applicationIds = saved?.applicationIds.filter((id) => availableApplications.some((application) => application.id === id));
+    const selectableServiceClasses = assignedServiceClasses.length
+      ? assignedServiceClasses
+      : policyServiceClasses;
     const requestedServiceClass = explicitWorkspaceServiceClass(
       saved?.requestedServiceClass ?? document.defaultServiceClass,
-      assignedServiceClasses,
+      selectableServiceClasses,
     );
     if (!requestedServiceClass) throw new LemmaComputerError("POLICY_INVALID", "The active policy has no supported Phase 0.5 model tier", 500);
-    const agentIds = saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id));
+    const agentIds = assignedServiceClasses.length
+      ? saved?.agentIds.filter((id) => availableAgents.some((agent) => agent.id === id))
+      : [];
     const selectedApplicationIds = saved ? applicationIds ?? [] : defaultApplicationIds(document, assignedApplications);
-    const selectedAgentIds = saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds);
+    const selectedAgentIds = assignedServiceClasses.length
+      ? saved ? agentIds ?? [] : defaultAgentIds(document, availableAgentIds)
+      : [];
     if (selectedAgentIds.length > 0 && !availableModels.length) {
       throw new LemmaComputerError("POLICY_INVALID", "The active policy has AI agents but no supported model route", 500);
     }
@@ -4648,7 +4821,12 @@ export function createControlServer(
       applicationIds: selectedApplicationIds,
       modelAlias,
       requestedServiceClass,
-      routePreferenceMigrationRequired: selectedAgentIds.length > 0 && governedRoutingAvailable && saved?.modelAlias !== "lemmacomputer-auto",
+      routePreferenceMigrationRequired: Boolean(saved && (
+        saved.agentIds.length !== selectedAgentIds.length
+        || saved.agentIds.some((id, index) => id !== selectedAgentIds[index])
+        || (selectedAgentIds.length > 0 && governedRoutingAvailable && saved.modelAlias !== "lemmacomputer-auto")
+        || saved.requestedServiceClass !== requestedServiceClass
+      )),
       profile: selectedProfile,
       availableProfiles,
       availableApplications,
@@ -4676,21 +4854,29 @@ export function createControlServer(
     const profiles = Array.isArray(document.workspaceProfiles) ? document.workspaceProfiles : [document.workspaceProfile ?? testRuntimePolicy.workspaceProfile];
     const applications = assignedApplicationIds(document);
     const models = Array.isArray(document.modelAliases) ? document.modelAliases : [testRuntimePolicy.modelAlias];
-    const serviceClasses = assignedWorkspaceServiceClasses(document);
-    const governedRoutingAvailable = await governedRoutingAvailableFor(actor.tenantId);
+    const publishedServiceClasses = await publishedWorkspaceServiceClassesFor(actor.tenantId);
+    const governedRoutingEnabled = publishedServiceClasses !== null;
+    const governedRoutingAvailable = Boolean(publishedServiceClasses?.length);
+    const policyServiceClasses = assignedWorkspaceServiceClasses(document);
+    const serviceClasses = publishedServiceClasses === null
+      ? policyServiceClasses
+      : policyServiceClasses.filter((serviceClass) => publishedServiceClasses.includes(serviceClass));
     const modelAlias = input.agentIds.length === 0
       ? null
-      : governedRoutingAvailable
-        ? "lemmacomputer-auto"
+      : governedRoutingEnabled
+        ? governedRoutingAvailable ? "lemmacomputer-auto" : null
         : input.modelAlias;
     const agents = assignedAgentIds(document);
     if (!profiles.includes(input.profileId)) throw new LemmaComputerError("PROFILE_NOT_ASSIGNED", "That sandbox profile is not assigned by your organization", 403);
     if (input.applicationIds.some((id) => !applications.includes(id))) throw new LemmaComputerError("APPLICATION_NOT_ASSIGNED", "That sandbox application is not assigned by your organization", 403);
-    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingAvailable && !models.includes(modelAlias)))) {
+    if (input.agentIds.length > 0 && !serviceClasses.length) {
+      throw new LemmaComputerError("MODEL_ROUTES_NOT_PUBLISHED", "No organization model routes have been published for this workspace", 409);
+    }
+    if (input.agentIds.length > 0 && (!modelAlias || (!governedRoutingEnabled && !models.includes(modelAlias)))) {
       throw new LemmaComputerError("MODEL_NOT_ASSIGNED", "That model route is not assigned by your organization", 403);
     }
     if (input.agentIds.some((id) => !agents.includes(id))) throw new LemmaComputerError("AGENT_NOT_ASSIGNED", "That workspace agent is not assigned by your organization", 403);
-    if (input.requestedServiceClass === "auto" || !serviceClasses.includes(input.requestedServiceClass)) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
+    if (input.requestedServiceClass === "auto" || (input.agentIds.length > 0 && !serviceClasses.includes(input.requestedServiceClass))) throw new LemmaComputerError("SERVICE_CLASS_NOT_ASSIGNED", "That service class is not assigned by your organization", 403);
     const previousSettings = await store.getSandboxSettings?.(actor.identity, input.grantId);
     const previousProfileId = previousSettings?.profileId ?? input.profileId;
     const previousEgress = await security.identityPolicyStore?.getWorkspaceEgressSecurityGroup?.({
@@ -5222,7 +5408,7 @@ export function createControlServer(
   app.get<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/chat/agents", async (request, reply) => {
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
-    const serviceClassOptions = await chatServiceClassOptionsFor(owner);
+    const serviceClassOptions = await chatServiceClassOptionsFor(owner, policy);
     const assigned = await service.agentChatAgents(owner, policy, request.params.workspaceId);
     const running = ["ready", "open"].includes(assigned.state);
     const agents = await Promise.all(assigned.accesses.map(async (access) => {
@@ -5375,7 +5561,7 @@ export function createControlServer(
     const input = createChatSessionSchema.parse(request.body ?? {});
     const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
-    await requireChatServiceClass(owner, input.requestedServiceClass);
+    await requireChatServiceClass(owner, input.requestedServiceClass, policy);
     await requireReasoningEffort(owner, policy, catalogId, input.requestedServiceClass, input.reasoningEffort);
     if (!assignedChatAgentIds(policy).includes(catalogId)) {
       throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
@@ -5427,7 +5613,7 @@ export function createControlServer(
         throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That chat agent is not selected for this workspace", 409);
       }
       const owner = identity(request);
-      await requireChatServiceClass(owner, input.requestedServiceClass);
+      await requireChatServiceClass(owner, input.requestedServiceClass, policy);
       await requireReasoningEffort(owner, policy, input.agentCatalogId, input.requestedServiceClass, input.reasoningEffort);
       const source = await requireDurableChat().store.getConversation(owner, request.params.sessionId);
       if (!source) {
@@ -5575,7 +5761,7 @@ export function createControlServer(
     }
     const { policy, workspace } = await requireWorkspacePolicy(request, request.params.workspaceId);
     const owner = identity(request);
-    await requireChatServiceClass(owner, input.requestedServiceClass);
+    await requireChatServiceClass(owner, input.requestedServiceClass, policy);
     await requireReasoningEffort(
       owner,
       policy,

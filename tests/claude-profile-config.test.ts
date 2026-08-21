@@ -13,13 +13,14 @@ test("Claude receives exactly the three governed product modes with one explicit
   const temporary = await mkdtemp(path.join(os.tmpdir(), "lemmacomputer-claude-profile-"));
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const output = path.join(temporary, "managed-settings.json");
-  const configure = async (serviceClass: string) => {
+  const configure = async (serviceClass: string, allowed = "lite,balanced,pro") => {
     await execute("python3", [
       configurator,
       output,
       "claude-sonnet-4-6",
       "lemmacomputer-auto",
       serviceClass,
+      allowed,
       "Claude — organization route",
       "true",
       "true",
@@ -43,4 +44,9 @@ test("Claude receives exactly the three governed product modes with one explicit
   const legacy = await configure("auto");
   assert.equal(legacy.inferenceModels[0]?.name, "claude-sonnet-4-6-20260102");
   assert.equal(legacy.inferenceModels.find((model: { isFamilyDefault: boolean }) => model.isFamilyDefault)?.name, "claude-sonnet-4-6-20260102");
+
+  const liteOnly = await configure("lite", "lite");
+  assert.deepEqual(liteOnly.inferenceModels, [
+    { name: "claude-sonnet-4-6-20260101", labelOverride: "Lite — organization route", anthropicFamilyTier: "sonnet", isFamilyDefault: true },
+  ]);
 });

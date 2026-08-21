@@ -54,6 +54,120 @@ test("workspace creation is shown only when the organization grants workspace.cr
   await expect(page.getByRole("button", { name: "Create workspace" })).toBeVisible();
 });
 
+test("administrators get exact recovery links for provider, model-route, and pricing setup", async ({ page }) => {
+  let failure = {
+    status: 409,
+    code: "PROVIDER_NOT_CONFIGURED",
+    message: "That provider is not configured",
+  };
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: failure.status,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: failure.code, message: failure.message, retryable: false } }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  const prompt = page.getByRole("dialog", { name: "Create workspace" });
+  await prompt.getByLabel("Workspace name").fill("Recovery links");
+  await prompt.getByRole("button", { name: "Continue to configuration" }).click();
+  await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("A model provider has not been connected for this workspace.");
+  const providerLink = alert.getByRole("link", { name: "Set up a workspace provider" });
+  await expect(providerLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers&focus=provider");
+  await expect(providerLink).toHaveCSS("text-decoration-line", "underline");
+
+  failure = {
+    status: 503,
+    code: "MODEL_TIER_ROUTE_UNAVAILABLE",
+    message: "No ready route is available for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("No model route is ready for this workspace.");
+  await expect(alert.getByRole("link", { name: "Configure model routes" })).toHaveAttribute(
+    "href",
+    "?view=ai-control-plane&section=models-providers&focus=route",
+  );
+
+  failure = {
+    status: 422,
+    code: "MODEL_TIER_PRICING_UNAVAILABLE",
+    message: "Pricing is not ready for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Approved pricing is missing for this workspace's model route.");
+  const pricingLink = alert.getByRole("link", { name: "Set up pricing" });
+  await expect(pricingLink).toHaveAttribute("href", "?view=ai-control-plane&section=models-providers&focus=pricing");
+  await pricingLink.click();
+  await expect(page).toHaveURL(/\?view=ai-control-plane&section=models-providers&focus=pricing$/);
+  await expect(page.getByRole("heading", { name: "Models & routing", exact: true })).toBeVisible();
+});
+
+test("members are told to contact an administrator without receiving configuration links", async ({ page }) => {
+  let failure = {
+    status: 409,
+    code: "PROVIDER_NOT_CONFIGURED",
+    message: "That provider is not configured",
+  };
+  await page.route("**/api/v1/auth/session", (route) => route.fulfill({
+    json: {
+      user: { id: "member-alex", displayName: "Alex Member", email: "alex@acme.test" },
+      tenant: { id: "acme", displayName: "Acme" },
+      roles: ["member"],
+      capabilities: ["organization.read", "workspace.use", "workspace.create", "workspace.manage_own"],
+      resourceCapabilities: [],
+    },
+  }));
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: { workspaces: [] } });
+      return;
+    }
+    await route.fulfill({
+      status: failure.status,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: failure.code, message: failure.message, retryable: false } }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  const prompt = page.getByRole("dialog", { name: "Create workspace" });
+  await prompt.getByLabel("Workspace name").fill("Member recovery");
+  await prompt.getByRole("button", { name: "Continue to configuration" }).click();
+  await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("Contact your administrator to connect one.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+
+  failure = {
+    status: 503,
+    code: "MODEL_TIER_ROUTE_UNAVAILABLE",
+    message: "No ready route is available for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Contact your administrator to configure one.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+
+  failure = {
+    status: 422,
+    code: "MODEL_TIER_PRICING_UNAVAILABLE",
+    message: "Pricing is not ready for that model tier",
+  };
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await expect(alert).toContainText("Contact your administrator to add it.");
+  await expect(alert.getByRole("link")).toHaveCount(0);
+});
+
 test("workspace deletion separates runtime removal from durable-content retention", async ({ page }) => {
   const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d70";
   let deletionRequest = null;
@@ -90,6 +204,8 @@ test("workspace deletion separates runtime removal from durable-content retentio
 test("an authenticated member can create and manage only their own workspace", async ({ page }) => {
   const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d71";
   let createdWorkspace = null;
+  let releaseCreation = () => {};
+  const creationReleased = new Promise<void>((resolve) => { releaseCreation = resolve; });
 
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     json: {
@@ -106,6 +222,7 @@ test("an authenticated member can create and manage only their own workspace", a
       return;
     }
     const input = route.request().postDataJSON();
+    await creationReleased;
     createdWorkspace = {
       id: workspaceId,
       grantId: input.grantId,
@@ -159,6 +276,14 @@ test("an authenticated member can create and manage only their own workspace", a
   await expect(page.getByText("Qualification workspace (legacy)", { exact: true })).toHaveCount(0);
   await expect(page.getByText("open workspace for non-sensitive work", { exact: false })).toHaveCount(0);
   await page.getByRole("button", { name: "Create workspace" }).click();
+
+  const progress = page.locator(".workspace-creation-progress");
+  await expect(progress).toBeVisible();
+  await expect(progress).toHaveAttribute("aria-busy", "true");
+  await expect(progress.getByRole("heading", { name: "Demo Workspace" })).toBeVisible();
+  await expect(progress).toContainText(/Securing the workspace boundary|Applying approved apps and model routes|Starting governed services|Checking the final connections/);
+  await expect(page.getByRole("button", { name: "Building workspace…" })).toBeDisabled();
+  releaseCreation();
 
   const card = page.getByRole("article", { name: "Demo Workspace" });
   await expect(card).toContainText("Preparing");
@@ -243,6 +368,66 @@ test("workspace model route tiers persist after save and refresh", async ({ page
   await page.reload();
   await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
   await expect(page.getByRole("radiogroup", { name: "Default model mode" }).getByRole("radio", { name: /^Pro/ })).toBeChecked();
+});
+
+test("workspace configuration shows only published organization routes", async ({ page }) => {
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        requestedServiceClass: "lite",
+        availableServiceClasses: payload.availableServiceClasses.filter(({ value }: { value: string }) => value === "lite" || value === "pro"),
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const modelRoutes = page.getByRole("radiogroup", { name: "Default model mode" });
+  await expect(modelRoutes.getByRole("radio")).toHaveCount(2);
+  await expect(modelRoutes.getByRole("radio", { name: /^Lite/ })).toBeChecked();
+  await expect(modelRoutes.getByRole("radio", { name: /^Pro/ })).toBeVisible();
+  await expect(modelRoutes.getByText("Balanced", { exact: true })).toHaveCount(0);
+});
+
+test("workspace configuration pre-empts unavailable AI setup without blocking a base workspace", async ({ page }) => {
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        modelAlias: null,
+        agentIds: [],
+        availableModels: [],
+        availableServiceClasses: [],
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  const agents = page.locator('section[aria-labelledby="sandbox-agents-heading"]');
+  await expect(agents).toHaveAttribute("aria-disabled", "true");
+  await expect(agents.getByText("AI agents unavailable", { exact: true })).toBeVisible();
+  await expect(agents.getByRole("checkbox")).not.toHaveCount(0);
+  for (const checkbox of await agents.getByRole("checkbox").all()) await expect(checkbox).toBeDisabled();
+
+  const modelModes = page.locator('section[aria-labelledby="sandbox-model-heading"]');
+  await expect(modelModes).toHaveAttribute("aria-disabled", "true");
+  await expect(modelModes.getByText("Model modes unavailable", { exact: true })).toBeVisible();
+  await expect(modelModes.getByRole("radiogroup")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review models & routing" }).first()).toHaveAttribute(
+    "href",
+    "?view=ai-control-plane&section=models-providers",
+  );
+  await expect(page.getByRole("alert", { name: /Workspace configuration unavailable/ })).toHaveCount(0);
 });
 
 test("workspace configuration can save a base workspace with no applications or AI agents", async ({ page }) => {

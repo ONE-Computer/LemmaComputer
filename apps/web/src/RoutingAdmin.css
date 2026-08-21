@@ -572,6 +572,10 @@
   gap: 15px;
 }
 
+.route-price-currency {
+  grid-column: 1 / -1;
+}
+
 .route-mapping-editor {
   width: min(920px, calc(100vw - 32px));
   max-width: 920px;

@@ -433,6 +433,60 @@ test("workspace settings expose only explicit tiers and reject new Auto selectio
   }
 });
 
+test("workspace settings remain usable as a base workspace before organization routes are published", async () => {
+  const store = new MemoryWorkspaceStore();
+  const routingStore = {
+    latestMappingVersion: async () => null,
+  } as unknown as RoutingStore;
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    identityPolicyStore: policyStore(effectivePolicy()),
+    routingStore,
+  });
+  try {
+    const response = await app.inject({ method: "GET", url: "/v1/sandbox-settings?grantId=personal", headers });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().availableServiceClasses, []);
+    assert.deepEqual(response.json().availableModels, []);
+    assert.deepEqual(response.json().agentIds, []);
+    assert.equal(response.json().modelAlias, null);
+
+    const savedBaseWorkspace = await app.inject({
+      method: "PUT",
+      url: "/v1/sandbox-settings",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        grantId: "personal",
+        profileId: response.json().profileId,
+        applicationIds: response.json().applicationIds,
+        modelAlias: null,
+        requestedServiceClass: response.json().requestedServiceClass,
+        agentIds: [],
+      },
+    });
+    assert.equal(savedBaseWorkspace.statusCode, 200);
+    assert.deepEqual(savedBaseWorkspace.json().agentIds, []);
+
+    const rejectedAiWorkspace = await app.inject({
+      method: "PUT",
+      url: "/v1/sandbox-settings",
+      headers: { ...headers, "content-type": "application/json" },
+      payload: {
+        grantId: "personal",
+        profileId: response.json().profileId,
+        applicationIds: response.json().applicationIds,
+        modelAlias: "lemmacomputer-auto",
+        requestedServiceClass: response.json().requestedServiceClass,
+        agentIds: ["hermes-claw"],
+      },
+    });
+    assert.equal(rejectedAiWorkspace.statusCode, 409);
+    assert.equal(rejectedAiWorkspace.json().error.code, "MODEL_ROUTES_NOT_PUBLISHED");
+  } finally {
+    await app.close();
+  }
+});
+
 test("workspace settings expose one manifest with a non-secret Telegram binding", async () => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(alpha, "personal", "workspace-manifest");

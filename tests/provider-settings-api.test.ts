@@ -16,6 +16,7 @@ import {
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
+  type RoutingStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
@@ -608,6 +609,84 @@ test("removing a provider that was never configured preserves the not-configured
     });
     assert.equal(removed.statusCode, 404);
     assert.equal(removed.json().error.code, "PROVIDER_NOT_CONFIGURED");
+  } finally {
+    await app.close();
+  }
+});
+
+test("removing a provider publishes a route version without that provider", async () => {
+  const settingsStore = new MemoryProviderSettingsStore();
+  const providerAdministration = new FakeProviderAdministration();
+  const capabilities = { vision: true, tools: true, streaming: true, contextTokens: 128000, outputTokens: 16000, residency: ["sg"] };
+  let latest = {
+    id: "11111111-1111-4111-8111-111111111111",
+    tenantId: identity.tenantId,
+    revisionNote: "Initial provider routes",
+    createdBy: administrator.userId,
+    createdAt: new Date("2026-08-19T00:00:00.000Z"),
+    deployments: [
+      { id: "22222222-2222-4222-8222-222222222222", serviceClass: "lite" as const, provider: "openai" as const, providerAccountId: "openai-primary", providerModel: "gpt-5.6-luna", providerDeployment: "openai/gpt-5.6-luna", region: null, providerServiceTier: null, rateCardId: null, capabilities, approved: true, evaluationPassed: true },
+      { id: "33333333-3333-4333-8333-333333333333", serviceClass: "pro" as const, provider: "anthropic" as const, providerAccountId: "anthropic-primary", providerModel: "claude-opus-4-8", providerDeployment: "anthropic/claude-opus-4-8", region: null, providerServiceTier: null, rateCardId: null, capabilities, approved: true, evaluationPassed: true },
+    ],
+  };
+  const published: Array<Parameters<RoutingStore["createMappingVersion"]>[0]> = [];
+  const routingStore = {
+    latestMappingVersion: async () => latest,
+    createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => {
+      published.push(input);
+      latest = {
+        id: "44444444-4444-4444-8444-444444444444",
+        tenantId: input.tenantId,
+        revisionNote: input.revisionNote,
+        createdBy: input.createdBy,
+        createdAt: new Date("2026-08-19T01:00:00.000Z"),
+        deployments: input.deployments.map((deployment, index) => ({
+          id: `55555555-5555-4555-8555-55555555555${index}`,
+          ...deployment,
+          providerAccountId: deployment.providerAccountId ?? null,
+          region: deployment.region ?? null,
+          providerServiceTier: deployment.providerServiceTier ?? null,
+          rateCardId: deployment.rateCardId ?? null,
+        })),
+      };
+      return latest;
+    },
+  } as unknown as RoutingStore;
+  const app = createControlServer(
+    new MemoryWorkspaceStore(),
+    {} as ControllerClient,
+    proxyToken,
+    undefined,
+    undefined,
+    {},
+    {
+      testIdentityMode: true,
+      identityPolicyStore: identityPolicies(),
+      providerSettingsStore: settingsStore,
+      providerAdministration,
+      routingStore,
+    },
+  );
+
+  try {
+    const configured = await app.inject({
+      method: "PUT",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "content-type": "application/json", "idempotency-key": "provider-route-cascade-configure-0001" },
+      payload: { apiKey: rawOpenAiKey, modelId: "gpt-5.6-luna" },
+    });
+    assert.equal(configured.statusCode, 200);
+
+    const removed = await app.inject({
+      method: "DELETE",
+      url: "/v1/admin/provider-settings/openai",
+      headers: { ...testHeaders, "idempotency-key": "provider-route-cascade-delete-0001" },
+    });
+    assert.equal(removed.statusCode, 200);
+    assert.equal(await settingsStore.getProviderSetting(identity.tenantId, "openai"), null);
+    assert.equal(published.length, 1);
+    assert.deepEqual(published[0]!.deployments.map((deployment) => deployment.provider), ["anthropic"]);
+    assert.deepEqual(removed.json().mapping.deployments.map((deployment: { serviceClass: string }) => deployment.serviceClass), ["pro"]);
   } finally {
     await app.close();
   }

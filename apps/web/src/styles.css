@@ -1104,6 +1104,59 @@ textarea:focus-visible,
   color: #606a76;
 }
 
+.workspace-ai-section-unavailable {
+  background: #fbfbfa;
+}
+
+.workspace-ai-section-unavailable .agent-family-grid {
+  opacity: .5;
+}
+
+.agent-choice.disabled {
+  cursor: not-allowed;
+  background: #f7f7f6;
+}
+
+.agent-choice.disabled:hover {
+  border-color: #d7d8d8;
+}
+
+.workspace-ai-readiness {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 11px;
+  margin-bottom: 18px;
+  padding: 15px 16px;
+  border: 1px solid #ead6a8;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5e4a1f;
+}
+
+.workspace-ai-readiness > svg {
+  width: 21px;
+  height: 21px;
+}
+
+.workspace-ai-readiness > span {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-inline-recovery-link {
+  color: #245a94;
+  font-weight: 680;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.workspace-inline-recovery-link:hover {
+  color: #173f6e;
+}
+
 .sandbox-model-options {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -1184,6 +1237,96 @@ textarea:focus-visible,
   min-height: 50px;
   padding-inline: 20px;
   font-size: 15px;
+}
+
+.workspace-inline-spinner {
+  animation: workspace-spin 900ms linear infinite;
+}
+
+.workspace-creation-progress-layer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(247 247 244 / 82%);
+  backdrop-filter: blur(8px);
+}
+
+.workspace-creation-progress {
+  display: grid;
+  width: min(480px, 100%);
+  justify-items: center;
+  gap: 9px;
+  padding: 40px 42px;
+  border: 1px solid #d9dee5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(22 44 72 / 16%);
+  color: #172334;
+  text-align: center;
+}
+
+.workspace-creation-spinner {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  margin-bottom: 8px;
+  border-radius: 50%;
+  background: #edf4fc;
+  color: var(--navy);
+}
+
+.workspace-creation-spinner svg {
+  width: 27px;
+  height: 27px;
+  animation: workspace-spin 900ms linear infinite;
+}
+
+.workspace-creation-eyebrow {
+  color: #617185;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.workspace-creation-progress h2,
+.workspace-creation-progress p {
+  margin: 0;
+}
+
+.workspace-creation-progress h2 {
+  font-size: 28px;
+  letter-spacing: -.03em;
+}
+
+.workspace-creation-progress p {
+  min-height: 24px;
+  color: #324d6d;
+  font-size: 15px;
+}
+
+.workspace-creation-stream {
+  margin-top: 6px;
+  color: #8a96a5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: .02em;
+  animation: breathe 1.2s ease-in-out infinite;
+}
+
+.workspace-creation-progress small {
+  max-width: 360px;
+  color: #6a7581;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@keyframes workspace-spin {
+  to { transform: rotate(360deg); }
 }
 
 .sandbox-json {
@@ -1626,6 +1769,30 @@ textarea:focus-visible,
   gap: 3px;
   font-size: 14px;
   line-height: 1.45;
+}
+
+.configuration-recovery-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 5px;
+}
+
+.configuration-recovery-link {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.configuration-recovery-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.configuration-recovery-link:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
 }
 
 .workspace-overview-heading {
@@ -6521,6 +6688,7 @@ a.chat-file-part:hover {
 .admin-team-heading p { margin-bottom: 4px; color: #2453a6; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .admin-team-heading h2 { color: #172334; font-size: 22px; letter-spacing: -.025em; }
 .admin-team-heading span { display: block; max-width: 720px; margin-top: 7px; color: #68727d; font-size: 13px; line-height: 1.45; }
+.admin-team-heading-actions { display: flex; align-items: center; gap: 8px; }
 .admin-team-empty { margin: 0; padding: 28px 24px; color: #68727d; }
 .admin-team-list article {
   display: grid;

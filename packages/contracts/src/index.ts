@@ -669,7 +669,7 @@ export const sandboxSettingsSchema = z.object({
     value: workspaceRequestedServiceClassSchema,
     displayName: z.string().min(1),
     description: z.string().min(1),
-  }).strict()).min(1),
+  }).strict()),
   agentIds: z.array(agentCatalogIdSchema)
     .refine(uniqueWorkspaceSelections, "Agent selections must not contain duplicates"),
   availableAgents: z.array(agentCatalogEntrySchema),
@@ -896,6 +896,11 @@ export const runtimePolicySchema = z.object({
   modelAlias: z.string().min(1).max(128).nullable(),
   mcpServer: z.string().min(1).max(128),
   requestedServiceClass: workspaceRequestedServiceClassSchema.default("auto"),
+  // Explicit organization modes projected into this workspace after applying
+  // its user/group policy. Optional only for compatibility with already-signed
+  // runtime bundles; new projections always include it.
+  allowedServiceClasses: z.array(z.enum(["lite", "balanced", "pro"]))
+    .max(3).optional(),
   maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),

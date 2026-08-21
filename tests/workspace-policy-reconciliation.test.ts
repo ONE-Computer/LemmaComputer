@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SandboxSettingsRecord } from "@lemmacomputer/workspace-store";
-import { compatibleSandboxSelection } from "../apps/control-api/src/server.js";
+import {
+  compatibleSandboxSelection,
+  shouldPersistCompatibleSandboxSelection,
+} from "../apps/control-api/src/server.js";
 
 const document = {
   workspaceProfile: "claude-desktop-standard-v1",
@@ -28,35 +31,38 @@ const saved = (agentIds: SandboxSettingsRecord["agentIds"]): SandboxSettingsReco
 });
 
 test("a removed agent is reconciled to the still-allowed saved selection", () => {
-  const selection = compatibleSandboxSelection(document, saved(["claude-desktop", "claude-cli"]), false);
+  const selection = compatibleSandboxSelection(document, saved(["claude-desktop", "claude-cli"]), null);
 
   assert.deepEqual(selection, {
     profileId: "claude-desktop-standard-v1",
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: "lemmacomputer-claude",
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: ["claude-desktop"],
     changed: true,
   });
 });
 
 test("a workspace whose only selected agent was removed reconciles to the safer base workspace", () => {
-  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-cli"]), false), {
+  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-cli"]), null), {
     profileId: "claude-desktop-standard-v1",
     applicationIds: ["firefox", "google-chrome"],
     modelAlias: null,
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: [],
     changed: true,
   });
 });
 
 test("a legacy workspace without saved sandbox settings adopts the constrained policy defaults", () => {
-  assert.deepEqual(compatibleSandboxSelection(document, null, false), {
+  assert.deepEqual(compatibleSandboxSelection(document, null, null), {
     profileId: "claude-desktop-standard-v1",
     applicationIds: ["firefox"],
     modelAlias: "lemmacomputer-claude",
     requestedServiceClass: "balanced",
+    allowedServiceClasses: ["lite", "balanced", "pro"],
     agentIds: ["claude-desktop"],
     changed: false,
   });
@@ -66,5 +72,64 @@ test("legacy saved settings without a service class adopt the constrained policy
   const legacy = saved(["claude-desktop"]);
   delete (legacy as Partial<SandboxSettingsRecord>).requestedServiceClass;
 
-  assert.equal(compatibleSandboxSelection(document, legacy, false)?.requestedServiceClass, "balanced");
+  assert.equal(compatibleSandboxSelection(document, legacy, null)?.requestedServiceClass, "balanced");
+});
+
+test("published organization routes constrain new and saved workspace selections", () => {
+  assert.deepEqual(compatibleSandboxSelection(document, null, ["lite", "pro"]), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox"],
+    modelAlias: "lemmacomputer-auto",
+    requestedServiceClass: "lite",
+    allowedServiceClasses: ["lite", "pro"],
+    agentIds: ["claude-desktop"],
+    changed: false,
+  });
+  assert.equal(compatibleSandboxSelection(document, saved(["claude-desktop"]), ["lite", "pro"]), null);
+});
+
+test("an organization without published routes reconciles to a creatable base workspace", () => {
+  assert.deepEqual(compatibleSandboxSelection(document, saved(["claude-desktop"]), []), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox", "google-chrome"],
+    modelAlias: null,
+    requestedServiceClass: "balanced",
+    allowedServiceClasses: [],
+    agentIds: [],
+    changed: true,
+  });
+  assert.deepEqual(compatibleSandboxSelection(document, null, []), {
+    profileId: "claude-desktop-standard-v1",
+    applicationIds: ["firefox"],
+    modelAlias: null,
+    requestedServiceClass: "balanced",
+    allowedServiceClasses: [],
+    agentIds: [],
+    changed: false,
+  });
+});
+
+test("temporary route removal suspends agents without deleting the saved selection", () => {
+  const desired = {
+    ...saved(["hermes-claw"]),
+    modelAlias: "lemmacomputer-auto" as const,
+    requestedServiceClass: "lite" as const,
+  };
+  const suspended = compatibleSandboxSelection(document, desired, []);
+
+  assert.ok(suspended);
+  assert.deepEqual(suspended.agentIds, []);
+  assert.equal(suspended.modelAlias, null);
+  assert.equal(suspended.changed, true);
+  assert.equal(
+    shouldPersistCompatibleSandboxSelection(suspended, []),
+    false,
+    "route availability must not overwrite desired workspace agents",
+  );
+
+  const restored = compatibleSandboxSelection(document, desired, ["lite"]);
+  assert.ok(restored);
+  assert.deepEqual(restored.agentIds, ["hermes-claw"]);
+  assert.equal(restored.modelAlias, "lemmacomputer-auto");
+  assert.equal(restored.requestedServiceClass, "lite");
 });

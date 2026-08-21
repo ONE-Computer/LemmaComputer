@@ -87,10 +87,9 @@ export async function loadAiControlPlaneOverviewData(now = new Date()) {
 
   if (!currentResult.value) throw currentResult.error;
   const teams = teamsResult.value?.teams ?? [];
-  const [budgetResults, routingResults] = await Promise.all([
-    Promise.all(teams.map((team) => safely(() => adminApi.teamBudget(team.id)))),
-    Promise.all(teams.map((team) => safely(() => adminApi.routingSettings(team.id)))),
-  ]);
+  const budgetResults = await Promise.all(
+    teams.map((team) => safely(() => adminApi.teamBudget(team.id))),
+  );
 
   return {
     report: currentResult.value.report,
@@ -101,10 +100,6 @@ export async function loadAiControlPlaneOverviewData(now = new Date()) {
       teamId: teams[index].id,
       status: result.value?.status ?? null,
     })),
-    routing: routingResults.map((result, index) => ({
-      teamId: teams[index].id,
-      settings: result.value,
-    })).filter((item) => item.settings),
     series: seriesResults.map((result, index) => ({
       from: ranges[index].from.toISOString(),
       to: ranges[index].to.toISOString(),
@@ -342,7 +337,7 @@ export function AiControlPlaneOverview({
         </section>
       </div>
 
-      <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage pricing</InlineLink></footer>
+      <footer className="ai-overview-footer"><InlineLink onClick={onOpenPricing}>Manage models & routing</InlineLink></footer>
       {emissionsDetailsOpen && <ModalDialog
         className="ai-emissions-method-modal"
         title="How this estimate is calculated"

@@ -13,6 +13,31 @@ const choose = async (page: Page, label: string, option: string) => {
   await page.getByRole("option", { name: option }).click();
 };
 
+test("uses the only ready published route as the Chat default", async ({ page }) => {
+  await page.route("**/chat/agents", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...payload,
+        serviceClassOptions: [
+          { value: "lite", available: true, reasonCode: "ready" },
+          { value: "balanced", available: false, reasonCode: "route_unavailable" },
+          { value: "pro", available: false, reasonCode: "route_unavailable" },
+        ],
+      },
+    });
+  });
+
+  await page.goto("/?view=chat");
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Lite/ })).toBeVisible();
+  await page.getByRole("button", { name: /Hermes Agent CLI · Acme Workspace · Lite/ }).click();
+  await expect(page.getByRole("combobox", { name: "Choose model mode" })).toHaveText("Lite · lowest cost");
+  await expect(page.getByText("Balanced does not have a ready route. Pro does not have a ready route.")).toBeVisible();
+  await expect(page.getByText(/Lite does not have a ready route/)).toHaveCount(0);
+});
+
 test("routes the next turn through the selected workspace, agent, and stable model mode", async ({ page }) => {
   await page.goto("/?view=chat");
 

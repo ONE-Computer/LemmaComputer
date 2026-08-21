@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { IdentityContext } from "@lemmacomputer/contracts";
 import type { GatewayClient, GovernedToolExecutionInput, GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
+import {
+  MemoryWorkspaceStore,
+  mvpPolicyDocument,
+  type EffectivePolicy,
+  type IdentityPolicyStore,
+  type RoutingStore,
+} from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -38,7 +44,29 @@ test("Control API exposes a durable approval-required operation and fixture deci
     },
   };
   const controller = {} as ControllerClient;
-  const app = createControlServer(store, controller, proxyToken, gateway, "api-fixture-approval-secret-at-least-32-characters", {}, { testIdentityMode: true });
+  const effectivePolicy: EffectivePolicy = {
+    assignmentId: "operation-policy-assignment",
+    policyBundleId: "operation-policy-bundle",
+    policyVersionId: "operation-policy-version",
+    version: 1,
+    documentHash: "a".repeat(64),
+    assignedBy: "administrator",
+    assignedAt: "2026-08-19T00:00:00.000Z",
+    agentId: "operation-agent",
+    vendorUserId: identity.subjectId,
+    document: mvpPolicyDocument(),
+  };
+  const identityPolicyStore = {
+    getEffectivePolicy: async () => effectivePolicy,
+  } as unknown as IdentityPolicyStore;
+  const routingStore = {
+    latestMappingVersion: async () => null,
+  } as unknown as RoutingStore;
+  const app = createControlServer(store, controller, proxyToken, gateway, "api-fixture-approval-secret-at-least-32-characters", {}, {
+    testIdentityMode: true,
+    identityPolicyStore,
+    routingStore,
+  });
 
   const empty = await app.inject({ method: "GET", url: "/v1/operations/recent", headers: authHeaders });
   assert.equal(empty.statusCode, 204);

@@ -29,6 +29,11 @@ CONFIGURED_SERVICE_CLASS = os.environ.get("LEMMACOMPUTER_REQUESTED_SERVICE_CLASS
 # Auto is no longer an employee-facing workspace mode. Preserve old workspace
 # projections safely by treating their legacy default as Balanced.
 DEFAULT_SERVICE_CLASS = "balanced" if CONFIGURED_SERVICE_CLASS == "auto" else CONFIGURED_SERVICE_CLASS
+ALLOWED_SERVICE_CLASSES = tuple(dict.fromkeys(
+    value for value in os.environ.get(
+        "LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES", "lite,balanced,pro"
+    ).split(",") if value
+))
 CONTROL = urlsplit(os.environ["LEMMACOMPUTER_CONTROL_UPSTREAM"])
 AGENT_BRIDGE_TOKEN = os.environ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("LEMMACOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
@@ -75,6 +80,9 @@ if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CRE
         or CONTROL.scheme not in {"http", "https"} or not CONTROL.hostname or not AGENT_BRIDGE_TOKEN_PATTERN.fullmatch(AGENT_BRIDGE_TOKEN)
         or not MODEL_ALIAS_PATTERN.fullmatch(CLIENT_MODEL_ALIAS) or not MODEL_ALIAS_PATTERN.fullmatch(MODEL_ALIAS)
         or DEFAULT_SERVICE_CLASS not in {"lite", "balanced", "pro"}
+        or not ALLOWED_SERVICE_CLASSES
+        or any(value not in {"lite", "balanced", "pro"} for value in ALLOWED_SERVICE_CLASSES)
+        or DEFAULT_SERVICE_CLASS not in ALLOWED_SERVICE_CLASSES
         or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
     raise SystemExit("invalid gateway broker configuration")
 
@@ -204,6 +212,8 @@ def task_reasoning_effort(task_binding: str) -> str | None:
 def native_service_class_for_model(requested_model: str) -> str:
     selected = NATIVE_MODEL_MODES.get(requested_model) or CLAUDE_NATIVE_MODEL_MODES.get(requested_model)
     if selected is not None:
+        if selected not in ALLOWED_SERVICE_CLASSES:
+            raise ValueError("model mode is not assigned to this workspace")
         return selected
     # Native runtimes make internal helper requests with their own model names.
     # Those requests retain the workspace default; only LemmaComputer's exact
@@ -738,9 +748,19 @@ class Handler(BaseHTTPRequestHandler):
                 "object": "list",
                 "data": [
                     {"id": model, "object": "model", "owned_by": "organization"}
-                    for model in NATIVE_MODEL_MODES
+                    for model, service_class in NATIVE_MODEL_MODES.items()
+                    if service_class in ALLOWED_SERVICE_CLASSES
                 ],
             })
+            return
+        model_prefix = "/v1/models/"
+        if path.startswith(model_prefix) and self.command == "GET" and MODEL_ALIAS == "lemmacomputer-auto":
+            model = path[len(model_prefix):]
+            service_class = NATIVE_MODEL_MODES.get(model) or CLAUDE_NATIVE_MODEL_MODES.get(model)
+            if service_class not in ALLOWED_SERVICE_CLASSES:
+                self.send_json(404, {"error": "model mode is not assigned to this workspace"})
+                return
+            self.send_json(200, {"id": model, "object": "model", "owned_by": "organization"})
             return
         is_tool_call = path == "/mcp-rest/tools/call"
         operation_prefix = "/lemmacomputer/operations/"

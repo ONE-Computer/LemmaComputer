@@ -103,6 +103,8 @@ test("workspace channels are compact, optional, and do not participate in config
   assert.match(channels, /<strong>Slack<\/strong>/);
   assert.match(channels, /Coming soon/);
   assert.match(channels, /Create this workspace without a channel/);
+  assert.match(channels, /href="\?view=settings&section=credentials">Set up a Telegram credential/);
+  assert.match(channels, /href="#sandbox-agents-heading">Review AI agents/);
   assert.doesNotMatch(channels, /telegram-allowed-user-ids"[^>]+required/);
   const footer = app.slice(app.indexOf('<div className="sandbox-management-footer">'), app.indexOf("<details className=\"sandbox-json\""));
   assert.doesNotMatch(footer, /telegram|credential|channel/i);
@@ -380,10 +382,10 @@ test("built-in connectors use locally served branded icons", async () => {
   ]);
   const svgBrands = [
     "asana", "atlassian", "box", "calendly", "clickup", "cloudflare", "exa", "figma", "fireflies", "github",
-    "google", "hubspot", "intercom", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+    "google", "hubspot", "intercom", "linear", "microsoft", "monday", "neon", "notion", "slack", "stripe", "supabase", "vercel",
   ];
   const pngBrands = [
-    "alpha-vantage", "canva", "gmail", "google-calendar", "google-drive", "intrinio", "massive", "monday",
+    "alpha-vantage", "canva", "gmail", "google-calendar", "google-drive", "intrinio", "massive",
   ];
   assert.match(app, /connectorIconFiles/);
   assert.match(app, /\/connector-icons\/\$\{connectorIconFiles\[iconBrand\]\}/);

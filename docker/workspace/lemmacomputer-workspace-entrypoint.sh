@@ -369,6 +369,7 @@ if agent_enabled claude-desktop; then
     "$LEMMACOMPUTER_MODEL_ALIAS" \
     "$LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS" \
     "$LEMMACOMPUTER_REQUESTED_SERVICE_CLASS" \
+    "$LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES" \
     "$model_label" \
     "$LEMMACOMPUTER_COWORK_ENABLED" \
     "$claude_code_for_desktop_enabled"
@@ -632,6 +633,7 @@ start_agent_broker() {
   local model_variable="${prefix}_MODEL_ALIAS"
   local transport_model_variable="${prefix}_TRANSPORT_MODEL_ALIAS"
   local service_class_variable="${prefix}_REQUESTED_SERVICE_CLASS"
+  local allowed_service_classes_variable="${prefix}_ALLOWED_SERVICE_CLASSES"
   # Claude Desktop and Hermes do not consistently attach the wrapper-issued
   # process header to native inference requests. Their catalogue-scoped
   # brokers may therefore recover identity only when exactly one
@@ -647,6 +649,7 @@ start_agent_broker() {
     LEMMACOMPUTER_MODEL_ALIAS="${!model_variable}" \
     LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS="${!transport_model_variable}" \
     LEMMACOMPUTER_REQUESTED_SERVICE_CLASS="${!service_class_variable}" \
+    LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES="${!allowed_service_classes_variable}" \
     LEMMACOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     LEMMACOMPUTER_GATEWAY_LISTEN_PORT="$port" \

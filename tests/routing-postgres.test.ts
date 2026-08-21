@@ -44,9 +44,9 @@ test(
     const admin = `admin-${suffix}`;
     const outsider = `outside-${suffix}`;
     const user = `user-${suffix}`;
-    const mapping = randomUUID();
+    let mapping = randomUUID();
     const otherMapping = randomUUID();
-    const deployment = randomUUID();
+    let deployment = randomUUID();
     const otherDeployment = randomUUID();
     const alternateExecution = randomUUID();
     try {
@@ -149,7 +149,7 @@ test(
             rateCardId: rateCard,
             capabilities,
             approved: true,
-            evaluationPassed: false,
+            evaluationPassed: true,
           },
           {
             serviceClass: "balanced",
@@ -183,17 +183,15 @@ test(
         await routing.latestMappingVersion(`missing-${suffix}`),
         null,
       );
+      mapping = publishedMapping.id;
+      deployment = publishedMapping.deployments.find((candidate) => candidate.serviceClass === "lite")!.id;
       await pool.query(
-        "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','account','private/luna','private-lite',$4,$5,true,true),($6,$7,$8,'lite','openai','other-account','other','other-lite',NULL,$5,true,true)",
+        "INSERT INTO ai_routing_deployments(id,tenant_id,mapping_version_id,service_class,provider,provider_account_id,provider_model,provider_deployment,rate_card_id,capabilities,approved,evaluation_passed) VALUES($1,$2,$3,'lite','openai','other-account','other','other-lite',NULL,$4,true,true)",
         [
-          deployment,
-          tenant,
-          mapping,
-          rateCard,
-          capabilities,
           otherDeployment,
           other,
           otherMapping,
+          capabilities,
         ],
       );
       await pool.query(
@@ -212,6 +210,24 @@ test(
         balanced: classPolicy(deployment),
         pro: classPolicy(deployment),
       };
+      const organizationPolicy = await routing.createPolicy({
+        tenantId: tenant,
+        teamId: null,
+        mappingVersionId: mapping,
+        billingCurrency: "USD",
+        serviceClassPolicies: policies,
+        identity: scope,
+        team: null,
+        createdBy: admin,
+        initializeFixedRollout: true,
+      });
+      const organizationEffective = await routing.resolveEffectivePolicy(tenant, null, [
+        { unit: "input_uncached_token", quantity: "1000" },
+        { unit: "output_token", quantity: "100" },
+      ]);
+      assert.equal(organizationEffective?.policy.policyVersionId, organizationPolicy);
+      assert.equal(organizationEffective?.policy.teamId, null);
+      assert.equal(organizationEffective?.policy.team, null);
       await assert.rejects(
         routing.createPolicy({
           tenantId: tenant,
@@ -747,6 +763,21 @@ test(
         /canonical effective deployment price/,
       );
       assert.equal((await routing.adminReadModel(other, team.id)).policy, null);
+      const emptyMapping = await routing.createMappingVersion({
+        tenantId: tenant,
+        revisionNote: "Remove every active organization route",
+        createdBy: admin,
+        deployments: [],
+      });
+      assert.deepEqual(emptyMapping.deployments, []);
+      assert.equal((await routing.latestMappingVersion(tenant))?.id, emptyMapping.id);
+      assert.equal(
+        await routing.resolveEffectivePolicy(tenant, null, [
+          { unit: "input_uncached_token", quantity: "1000" },
+        ]),
+        null,
+        "an explicit empty organization mapping must not fall back to an older rollout",
+      );
     } finally {
       await Promise.all([
         pool.end(),
