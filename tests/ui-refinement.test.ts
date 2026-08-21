@@ -382,10 +382,10 @@ test("built-in connectors use locally served branded icons", async () => {
   ]);
   const svgBrands = [
     "asana", "atlassian", "box", "calendly", "clickup", "cloudflare", "exa", "figma", "fireflies", "github",
-    "google", "hubspot", "intercom", "linear", "microsoft", "neon", "notion", "slack", "stripe", "supabase", "vercel",
+    "google", "hubspot", "intercom", "linear", "microsoft", "monday", "neon", "notion", "slack", "stripe", "supabase", "vercel",
   ];
   const pngBrands = [
-    "alpha-vantage", "canva", "gmail", "google-calendar", "google-drive", "intrinio", "massive", "monday",
+    "alpha-vantage", "canva", "gmail", "google-calendar", "google-drive", "intrinio", "massive",
   ];
   assert.match(app, /connectorIconFiles/);
   assert.match(app, /\/connector-icons\/\$\{connectorIconFiles\[iconBrand\]\}/);
