@@ -163,6 +163,7 @@ Mail.ReadWrite
 Mail.Send
 Calendars.ReadWrite
 Files.ReadWrite
+Sites.Selected
 Chat.Read
 ChatMessage.Read
 ChatMessage.Send
@@ -180,6 +181,20 @@ connector.
 when the corresponding `ReadWrite` permission above is present. If they were
 copied from an earlier setup, remove them unless another application sharing
 the registration still needs them.
+
+`Sites.Selected` does not grant access to every SharePoint site. A SharePoint
+administrator must separately grant this Entra application read access to each
+approved site. After that provider-side grant is in place:
+
+1. Open **Connections → Microsoft 365 → SharePoint sites** as a LemmaComputer administrator.
+2. Add a friendly name and the exact site URL, such as `https://contoso.sharepoint.com/sites/Finance`.
+3. Connect or reconnect the administrator's Microsoft 365 account after adding the new delegated permission.
+4. Select **Verify access**. Verification resolves the non-secret Graph site and drive identifiers through the existing user connection; the OAuth token remains in LiteLLM.
+
+Both gates remain active. Removing the site from LemmaComputer immediately
+blocks agent calls to that site, but does not remove the provider-side
+SharePoint grant. Remove that grant separately in the customer's normal
+SharePoint or Microsoft Graph administration workflow when access is retired.
 
 Carefully review the resulting permission set, select **Grant admin consent for
 <tenant>**, and verify that every row shows **Granted**. In particular,

@@ -862,6 +862,62 @@ test("owned OAuth uses a narrow per-user connection key and returns only the ups
   }
 });
 
+test("SharePoint verification uses one exact temporary tool grant and returns only parsed safe content", async () => {
+  const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? ""), body });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "ms365-server-id", server_name: "lemmacomputer_ms365" }]));
+    } else if (request.url === "/v1/mcp/server/ms365-server-id/oauth-user-credential/status") {
+      response.end(JSON.stringify({ has_credential: true, is_expired: false }));
+    } else if (request.url === "/mcp-rest/tools/call") {
+      response.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify({ id: "contoso.sharepoint.com,collection,site" }) }] }));
+    } else {
+      response.end(JSON.stringify({ ok: true }));
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const result = await liveAdapter.callUserOAuthConnectionTool(
+      identity,
+      "lemmacomputer_ms365",
+      "get-sharepoint-site-by-path",
+      { "site-id": "contoso.sharepoint.com", path: "sites/Finance" },
+    );
+    assert.deepEqual(result, { id: "contoso.sharepoint.com,collection,site" });
+    const grant = requests.find((request) => request.url === "/key/generate")!;
+    assert.deepEqual(grant.body.object_permission, {
+      mcp_servers: ["lemmacomputer_ms365"],
+      mcp_tool_permissions: { lemmacomputer_ms365: ["get-sharepoint-site-by-path"] },
+    });
+    assert.deepEqual(
+      (grant.body.metadata as Record<string, unknown>).lemmacomputer_connection_verification_tools,
+      ["get-sharepoint-site-by-path"],
+    );
+    const call = requests.find((request) => request.url === "/mcp-rest/tools/call")!;
+    assert.match(call.authorization, /^Bearer sk-occ-/);
+    assert.deepEqual(call.body, {
+      server_id: "ms365-server-id",
+      name: "get-sharepoint-site-by-path",
+      arguments: { "site-id": "contoso.sharepoint.com", path: "sites/Finance" },
+    });
+    assert.equal(requests.at(-1)?.url, "/key/delete");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("owned OAuth registers and retries a persistent MCP server when LiteLLM reports a missing client id", async () => {
   const requests: Array<{ url: string; authorization: string; body: Record<string, unknown> }> = [];
   let authorizeAttempts = 0;

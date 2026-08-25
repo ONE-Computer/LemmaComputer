@@ -4065,6 +4065,119 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
   );
 }
 
+function Microsoft365SharePointSites({ connected }) {
+  const [sites, setSites] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [draft, setDraft] = useState({ displayName: "", siteUrl: "" });
+  const [pendingRemoval, setPendingRemoval] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await adminApi.microsoft365SharePointSites();
+      setSites(result.sites ?? []);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const addSite = async (event) => {
+    event.preventDefault();
+    setBusy("add");
+    setError("");
+    try {
+      await adminApi.addMicrosoft365SharePointSite(draft);
+      setDraft({ displayName: "", siteUrl: "" });
+      await load();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const verify = async (siteId) => {
+    setBusy(`verify:${siteId}`);
+    setError("");
+    try {
+      await adminApi.verifyMicrosoft365SharePointSite(siteId);
+      await load();
+    } catch (requestError) {
+      setError(requestError.message);
+      await load();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = async (site) => {
+    setBusy(`delete:${site.id}`);
+    setError("");
+    try {
+      await adminApi.deleteMicrosoft365SharePointSite(site.id);
+      setPendingRemoval(null);
+      await load();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="sharepoint-site-administration">
+      <header>
+        <p>Selected site access</p>
+        <h2>Choose the SharePoint sites agents can use</h2>
+        <span>Adding a site creates the LemmaComputer allowlist entry. Your SharePoint administrator must separately grant this Entra application read access to that site. Verify access after both steps are complete.</span>
+      </header>
+      <section className="sharepoint-site-prerequisite" aria-label="SharePoint setup requirement">
+        <strong>Two gates protect every site</strong>
+        <span>Microsoft Graph <code>Sites.Selected</code> permission plus a site-specific read grant, and this organization allowlist. Tenant-wide SharePoint search is not enabled.</span>
+      </section>
+      <form className="sharepoint-site-form" onSubmit={addSite}>
+        <label><span>Site name</span><input value={draft.displayName} maxLength={120} placeholder="Finance policies" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} required /></label>
+        <label><span>SharePoint site URL</span><input type="url" value={draft.siteUrl} maxLength={1000} placeholder="https://contoso.sharepoint.com/sites/Finance" onChange={(event) => setDraft({ ...draft, siteUrl: event.target.value })} required /></label>
+        <button className="primary-button compact-button" type="submit" disabled={busy === "add"}>{busy === "add" ? "Adding site" : "Add site"}</button>
+      </form>
+      {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint sites were not updated</strong>{error}</span></div>}
+      {!connected && <p className="sharepoint-site-connection-note">Connect your own Microsoft 365 account on the Overview tab before verifying site access. The OAuth token remains in the gateway.</p>}
+      {loading ? <p className="sharepoint-site-empty">Loading SharePoint sites…</p> : sites.length ? (
+        <div className="sharepoint-site-list">
+          {sites.map((site) => <article key={site.id} className="sharepoint-site-row">
+            <div>
+              <div className="sharepoint-site-title"><h3>{site.displayName}</h3><span className={`sharepoint-site-status ${site.status}`}>{site.status === "verified" ? "Verified" : site.status === "verification_failed" ? "Needs attention" : "Pending verification"}</span></div>
+              <a href={site.siteUrl} target="_blank" rel="noreferrer">{site.siteUrl}</a>
+              {site.lastVerificationError && <p>{site.lastVerificationError}</p>}
+              {site.lastVerifiedAt && <small>Verified {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.lastVerifiedAt))}</small>}
+            </div>
+            <div className="sharepoint-site-actions">
+              <button className="secondary-button" type="button" onClick={() => verify(site.id)} disabled={!connected || Boolean(busy)}>{busy === `verify:${site.id}` ? "Verifying" : site.status === "verified" ? "Verify again" : "Verify access"}</button>
+              <button className="connection-quiet-button" type="button" onClick={() => setPendingRemoval(site)} disabled={Boolean(busy)}>{busy === `delete:${site.id}` ? "Removing" : "Remove"}</button>
+            </div>
+          </article>)}
+        </div>
+      ) : <p className="sharepoint-site-empty">No SharePoint sites have been added. Agents cannot resolve or browse any SharePoint site.</p>}
+      {pendingRemoval && <ConfirmDialog
+        title={`Remove ${pendingRemoval.displayName}?`}
+        description="Agents will immediately lose access through LemmaComputer. Revoke the separate SharePoint site grant in Microsoft 365 if the Entra application should also lose access."
+        confirmLabel="Remove site"
+        danger
+        busy={busy === `delete:${pendingRemoval.id}`}
+        onConfirm={() => void remove(pendingRemoval)}
+        onCancel={() => setPendingRemoval(null)}
+      />}
+    </div>
+  );
+}
+
 function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDisconnect, onAdminConsentChange, onAccessPolicySave, displayName, canManageConnector, canManagePolicy, activeTab, onTabChange, onBack, mcpPolicy, policyLoading, policySaving, onPolicyChange, onPolicySave, effectivePolicy, effectivePolicyLoading, effectivePolicyError, deliveryBusy, onRetryDelivery, onReviewWorkspacePolicies }) {
   const connected = connection?.state === "connected";
   const expired = connection?.state === "expired";
@@ -4081,7 +4194,7 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
         <div>
           <p>Connected service</p>
           <h1>Microsoft 365</h1>
-          <span>Outlook Mail, Calendar, OneDrive, and Teams</span>
+          <span>Outlook Mail, Calendar, OneDrive, SharePoint, and Teams</span>
         </div>
         <span className={`connection-status ${connected ? "connected" : expired ? "expired" : "disconnected"}`}>
           {loading ? "Checking" : organizationDisabled ? "Disabled" : connected ? "Connected" : expired ? "Reconnect required" : "Not connected"}
@@ -4090,12 +4203,15 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
 
       <nav className="connector-tabs" aria-label="Microsoft 365 settings">
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
+        {canManageConnector && <button className={activeTab === "sharepoint" ? "active" : ""} type="button" onClick={() => onTabChange("sharepoint")}>SharePoint sites</button>}
         {canManagePolicy && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Policy</button>}
       </nav>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
       {activeTab === "tools" && canManagePolicy ? (
         <ConnectorPolicyAdministration connector={connection} busy={busy} onAccessPolicySave={onAccessPolicySave} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} canManageAccess={canManageConnector} />
+      ) : activeTab === "sharepoint" && canManageConnector ? (
+        <Microsoft365SharePointSites connected={connected} />
       ) : (
         <div className="connector-overview">
           <section className="connector-overview-card">
@@ -4103,7 +4219,7 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
               <p>Connection status</p>
               <h2>{organizationDisabled ? "Disabled by your organization" : connectionLocked ? "Managed by your administrator" : connected ? "Ready for assigned workspaces" : expired ? "Microsoft access needs attention" : "Connect your work account"}</h2>
               <span>{organizationDisabled ? "Microsoft 365 tools and new connections are unavailable until an administrator enables this connector." : connectionLocked ? "Your existing connection status is visible, but only an administrator can change it." : connected ? "Your workspace agent can use the tools your organization has allowed." : "Connect once to make approved Microsoft 365 tools available to your workspace."}</span>
-              <div className="connection-services" aria-label="Included services"><span>Outlook Mail</span><span>Calendar</span><span>OneDrive</span><span>Teams</span></div>
+              <div className="connection-services" aria-label="Included services"><span>Outlook Mail</span><span>Calendar</span><span>OneDrive</span><span>SharePoint</span><span>Teams</span></div>
               {connected && <Microsoft365AccountMetadata account={connection?.account} />}
               {connectedAt && <p className="connection-metadata">Connected {connectedAt}</p>}
             </div>
@@ -4642,7 +4758,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
   const microsoft = connections.find((connector) => connector.id === "microsoft-365");
   if (view !== "list") {
     if (view.startsWith("microsoft365-") && microsoft) {
-      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} error={error} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAdminConsentChange={onCredentialsSaved} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === microsoft.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
+      return <Microsoft365Detail connection={microsoft} loading={loading} busy={busyConnectorId === microsoft.id} error={error} onConnect={() => onConnect(microsoft.id)} onDisconnect={() => onDisconnect(microsoft)} onAdminConsentChange={onCredentialsSaved} onAccessPolicySave={onAccessPolicySave} displayName={displayName} canManageConnector={Boolean(microsoft.canAdministerConnector)} canManagePolicy={canManagePolicy} activeTab={view === "microsoft365-tools" ? "tools" : view === "microsoft365-sharepoint" ? "sharepoint" : "overview"} onTabChange={(tab) => onViewChange(`microsoft365-${tab}`)} onBack={() => onViewChange("list")} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy?.connector.id === microsoft.id ? effectivePolicy : null} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={busyConnectorId === microsoft.id} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />;
     }
     const selected = connections.find((connector) => view === `connector-${connector.id}` || view === `connector-${connector.id}-tools`);
     if (selected) {

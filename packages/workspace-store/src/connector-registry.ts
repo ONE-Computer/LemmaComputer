@@ -21,6 +21,31 @@ export type ConnectorConnectionStateRecord = {
 
 export type SaveConnectorConnectionStateRecord = Omit<ConnectorConnectionStateRecord, "updatedAt">;
 
+export type Microsoft365SharePointSiteStatus = "pending" | "verified" | "verification_failed";
+
+export type Microsoft365SharePointSiteRecord = {
+  tenantId: string;
+  id: string;
+  connectorId: "microsoft-365";
+  displayName: string;
+  siteUrl: string;
+  hostname: string;
+  sitePath: string;
+  graphSiteId: string | null;
+  driveIds: string[];
+  status: Microsoft365SharePointSiteStatus;
+  lastVerifiedAt: Date | null;
+  lastVerificationError: string | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateMicrosoft365SharePointSiteInput = Pick<
+  Microsoft365SharePointSiteRecord,
+  "tenantId" | "displayName" | "siteUrl" | "hostname" | "sitePath" | "createdBy"
+>;
+
 export type ConnectorRegistryRecord = {
   tenantId: string;
   id: string;
@@ -196,6 +221,16 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
    * previously issued authorizations unusable.
    */
   deleteConnectorConnectionStates(tenantId: string, connectorId: string): Promise<number>;
+  listMicrosoft365SharePointSites(tenantId: string): Promise<Microsoft365SharePointSiteRecord[]>;
+  getMicrosoft365SharePointSite(tenantId: string, siteId: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput): Promise<Microsoft365SharePointSiteRecord>;
+  recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }): Promise<Microsoft365SharePointSiteRecord | null>;
+  recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  deleteMicrosoft365SharePointSite(tenantId: string, siteId: string): Promise<Microsoft365SharePointSiteRecord | null>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
   updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, review: ConnectorToolPolicyReview): Promise<ConnectorRegistryRecord | null>;
@@ -334,6 +369,14 @@ const cloneDiscoveryPermit = (permit: ConnectorDiscoveryEgressPermit): Connector
   createdAt: new Date(permit.createdAt),
 });
 
+const cloneMicrosoft365SharePointSite = (site: Microsoft365SharePointSiteRecord): Microsoft365SharePointSiteRecord => ({
+  ...site,
+  driveIds: [...site.driveIds],
+  lastVerifiedAt: site.lastVerifiedAt ? new Date(site.lastVerifiedAt) : null,
+  createdAt: new Date(site.createdAt),
+  updatedAt: new Date(site.updatedAt),
+});
+
 const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   tenantId: String(row.tenant_id),
   id: String(row.id),
@@ -377,6 +420,24 @@ const mapConnectionStateRow = (row: Record<string, unknown>): ConnectorConnectio
   state: row.state as ConnectorConnectionState,
   connectedAt: row.connected_at ? new Date(String(row.connected_at)) : null,
   expiresAt: row.expires_at ? new Date(String(row.expires_at)) : null,
+  updatedAt: new Date(String(row.updated_at)),
+});
+
+const mapMicrosoft365SharePointSiteRow = (row: Record<string, unknown>): Microsoft365SharePointSiteRecord => ({
+  tenantId: String(row.tenant_id),
+  id: String(row.id),
+  connectorId: "microsoft-365",
+  displayName: String(row.display_name),
+  siteUrl: String(row.site_url),
+  hostname: String(row.hostname),
+  sitePath: String(row.site_path),
+  graphSiteId: typeof row.graph_site_id === "string" ? row.graph_site_id : null,
+  driveIds: Array.isArray(row.drive_ids) ? row.drive_ids.map(String) : [],
+  status: row.status as Microsoft365SharePointSiteStatus,
+  lastVerifiedAt: row.last_verified_at ? new Date(String(row.last_verified_at)) : null,
+  lastVerificationError: typeof row.last_verification_error === "string" ? row.last_verification_error : null,
+  createdBy: String(row.created_by),
+  createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });
 
@@ -556,6 +617,78 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       [tenantId, connectorId],
     );
     return result.rowCount ?? 0;
+  }
+
+  async listMicrosoft365SharePointSites(tenantId: string) {
+    const result = await this.pool.query(
+      `SELECT * FROM microsoft365_sharepoint_sites
+       WHERE tenant_id=$1 ORDER BY display_name,id`,
+      [tenantId],
+    );
+    return result.rows.map(mapMicrosoft365SharePointSiteRow);
+  }
+
+  async getMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM microsoft365_sharepoint_sites WHERE tenant_id=$1 AND id=$2::uuid",
+      [tenantId, siteId],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput) {
+    const result = await this.pool.query(
+      `INSERT INTO microsoft365_sharepoint_sites (
+         tenant_id,id,display_name,site_url,hostname,site_path,created_by
+       ) VALUES ($1,$2::uuid,$3,$4,$5,$6,$7)
+       RETURNING *`,
+      [input.tenantId, randomUUID(), input.displayName, input.siteUrl, input.hostname, input.sitePath, input.createdBy],
+    );
+    return mapMicrosoft365SharePointSiteRow(result.rows[0]);
+  }
+
+  async recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         graph_site_id=$3,
+         drive_ids=$4::jsonb,
+         status='verified',
+         last_verified_at=$5,
+         last_verification_error=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, input.graphSiteId, JSON.stringify([...new Set(input.driveIds)].sort()), input.verifiedAt ?? new Date()],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         graph_site_id=NULL,
+         drive_ids='[]'::jsonb,
+         status='verification_failed',
+         last_verified_at=NULL,
+         last_verification_error=$3,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, error.slice(0, 320)],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async deleteMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM microsoft365_sharepoint_sites WHERE tenant_id=$1 AND id=$2::uuid RETURNING *",
+      [tenantId, siteId],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
   }
 
   async saveConnector(record: SaveConnectorRegistryRecord) {
@@ -1005,11 +1138,13 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
 export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
   private readonly records = new Map<string, ConnectorRegistryRecord>();
   private readonly connectionStates = new Map<string, ConnectorConnectionStateRecord>();
+  private readonly microsoft365SharePointSites = new Map<string, Microsoft365SharePointSiteRecord>();
   private readonly discoveryEgressPermits = new Map<string, ConnectorDiscoveryEgressPermit>();
   private readonly policyChangeEvents: ConnectorPolicyChangeEvent[] = [];
   private readonly policyDeliveryReceipts: ConnectorPolicyWorkspaceDeliveryReceipt[] = [];
   private key(tenantId: string, connectorId: string) { return `${tenantId}:${connectorId}`; }
   private connectionStateKey(tenantId: string, subjectId: string, connectorId: string) { return `${tenantId}\u0000${subjectId}\u0000${connectorId}`; }
+  private microsoft365SharePointSiteKey(tenantId: string, siteId: string) { return `${tenantId}\u0000${siteId}`; }
   private discoveryPermitKey(tenantId: string, permitId: string) { return `${tenantId}\u0000${permitId}`; }
 
   async seedConnectors(_tenantId: string, connectors: SaveConnectorRegistryRecord[]) {
@@ -1079,6 +1214,86 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       removed += 1;
     }
     return removed;
+  }
+
+  async listMicrosoft365SharePointSites(tenantId: string) {
+    return [...this.microsoft365SharePointSites.values()]
+      .filter((site) => site.tenantId === tenantId)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id))
+      .map(cloneMicrosoft365SharePointSite);
+  }
+
+  async getMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const site = this.microsoft365SharePointSites.get(this.microsoft365SharePointSiteKey(tenantId, siteId));
+    return site ? cloneMicrosoft365SharePointSite(site) : null;
+  }
+
+  async createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput) {
+    if (!this.records.has(this.key(input.tenantId, "microsoft-365"))) throw new Error("Microsoft 365 connector does not exist");
+    if ([...this.microsoft365SharePointSites.values()].some((site) => site.tenantId === input.tenantId && site.siteUrl === input.siteUrl)) {
+      throw new Error("SharePoint site already exists");
+    }
+    const now = new Date();
+    const site: Microsoft365SharePointSiteRecord = {
+      ...input,
+      id: randomUUID(),
+      connectorId: "microsoft-365",
+      graphSiteId: null,
+      driveIds: [],
+      status: "pending",
+      lastVerifiedAt: null,
+      lastVerificationError: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.microsoft365SharePointSites.set(this.microsoft365SharePointSiteKey(site.tenantId, site.id), site);
+    return cloneMicrosoft365SharePointSite(site);
+  }
+
+  async recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      graphSiteId: input.graphSiteId,
+      driveIds: [...new Set(input.driveIds)].sort(),
+      status: "verified",
+      lastVerifiedAt: input.verifiedAt ?? new Date(),
+      lastVerificationError: null,
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      graphSiteId: null,
+      driveIds: [],
+      status: "verification_failed",
+      lastVerifiedAt: null,
+      lastVerificationError: error.slice(0, 320),
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async deleteMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    this.microsoft365SharePointSites.delete(key);
+    return cloneMicrosoft365SharePointSite(current);
   }
 
   async saveConnector(record: SaveConnectorRegistryRecord) {

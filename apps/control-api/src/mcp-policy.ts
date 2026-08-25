@@ -213,7 +213,7 @@ type CapabilityDefinition = {
   displayName: string;
   description: string;
   risk: "read" | "write";
-  service: "mail" | "calendar" | "onedrive" | "teams";
+  service: "mail" | "calendar" | "onedrive" | "sharepoint" | "teams";
   mode: "allow" | "approval_required";
   parse: (argumentsValue: OwnedJson) => Record<string, OwnedJson>;
 };
@@ -229,6 +229,11 @@ export type HostedToolPolicy = {
 };
 
 export type McpRuntimePolicyResolver = (principal: SessionPrincipal, grantId: string) => Promise<RuntimePolicy | null>;
+export type Microsoft365TargetPolicy = (
+  identity: IdentityContext,
+  toolName: string,
+  argumentsValue: Record<string, OwnedJson>,
+) => Promise<boolean>;
 
 const definition = (
   capabilityId: string,
@@ -287,6 +292,13 @@ const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string,
   "list-folder-files": boundedListArguments.extend({ driveId: id, driveItemId: id }),
   "search-onedrive-files": boundedDriveSearchArguments,
   "get-drive-item": driveItemMetadataArguments,
+  "list-approved-sharepoint-sites": noArguments,
+  "get-sharepoint-site-by-path": z.strictObject({
+    "site-id": z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.sharepoint\.(?:com|us|de|cn)$/).max(253),
+    path: z.string().trim().regex(/^(?:sites|teams)\/[^/]+(?:\/[^/]+)*$/i).max(512),
+  }),
+  "get-sharepoint-site": z.strictObject({ "site-id": id }),
+  "list-sharepoint-site-drives": z.strictObject({ "site-id": id }),
   "create-onedrive-folder": z.strictObject({ driveId: id, driveItemId: id, body: createFolderBody }),
   "upload-file-content": z.strictObject({ driveId: id, driveItemId: uploadDriveItemId, body: z.string().min(1).max(5_600_000) }),
   "move-rename-onedrive-item": z.strictObject({ driveId: id, driveItemId: id, body: moveDriveItemBody }),
@@ -338,6 +350,8 @@ const displayNames: Record<keyof typeof m365ToolCatalog, string> = {
   "create-calendar-event": "Create calendar event", "update-calendar-event": "Update calendar event", "delete-calendar-event": "Delete calendar event",
   "list-drives": "List OneDrive drives", "get-drive-root-item": "Read drive root", "list-folder-files": "List folder files",
   "search-onedrive-files": "Search OneDrive", "get-drive-item": "Read OneDrive metadata", "create-onedrive-folder": "Create OneDrive folder",
+  "list-approved-sharepoint-sites": "List approved SharePoint sites",
+  "get-sharepoint-site-by-path": "Resolve approved SharePoint site", "get-sharepoint-site": "Read SharePoint site", "list-sharepoint-site-drives": "List SharePoint document libraries",
   "upload-file-content": "Upload file content", "move-rename-onedrive-item": "Move or rename OneDrive item", "copy-drive-item": "Copy OneDrive item", "delete-onedrive-file": "Delete OneDrive file",
   "list-chats": "List Teams chats", "list-chat-messages": "Read Teams chat messages", "list-joined-teams": "List joined teams",
   "list-team-channels": "List team channels", "list-channel-messages": "Read channel messages", "send-chat-message": "Send Teams chat message",
@@ -411,6 +425,7 @@ export class McpPolicyService {
     private readonly operations: GovernedOperationService,
     private readonly resolveRuntimePolicy: McpRuntimePolicyResolver,
     private readonly hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
+    private readonly microsoft365TargetPolicy?: Microsoft365TargetPolicy,
   ) {}
 
   async authorize(request: McpPolicyRequest, correlationId: string): Promise<McpPolicyDecision> {
@@ -498,6 +513,18 @@ export class McpPolicyService {
       canonicalArguments = canonicalizeOperationAudit(request.toolName, capability.parse(policyArguments));
     } catch (error) {
       return invalidArguments(error, capability);
+    }
+
+    if (
+      capability.service === "sharepoint"
+      && (!this.microsoft365TargetPolicy || !await this.microsoft365TargetPolicy(identity, request.toolName, canonicalArguments))
+    ) {
+      return denied("MCP_SHAREPOINT_SITE_NOT_APPROVED", capability, {
+        category: "policy_denial",
+        field: "site-id",
+        message: "This SharePoint site is not verified in the Microsoft 365 connector policy.",
+        retryable: false,
+      });
     }
 
     const policyDecision = assignedToolPolicies[request.toolName];

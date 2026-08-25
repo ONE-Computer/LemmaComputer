@@ -2,7 +2,7 @@
 
 LemmaComputer does not expose the broad schema published by
 `@softeria/ms-365-mcp-server` directly to workspace agents. The managed
-connector bridge projects contract version 1 for the 38 tools in
+connector bridge projects contract version 1 for the 42 tools in
 `m365ToolCatalog`; Control independently validates the same bounded calls
 before Microsoft Graph execution.
 
@@ -19,7 +19,15 @@ a reviewed profile is omitted from discovery and cannot be called.
 | Outlook mail | list folders and recent messages, then read by `messageId` | draft, update, move, send, reply, forward, or delete with resolved IDs and strictly typed message bodies |
 | Calendar | list calendars or series, or read occurrences using an explicit `startDateTime` and `endDateTime` window | create, update, or delete with resolved IDs, explicit timezone-bearing start/end values, and bounded event fields |
 | OneDrive | resolve a drive and item, search by a bounded filename query, and read exact metadata | create, upload, move, copy, or delete using resolved IDs and governed human-facing audit metadata |
+| SharePoint | list administrator-approved sites, resolve one exact site, list its document libraries, then use the bounded drive search and folder tools | not enabled; this release exposes selected-site reads only |
 | Teams | resolve chats, teams, channels, and messages in sequence | send or reply using resolved IDs and a bounded HTML message body |
+
+SharePoint has two independent authorization gates. Microsoft Graph
+`Sites.Selected` plus the SharePoint site-specific grant limit what the Entra
+application can access. **Connections → Microsoft 365 → SharePoint sites** is
+the tenant-scoped LemmaComputer allowlist. A site must be verified in that
+screen before Control authorizes its hostname/path or Graph site ID. Tenant-wide
+SharePoint site search is deliberately not exposed.
 
 Raw OData `filter`, `search`, `orderby`, `skip`, and `count` fields are not
 part of the agent contract. Neither are Graph paths, arbitrary headers,

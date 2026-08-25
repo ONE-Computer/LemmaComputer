@@ -4,7 +4,7 @@ import test from "node:test";
 import { m365ToolCatalog, type IdentityContext, type McpPolicyRequest, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type { GovernedToolExecutor } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore, runtimePolicyFor, type EffectivePolicy, type IdentityPolicyStore, type SessionPrincipal } from "@lemmacomputer/workspace-store";
-import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy, type McpRuntimePolicyResolver } from "../apps/control-api/src/mcp-policy.js";
+import { McpPolicyService, m365CapabilityDefinitions, type HostedToolPolicy, type McpRuntimePolicyResolver, type Microsoft365TargetPolicy } from "../apps/control-api/src/mcp-policy.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "../apps/control-api/src/operations.js";
 
 const identity: IdentityContext = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
@@ -15,6 +15,7 @@ const policyHash = "a".repeat(64);
 const setup = async (
   hostedToolPolicy?: (identity: IdentityContext, serverName: string, toolName: string) => Promise<HostedToolPolicy | null>,
   projectRuntimePolicy?: (assigned: EffectivePolicy, grantId: string) => RuntimePolicy | null,
+  microsoft365TargetPolicy?: Microsoft365TargetPolicy,
 ) => {
   const store = new MemoryWorkspaceStore();
   const workspace = await store.createOrGet(identity, "personal", randomUUID());
@@ -44,7 +45,7 @@ const setup = async (
       agentProfile: "lemmacomputer-default-agent",
       modelAliases: ["lemmacomputer-assistant"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "get-sharepoint-site", "list-sharepoint-site-drives", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
       capabilities: ["m365-read", "onedrive-delete-protected"],
       protectedOperations: { "onedrive-delete-protected": "approval_required", defaultWrite: "deny" },
     },
@@ -66,6 +67,7 @@ const setup = async (
     operations,
     resolveRuntimePolicy,
     hostedToolPolicy,
+    microsoft365TargetPolicy,
   );
   const base: McpPolicyRequest = {
     schemaVersion: 1,
@@ -192,10 +194,42 @@ test("MCP authorization uses the organization-composed grant policy for a non-de
 });
 
 test("the curated Microsoft 365 surface is complete and defaults every write to approval", () => {
-  assert.equal(Object.keys(m365ToolCatalog).length, 38);
+  assert.equal(Object.keys(m365ToolCatalog).length, 42);
   assert.deepEqual(Object.keys(m365CapabilityDefinitions).sort(), Object.keys(m365ToolCatalog).sort());
-  assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "read" && tool.decision === "allow").length, 17);
+  assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "read" && tool.decision === "allow").length, 21);
   assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "write" && tool.decision === "approval_required").length, 21);
+});
+
+test("SharePoint tools require an exact verified site target", async () => {
+  const approvedHost = "contoso.sharepoint.com";
+  const approvedPath = "sites/Finance";
+  const approvedId = "contoso.sharepoint.com,collection-id,site-id";
+  const targetPolicy: Microsoft365TargetPolicy = async (_identity, toolName, argumentsValue) => (
+    toolName === "get-sharepoint-site-by-path"
+      ? argumentsValue["site-id"] === approvedHost && argumentsValue.path === approvedPath
+      : argumentsValue["site-id"] === approvedId
+  );
+  const { policy, base } = await setup(undefined, undefined, targetPolicy);
+  const resolveRequest = {
+    ...base,
+    toolName: "get-sharepoint-site-by-path",
+    arguments: { "site-id": approvedHost, path: approvedPath },
+  };
+  assert.equal((await policy.authorize(resolveRequest, "sharepoint-approved-path")).decision, "allow");
+  assert.equal((await policy.authorize({
+    ...resolveRequest,
+    arguments: { "site-id": approvedHost, path: "sites/Unapproved" },
+  }, "sharepoint-blocked-path")).code, "MCP_SHAREPOINT_SITE_NOT_APPROVED");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "list-sharepoint-site-drives",
+    arguments: { "site-id": approvedId },
+  }, "sharepoint-approved-id")).decision, "allow");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "get-sharepoint-site",
+    arguments: { "site-id": "another-site" },
+  }, "sharepoint-blocked-id")).code, "MCP_SHAREPOINT_SITE_NOT_APPROVED");
 });
 
 test("upload-file-content rejects Graph endpoint wrappers before approval", () => {

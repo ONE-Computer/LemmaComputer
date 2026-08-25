@@ -108,6 +108,12 @@ export interface OAuthConnectionGateway {
   userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   disconnectUserOAuthConnection(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<OAuthConnectionTool[]>;
+  callUserOAuthConnectionTool?(
+    identity: IdentityContext,
+    serverName: string,
+    toolName: string,
+    argumentsValue: Record<string, OwnedJson>,
+  ): Promise<OwnedJson>;
 }
 
 export type McpConnectorRegistrationInput = {
@@ -822,7 +828,7 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return serverId;
   }
 
-  private async ensureConnectionGrant(identity: IdentityContext, serverName: string, options: { accountLookup?: boolean } = {}) {
+  private async ensureConnectionGrant(identity: IdentityContext, serverName: string, options: { accountLookup?: boolean; tools?: string[] } = {}) {
     const serverId = await this.resolveMcpServer(serverName);
     const grantNonce = randomBytes(12).toString("base64url");
     const credential = this.connectionCredentialFor(identity, serverName, grantNonce);
@@ -831,13 +837,21 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const keyAlias = `lemmacomputer-connection-${userId}-${serverDigest}-${grantNonce}`;
     const credentialRoute = `/v1/mcp/server/${serverId}/oauth-user-credential`;
     const accountLookup = options.accountLookup === true && serverName === "lemmacomputer_ms365";
+    const requestedTools = options.tools ?? [];
+    const verifiedTools = [...new Set(requestedTools)]
+      .filter((tool) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tool));
+    if (requestedTools.length !== verifiedTools.length) {
+      throw new LemmaComputerError("MCP_CONNECTION_TOOL_INVALID", "The connector verification tool is invalid", 500);
+    }
+    const allowedTools = accountLookup ? ["get-current-user"] : verifiedTools;
+    const canCallTools = allowedTools.length > 0;
     const allowedRoutes = [
       `/v1/mcp/server/oauth/${serverId}/authorize`,
       `/v1/mcp/server/oauth/${serverId}/token`,
       credentialRoute,
       `${credentialRoute}/status`,
       "/mcp-rest/tools/list",
-      ...(accountLookup ? ["/mcp-rest/tools/call"] : []),
+      ...(accountLookup || canCallTools ? ["/mcp-rest/tools/call"] : []),
     ];
     const durationSeconds = Math.max(60, Math.ceil(this.connectionGrantTtlMs / 1_000));
     const grant = {
@@ -856,15 +870,52 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
         lemmacomputer_connection_credential: true,
         lemmacomputer_connection_server: serverName,
         lemmacomputer_connection_account_lookup: accountLookup,
+        lemmacomputer_connection_verification_tools: allowedTools,
       },
       object_permission: {
         mcp_servers: [serverName],
-        mcp_tool_permissions: { [serverName]: accountLookup ? ["get-current-user"] : [] },
+        mcp_tool_permissions: { [serverName]: allowedTools },
       },
     };
     const generated = await this.adminCall("/key/generate", { method: "POST", body: grant }, true);
     if (!generated.ok) throw this.upstreamError("MCP_CONNECTION_GRANT_FAILED", generated.status, generated.payload);
     return { credential, serverId, keyAlias };
+  }
+
+  async callUserOAuthConnectionTool(
+    identity: IdentityContext,
+    serverName: string,
+    toolName: string,
+    argumentsValue: Record<string, OwnedJson>,
+  ): Promise<OwnedJson> {
+    const grant = await this.ensureConnectionGrant(identity, serverName, { tools: [toolName] });
+    try {
+      const status = await this.readConnectionStatus(grant.credential, grant.serverId, serverName);
+      if (status.state !== "connected") {
+        throw new LemmaComputerError("MCP_CONNECTOR_NOT_CONNECTED", "Connect Microsoft 365 before verifying SharePoint access", 409);
+      }
+      const called = await this.dataCall("/mcp-rest/tools/call", grant.credential, {
+        method: "POST",
+        body: { server_id: grant.serverId, name: toolName, arguments: argumentsValue as JsonObject },
+      });
+      if (!called.ok) throw this.upstreamError("MCP_CONNECTION_TOOL_FAILED", called.status, called.payload, "Microsoft 365 could not verify this SharePoint site.");
+      const payload = asObject(called.payload);
+      if (payload.isError === true) {
+        throw new LemmaComputerError("MCP_CONNECTION_TOOL_FAILED", "Microsoft 365 could not verify this SharePoint site. Confirm the site grant and reconnect if permissions changed.", 422);
+      }
+      const content = Array.isArray(payload.content) ? payload.content : [];
+      const text = content.map(asObject).find((item) => item.type === "text" && typeof item.text === "string")?.text;
+      if (typeof text !== "string") {
+        throw new LemmaComputerError("MCP_CONNECTION_TOOL_INVALID", "Microsoft 365 returned an invalid SharePoint verification response", 502, true);
+      }
+      try {
+        return JSON.parse(text) as OwnedJson;
+      } catch {
+        throw new LemmaComputerError("MCP_CONNECTION_TOOL_INVALID", "Microsoft 365 returned an invalid SharePoint verification response", 502, true);
+      }
+    } finally {
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
+    }
   }
 
   private async readConnectionStatus(credential: string, serverId: string, serverName: string, options: { includeAccount?: boolean } = {}): Promise<OAuthConnectionStatus> {

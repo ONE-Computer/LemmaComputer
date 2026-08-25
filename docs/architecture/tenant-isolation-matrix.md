@@ -48,6 +48,12 @@ server authority; an object-store key is an opaque locator, never authorization.
 Hosted artifact ingestion additionally matches the workspace's persisted owning
 node and generation before Control promotes staged bytes to a durable revision.
 
+Microsoft 365 selected-site configuration is organization-scoped by
+`microsoft365_sharepoint_sites.tenant_id`. Control returns only verified sites
+from the same tenant to an active workspace agent, and the stored record holds
+only canonical URLs plus non-secret Graph site/drive identifiers; OAuth tokens
+remain in the gateway credential boundary.
+
 ## Revocation and replay rules
 
 - Membership suspension, removal, organization closure, product-session revocation, and operator elevation expiry take effect at the next protected operation.

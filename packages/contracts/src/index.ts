@@ -2315,6 +2315,10 @@ export const m365ToolCatalog = {
   "list-folder-files": { service: "onedrive", risk: "read", decision: "allow" },
   "search-onedrive-files": { service: "onedrive", risk: "read", decision: "allow" },
   "get-drive-item": { service: "onedrive", risk: "read", decision: "allow" },
+  "list-approved-sharepoint-sites": { service: "sharepoint", risk: "read", decision: "allow" },
+  "get-sharepoint-site-by-path": { service: "sharepoint", risk: "read", decision: "allow" },
+  "get-sharepoint-site": { service: "sharepoint", risk: "read", decision: "allow" },
+  "list-sharepoint-site-drives": { service: "sharepoint", risk: "read", decision: "allow" },
   "create-onedrive-folder": { service: "onedrive", risk: "write", decision: "approval_required" },
   "upload-file-content": { service: "onedrive", risk: "write", decision: "approval_required" },
   "move-rename-onedrive-item": { service: "onedrive", risk: "write", decision: "approval_required" },
@@ -2330,7 +2334,7 @@ export const m365ToolCatalog = {
   "send-channel-message": { service: "teams", risk: "write", decision: "approval_required" },
   "reply-to-channel-message": { service: "teams", risk: "write", decision: "approval_required" },
 } as const satisfies Record<string, {
-  service: "mail" | "calendar" | "onedrive" | "teams";
+  service: "mail" | "calendar" | "onedrive" | "sharepoint" | "teams";
   risk: "read" | "write";
   decision: McpToolPolicyDecision;
 }>;

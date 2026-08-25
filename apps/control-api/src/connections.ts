@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { LemmaComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type RuntimePolicy } from "@lemmacomputer/contracts";
+import { LemmaComputerError, runtimePolicySchema, type IdentityContext, type McpToolPolicyDecision, type OwnedJson, type RuntimePolicy } from "@lemmacomputer/contracts";
 import type {
   McpConnectorAdministrationGateway,
   OAuthConnectionGateway,
@@ -222,6 +222,52 @@ const gatewayDestinationOrigin = (protocol: "https", host: string, port: number)
   return url.origin;
 };
 
+const canonicalSharePointSite = (input: string) => {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new LemmaComputerError("M365_SHAREPOINT_SITE_URL_INVALID", "Enter the full HTTPS URL of a SharePoint site", 400);
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.port
+    || url.search
+    || url.hash
+    || !/\.sharepoint\.(?:com|us|de|cn)$/.test(hostname)
+  ) {
+    throw new LemmaComputerError("M365_SHAREPOINT_SITE_URL_INVALID", "Enter a Microsoft SharePoint site URL without a query string or page link", 400);
+  }
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(url.pathname).replace(/\/+$/, "");
+  } catch {
+    throw new LemmaComputerError("M365_SHAREPOINT_SITE_URL_INVALID", "Enter the full HTTPS URL of a SharePoint site", 400);
+  }
+  if (!/^\/(?:sites|teams)\/[^/]+(?:\/[^/]+)*$/i.test(decodedPath) || decodedPath.length > 513) {
+    throw new LemmaComputerError("M365_SHAREPOINT_SITE_URL_INVALID", "Use a SharePoint site URL such as https://contoso.sharepoint.com/sites/Finance", 400);
+  }
+  const sitePath = decodedPath.slice(1);
+  const canonicalUrl = new URL(`https://${hostname}`);
+  canonicalUrl.pathname = decodedPath;
+  return {
+    hostname,
+    sitePath,
+    siteUrl: canonicalUrl.toString().replace(/\/$/, ""),
+  };
+};
+
+const ownedObject = (value: OwnedJson): Record<string, OwnedJson> => (
+  value && typeof value === "object" && !Array.isArray(value) ? value : {}
+);
+
+const boundedVerificationMessage = (error: unknown) => error instanceof LemmaComputerError
+  ? error.message.slice(0, 320)
+  : "Microsoft 365 could not verify the site. Confirm the SharePoint site grant, then try again.";
+
 export class McpConnectionService {
   private readonly sessions = new Map<string, PendingConnection>();
   private readonly connectorDiscoveries = new Map<string, PendingConnectorDiscovery>();
@@ -429,6 +475,114 @@ export class McpConnectionService {
 
   async adminList(identity: IdentityContext) {
     return { connectors: await this.connectors(identity.tenantId) };
+  }
+
+  async listMicrosoft365SharePointSites(identity: IdentityContext) {
+    await this.connector(identity.tenantId, "microsoft-365");
+    const sites = await this.registry.listMicrosoft365SharePointSites(identity.tenantId);
+    return { sites: sites.map((site) => ({
+      id: site.id,
+      displayName: site.displayName,
+      siteUrl: site.siteUrl,
+      hostname: site.hostname,
+      sitePath: site.sitePath,
+      status: site.status,
+      lastVerifiedAt: site.lastVerifiedAt?.toISOString() ?? null,
+      lastVerificationError: site.lastVerificationError,
+      createdAt: site.createdAt.toISOString(),
+    })) };
+  }
+
+  async createMicrosoft365SharePointSite(
+    identity: IdentityContext,
+    createdBy: string,
+    input: { displayName: string; siteUrl: string },
+  ) {
+    await this.connector(identity.tenantId, "microsoft-365");
+    const displayName = input.displayName.trim();
+    if (!displayName || displayName.length > 120) {
+      throw new LemmaComputerError("M365_SHAREPOINT_SITE_NAME_INVALID", "Enter a site name of 120 characters or fewer", 400);
+    }
+    const target = canonicalSharePointSite(input.siteUrl);
+    try {
+      return await this.registry.createMicrosoft365SharePointSite({
+        tenantId: identity.tenantId,
+        displayName,
+        ...target,
+        createdBy,
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "23505" || /already exists/i.test(String((error as Error)?.message))) {
+        throw new LemmaComputerError("M365_SHAREPOINT_SITE_EXISTS", "That SharePoint site is already in the organization allowlist", 409);
+      }
+      throw error;
+    }
+  }
+
+  async verifyMicrosoft365SharePointSite(identity: IdentityContext, siteId: string) {
+    const site = await this.registry.getMicrosoft365SharePointSite(identity.tenantId, siteId);
+    if (!site) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
+    const call = this.gateway.callUserOAuthConnectionTool;
+    if (!call) throw new LemmaComputerError("M365_SHAREPOINT_VERIFICATION_UNAVAILABLE", "SharePoint site verification is unavailable", 503, true);
+    try {
+      const resolved = ownedObject(await call.call(this.gateway, identity, "lemmacomputer_ms365", "get-sharepoint-site-by-path", {
+        "site-id": site.hostname,
+        path: site.sitePath,
+      }));
+      const graphSiteId = typeof resolved.id === "string" && resolved.id.trim() ? resolved.id.trim() : null;
+      if (!graphSiteId) throw new LemmaComputerError("M365_SHAREPOINT_VERIFICATION_INVALID", "Microsoft 365 did not return a site identifier", 502, true);
+      const drivesDocument = ownedObject(await call.call(this.gateway, identity, "lemmacomputer_ms365", "list-sharepoint-site-drives", {
+        "site-id": graphSiteId,
+      }));
+      const drives = Array.isArray(drivesDocument.value) ? drivesDocument.value : [];
+      const driveIds = drives
+        .map((drive) => ownedObject(drive).id)
+        .filter((driveId): driveId is string => typeof driveId === "string" && Boolean(driveId.trim()))
+        .map((driveId) => driveId.trim());
+      const saved = await this.registry.recordMicrosoft365SharePointSiteVerification(identity.tenantId, site.id, {
+        graphSiteId,
+        driveIds,
+      });
+      if (!saved) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
+      return saved;
+    } catch (error) {
+      await this.registry.recordMicrosoft365SharePointSiteVerificationFailure(identity.tenantId, site.id, boundedVerificationMessage(error));
+      throw error;
+    }
+  }
+
+  async deleteMicrosoft365SharePointSite(identity: IdentityContext, siteId: string) {
+    const removed = await this.registry.deleteMicrosoft365SharePointSite(identity.tenantId, siteId);
+    if (!removed) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
+    return { deleted: true, id: removed.id };
+  }
+
+  async approvedMicrosoft365SharePointSites(identity: IdentityContext) {
+    const sites = await this.registry.listMicrosoft365SharePointSites(identity.tenantId);
+    return sites
+      .filter((site) => site.status === "verified" && site.graphSiteId)
+      .map((site) => ({ displayName: site.displayName, siteUrl: site.siteUrl, hostname: site.hostname, sitePath: site.sitePath }));
+  }
+
+  async authorizeMicrosoft365SharePointTarget(
+    identity: IdentityContext,
+    toolName: string,
+    argumentsValue: Record<string, OwnedJson>,
+  ) {
+    const sites = (await this.registry.listMicrosoft365SharePointSites(identity.tenantId))
+      .filter((site) => site.status === "verified" && site.graphSiteId);
+    if (toolName === "get-sharepoint-site-by-path") {
+      const hostname = argumentsValue["site-id"];
+      const sitePath = argumentsValue.path;
+      return typeof hostname === "string" && typeof sitePath === "string" && sites.some((site) => (
+        site.hostname === hostname.toLowerCase() && site.sitePath.toLowerCase() === sitePath.replace(/^\//, "").toLowerCase()
+      ));
+    }
+    if (["get-sharepoint-site", "list-sharepoint-site-drives"].includes(toolName)) {
+      const graphSiteId = argumentsValue["site-id"];
+      return typeof graphSiteId === "string" && sites.some((site) => site.graphSiteId === graphSiteId);
+    }
+    return true;
   }
 
   async connectorPolicyAdministrationSnapshot(

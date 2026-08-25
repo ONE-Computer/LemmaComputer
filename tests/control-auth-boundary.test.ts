@@ -738,7 +738,7 @@ test("only an administrator can assign and revoke the tenant policy through Cont
 
     const policy = await app.inject({ method: "GET", url: "/v1/admin/mcp-policy", headers });
     assert.equal(policy.statusCode, 200);
-    assert.equal(policy.json().tools.length, 38);
+    assert.equal(policy.json().tools.length, 42);
 
     const incompletePolicy = await app.inject({
       method: "PUT", url: "/v1/admin/mcp-policy", headers: { ...headers, "content-type": "application/json" }, payload: { tools: {} },

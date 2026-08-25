@@ -31,12 +31,16 @@ try {
 }
 
 const names = Object.keys(m365ToolCatalog).sort();
+const localTools = new Set(["list-approved-sharepoint-sites"]);
 const evaluationFixture = JSON.parse(await readFile(new URL(
   "../tests/fixtures/microsoft365-tool-contract-evaluations.v1.json",
   import.meta.url,
 ), "utf8"));
 assert.deepEqual(evaluationFixture.agents, ["claude", "codex", "hermes"]);
 const upstreamDefinitions = Object.fromEntries(names.map((name) => {
+  if (localTools.has(name)) {
+    return [name, { source: "lemmacomputer-control-local", toolName: name }];
+  }
   const matches = upstreamEndpoints.filter((endpoint) => endpoint.toolName === name);
   assert.equal(matches.length, 1, `expected one pinned upstream definition for ${name}`);
   return [name, matches[0]];

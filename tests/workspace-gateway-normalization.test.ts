@@ -458,6 +458,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
 test("the workspace broker isolates failed and slow connector discovery and represents zero connected servers safely", async () => {
   const agentInstanceId = "33333333-3333-4333-8333-333333333333";
   let activeServers = ["lemmacomputer_ms365", "lemmacomputer_slow", "lemmacomputer_exa"];
+  let localTools = ["list-approved-sharepoint-sites"];
   let projectionHash = "a".repeat(64);
   const discoveryRequests: string[] = [];
   const toolCalls: Array<Record<string, unknown>> = [];
@@ -475,7 +476,12 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       return;
     }
     if (request.url === "/internal/v1/agent/mcp-discovery-plan") {
-      response.end(JSON.stringify({ servers: activeServers, projectionHash }));
+      response.end(JSON.stringify({ servers: activeServers, projectionHash, localTools }));
+      return;
+    }
+    if (request.url === "/internal/v1/agent/sharepoint-sites") {
+      assert.equal(request.headers["x-lemmacomputer-agent-instance-id"], agentInstanceId);
+      response.end(JSON.stringify({ sites: [{ displayName: "Finance", siteUrl: "https://contoso.sharepoint.com/sites/Finance", hostname: "contoso.sharepoint.com", sitePath: "sites/Finance" }] }));
       return;
     }
     if (request.url?.startsWith("/mcp-rest/tools/list?")) {
@@ -541,7 +547,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
 
     const signature = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/signature`);
     assert.equal(signature.status, 200);
-    assert.deepEqual(await signature.json(), { signature: projectionHash, servers: activeServers });
+    assert.deepEqual(await signature.json(), { signature: projectionHash, servers: activeServers, localTools });
     assert.deepEqual(discoveryRequests, [], "projection polling must not contact connector providers");
 
     const partiallyAvailable = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/list`);
@@ -551,7 +557,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       error: string | null;
       failedServers: Array<{ serverName: string; code: string }>;
     };
-    assert.deepEqual(partialBody.tools.map((tool) => tool.name), ["web_search"]);
+    assert.deepEqual(partialBody.tools.map((tool) => tool.name), ["web_search", "list-approved-sharepoint-sites"]);
     assert.equal(partialBody.error, "partial_failure");
     assert.deepEqual(partialBody.failedServers, [
       { serverName: "lemmacomputer_ms365", code: "http_401" },
@@ -583,7 +589,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       const listed = stdioResponses.find((response) => response.id === 1)?.result as { tools: Array<{ name: string }> };
       const listedNames = listed.tools.map((tool) => tool.name);
       assert.ok(listedNames.includes("exa__web_search"));
-      assert.equal(listedNames.some((name) => name.startsWith("microsoft365__")), false);
+      assert.ok(listedNames.includes("microsoft365__list-approved-sharepoint-sites"));
       stdio.stdin.write(`${JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
@@ -606,12 +612,27 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).outcome, "succeeded");
       assert.equal((toolTerminals[0]?.terminal as Record<string, unknown>).failureClass, null);
       assert.equal(typeof (toolTerminals[0]?.terminal as Record<string, unknown>).latencyMs, "number");
+      stdio.stdin.write(`${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "microsoft365__list-approved-sharepoint-sites", arguments: {} },
+      })}\n`);
+      for (let attempt = 0; attempt < 100 && !stdioResponses.some((response) => response.id === 3); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const approvedSites = stdioResponses.find((response) => response.id === 3)?.result as { content: Array<{ text: string }> };
+      assert.deepEqual(JSON.parse(approvedSites.content[0]!.text), {
+        sites: [{ displayName: "Finance", siteUrl: "https://contoso.sharepoint.com/sites/Finance", hostname: "contoso.sharepoint.com", sitePath: "sites/Finance" }],
+      });
+      assert.equal(toolCalls.length, 1, "the local approved-site lookup never reaches LiteLLM or Microsoft Graph");
     } finally {
       stdio.kill("SIGTERM");
       await once(stdio, "exit");
     }
 
     activeServers = [];
+    localTools = [];
     const beforeEmpty = discoveryRequests.length;
     const empty = await fetch(`http://127.0.0.1:${brokerPort}/mcp-rest/tools/list`);
     assert.equal(empty.status, 200);

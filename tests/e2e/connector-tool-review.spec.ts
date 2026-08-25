@@ -614,3 +614,68 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
   // Clearing the record is an administrator action, and this person is not one.
   await expect(approval.getByRole("button", { name: "Clear approval record" })).toHaveCount(0);
 });
+
+test("Microsoft 365 administrators can add and verify a selected SharePoint site", async ({ page }) => {
+  const microsoft = {
+    ...exaConnector,
+    id: "microsoft-365",
+    serverName: "lemmacomputer_ms365",
+    name: "Microsoft 365",
+    shortDescription: "Mail, calendar, files, SharePoint, and Teams",
+    description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway.",
+    services: ["Outlook Mail", "Calendar", "OneDrive", "SharePoint", "Teams"],
+    policySupport: "governed",
+    brand: "microsoft",
+    state: "connected",
+    connectedAt: "2026-08-25T01:00:00.000Z",
+    account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+    canAdministerConnector: true,
+    canManageConnection: true,
+    adminConsent: { required: true, available: true, grantedAt: "2026-08-24T01:00:00.000Z", providerTenantId: "11111111-2222-3333-4444-555555555555" },
+  };
+  let sites: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [microsoft] }) });
+  });
+  await page.route("**/api/v1/connections/microsoft-365", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(microsoft) });
+  });
+  await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites", async (route) => {
+    if (route.request().method() === "POST") {
+      const input = JSON.parse(route.request().postData() ?? "{}") as { displayName: string; siteUrl: string };
+      sites = [{
+        id: "2b37cc2b-e2c3-4d48-a30e-1d4dfda64d88",
+        displayName: input.displayName,
+        siteUrl: input.siteUrl,
+        hostname: "contoso.sharepoint.com",
+        sitePath: "sites/Finance",
+        status: "pending",
+        lastVerifiedAt: null,
+        lastVerificationError: null,
+        createdAt: "2026-08-25T02:00:00.000Z",
+      }];
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ site: sites[0] }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ sites }) });
+  });
+  await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites/*/verify", async (route) => {
+    sites = sites.map((site) => ({ ...site, status: "verified", lastVerifiedAt: "2026-08-25T02:01:00.000Z" }));
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ site: sites[0] }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "SharePoint sites" }).click();
+
+  await expect(page.getByRole("heading", { name: "Choose the SharePoint sites agents can use" })).toBeVisible();
+  await expect(page.getByText("Tenant-wide SharePoint search is not enabled.")).toBeVisible();
+  await page.getByLabel("Site name").fill("Finance policies");
+  await page.getByLabel("SharePoint site URL").fill("https://contoso.sharepoint.com/sites/Finance");
+  await page.getByRole("button", { name: "Add site" }).click();
+  await expect(page.getByRole("heading", { name: "Finance policies" })).toBeVisible();
+  await expect(page.getByText("Pending verification")).toBeVisible();
+  await page.getByRole("button", { name: "Verify access" }).click();
+  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
+});

@@ -610,7 +610,10 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
     path === "/internal/v1/agent/instances"
     || /^\/internal\/v1\/agent\/instances\/[^/]+\/(?:running|end)$/.test(path)
   )) return "agent:instances";
-  if (method === "GET" && path === "/internal/v1/agent/mcp-discovery-plan") return "agent:mcp-discovery";
+  if (method === "GET" && (
+    path === "/internal/v1/agent/mcp-discovery-plan"
+    || path === "/internal/v1/agent/sharepoint-sites"
+  )) return "agent:mcp-discovery";
   if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
   if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
   if (method === "POST" && (
@@ -1074,6 +1077,7 @@ export function createControlServer(
       return effective ? (await policyForGrant(actor, effective, grantId)).policy : null;
     },
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
+    connections ? (actor, toolName, argumentsValue) => connections.authorizeMicrosoft365SharePointTarget(actor, toolName, argumentsValue) : undefined,
   ) : undefined;
   const toolAudit = security.toolAuditStore ? new ToolAuditService(
     security.toolAuditStore,
@@ -2216,10 +2220,38 @@ export function createControlServer(
     if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "Connector discovery is not assigned to this workspace agent", 403);
     }
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const assignedTools = assigned?.allowedTools ?? policy.allowedTools;
+    const assignedToolPolicies = assigned?.toolPolicies ?? policy.toolPolicies;
+    const servers = policy.activeMcpServers ?? policy.mcpServers ?? [policy.mcpServer];
     return {
-      servers: policy.activeMcpServers ?? policy.mcpServers ?? [policy.mcpServer],
+      servers,
+      localTools: servers.includes("lemmacomputer_ms365")
+        && assignedTools.includes("list-approved-sharepoint-sites")
+        && assignedToolPolicies["list-approved-sharepoint-sites"] !== "deny"
+        ? ["list-approved-sharepoint-sites"]
+        : [],
       projectionHash: policy.connectionProjectionHash ?? null,
     };
+  });
+  app.get("/internal/v1/agent/sharepoint-sites", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    await requireAgentInstance(request, actor);
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((candidate) => candidate.agentId) ?? [])]);
+    const assignedTools = assigned?.allowedTools ?? policy.allowedTools;
+    const assignedToolPolicies = assigned?.toolPolicies ?? policy.toolPolicies;
+    if (
+      !allowedAgentIds.has(actor.agentId)
+      || !assignedTools.includes("list-approved-sharepoint-sites")
+      || assignedToolPolicies["list-approved-sharepoint-sites"] === "deny"
+    ) {
+      throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "SharePoint site discovery is not assigned to this workspace agent", 403);
+    }
+    return { sites: await requireConnections().approvedMicrosoft365SharePointSites(owner) };
   });
   app.post("/internal/v1/agent/usage-bindings", async (request) => {
     const actor = agentPrincipals.get(request);
@@ -4315,6 +4347,29 @@ export function createControlServer(
       type: "provider",
       resourceId: connector.id,
     })) };
+  });
+  app.get("/v1/admin/connectors/microsoft-365/sharepoint-sites", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    return requireConnections().listMicrosoft365SharePointSites(actor.identity);
+  });
+  app.post("/v1/admin/connectors/microsoft-365/sharepoint-sites", async (request, reply) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    const input = z.strictObject({
+      displayName: z.string().trim().min(1).max(120),
+      siteUrl: z.string().trim().min(12).max(1000),
+    }).parse(request.body ?? {});
+    const site = await requireConnections().createMicrosoft365SharePointSite(actor.identity, actor.userId, input);
+    return reply.code(201).send({ site });
+  });
+  app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/verify", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    const siteId = z.uuid().parse(request.params.siteId);
+    const site = await requireConnections().verifyMicrosoft365SharePointSite(actor.identity, siteId);
+    return { site };
+  });
+  app.delete<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    return requireConnections().deleteMicrosoft365SharePointSite(actor.identity, z.uuid().parse(request.params.siteId));
   });
   app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/effective-policy", async (request) => {
     const connectorId = request.params.connectorId;

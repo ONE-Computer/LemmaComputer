@@ -63,6 +63,9 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       disconnects.push(identity);
       return { state: "disconnected", connectedAt: null, expiresAt: null, account: null };
     },
+    callUserOAuthConnectionTool: async (_identity, _serverName, toolName, argumentsValue) => toolName === "get-sharepoint-site-by-path"
+      ? { id: "contoso.sharepoint.com,collection,finance" }
+      : { value: [{ id: "finance-documents" }], requested: argumentsValue },
   };
   const app = createControlServer(
     new MemoryWorkspaceStore(),
@@ -163,6 +166,28 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(linearCallback.headers.location, "http://localhost:4174/?view=connections&connector=linear&connection=connected");
     assert.deepEqual(startedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
     assert.deepEqual(completedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
+
+    const addedSite = await app.inject({
+      method: "POST",
+      url: "/v1/admin/connectors/microsoft-365/sharepoint-sites",
+      headers: headersFor(alpha),
+      payload: { displayName: "Finance", siteUrl: "https://contoso.sharepoint.com/sites/Finance" },
+    });
+    assert.equal(addedSite.statusCode, 201);
+    const siteId = addedSite.json().site.id as string;
+    const verifiedSite = await app.inject({
+      method: "POST",
+      url: `/v1/admin/connectors/microsoft-365/sharepoint-sites/${siteId}/verify`,
+      headers: headersFor(alpha),
+    });
+    assert.equal(verifiedSite.statusCode, 200);
+    assert.equal(verifiedSite.json().site.status, "verified");
+    const sites = await app.inject({
+      method: "GET",
+      url: "/v1/admin/connectors/microsoft-365/sharepoint-sites",
+      headers: headersFor(alpha),
+    });
+    assert.deepEqual(sites.json().sites.map((site: { displayName: string; status: string }) => [site.displayName, site.status]), [["Finance", "verified"]]);
 
     const disconnected = await app.inject({ method: "DELETE", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(disconnected.statusCode, 200);

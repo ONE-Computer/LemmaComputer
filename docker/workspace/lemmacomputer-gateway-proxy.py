@@ -46,6 +46,7 @@ TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 AGENT_BRIDGE_TOKEN_PATTERN = re.compile(r"^ocab2_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$")
 AGENT_INSTANCE_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+LOCAL_CONNECTOR_TOOLS = {"list-approved-sharepoint-sites"}
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
 MCP_DISCOVERY_TIMEOUT_SECONDS = 5
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
@@ -404,7 +405,7 @@ def record_tool_terminal(
     }, agent_instance_id)
 
 
-def mcp_discovery_plan() -> tuple[list[str], str]:
+def mcp_discovery_plan() -> tuple[list[str], str, list[str]]:
     plan = control_json_request("/internal/v1/agent/mcp-discovery-plan")
     raw_servers = plan.get("servers")
     if not isinstance(raw_servers, list) or len(raw_servers) > 32:
@@ -420,7 +421,11 @@ def mcp_discovery_plan() -> tuple[list[str], str]:
         projection_hash = hashlib.sha256(
             json.dumps(servers, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
-    return servers, projection_hash
+    raw_local_tools = plan.get("localTools", [])
+    if not isinstance(raw_local_tools, list) or any(tool not in LOCAL_CONNECTOR_TOOLS for tool in raw_local_tools):
+        raise ValueError("Control returned an invalid local MCP tool plan")
+    local_tools = list(dict.fromkeys(raw_local_tools))
+    return servers, projection_hash, local_tools
 
 
 def mcp_discovery_servers() -> list[str]:
@@ -478,6 +483,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.split("?", 1)[0] == "/mcp-rest/tools/signature":
             self.mcp_tool_signature()
+            return
+        if self.path == "/lemmacomputer/sharepoint-sites":
+            self.approved_sharepoint_sites()
             return
         self.forward()
 
@@ -557,11 +565,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def discover_mcp_tools(self) -> None:
         try:
-            servers = mcp_discovery_servers()
-            if not servers:
+            servers, _, local_tools = mcp_discovery_plan()
+            if not servers and not local_tools:
                 self.send_json(200, {"tools": [], "error": None, "message": "No connected MCP servers"})
                 return
-            with ThreadPoolExecutor(max_workers=min(8, len(servers))) as executor:
+            with ThreadPoolExecutor(max_workers=min(8, len(servers) or 1)) as executor:
                 results = list(executor.map(discover_mcp_server, servers))
             tools: list[dict] = []
             failures: list[dict[str, str]] = []
@@ -571,6 +579,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.log_message("MCP discovery failed server=%s code=%s", server_name, error_code or "discovery_failed")
                     continue
                 tools.extend(discovered)
+            for tool_name in local_tools:
+                tools.append({
+                    "name": tool_name,
+                    "description": "Organization-approved SharePoint site discovery governed by LemmaComputer.",
+                    "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+                    "mcp_info": {
+                        "server_id": "lemmacomputer-control-local",
+                        "server_name": "lemmacomputer_ms365",
+                    },
+                })
             self.send_json(200, {
                 "tools": tools,
                 "error": "partial_failure" if failures else None,
@@ -585,12 +603,27 @@ class Handler(BaseHTTPRequestHandler):
     def mcp_tool_signature(self) -> None:
         """Return Control's durable connector projection without probing providers."""
         try:
-            servers, signature = mcp_discovery_plan()
-            self.send_json(200, {"signature": signature, "servers": servers})
+            servers, signature, local_tools = mcp_discovery_plan()
+            self.send_json(200, {"signature": signature, "servers": servers, "localTools": local_tools})
         except AgentBridgeTerminalError as error:
             self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
             self.send_json(502, {"error": "connector_projection_unavailable", "message": "Connector projection is temporarily unavailable"})
+
+    def approved_sharepoint_sites(self) -> None:
+        try:
+            agent_instance_id = request_agent_instance_id(
+                self.headers.get("x-lemmacomputer-agent-instance-id")
+            )
+            if agent_instance_id is None:
+                raise ValueError("SharePoint site discovery requires an agent process identity")
+            self.send_json(200, control_json_request(
+                "/internal/v1/agent/sharepoint-sites", None, agent_instance_id
+            ))
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError):
+            self.send_json(502, {"error": "sharepoint_sites_unavailable", "message": "Approved SharePoint sites are temporarily unavailable"})
 
     def create_local_upload(self) -> None:
         try:

@@ -595,6 +595,19 @@ MS365_READ_INPUT_SCHEMAS = {
         "includeHeaders": {"type": "boolean", "const": True},
         "select": {"type": "string", "const": "id,name,eTag,parentReference"},
     }, ["driveId", "driveItemId", "includeHeaders", "select"]),
+    "list-approved-sharepoint-sites": NO_ARGUMENTS_INPUT_SCHEMA,
+    "get-sharepoint-site-by-path": strict_input({
+        "site-id": {
+            "type": "string", "minLength": 1, "maxLength": 253,
+            "description": "SharePoint hostname from the organization-approved site URL, for example contoso.sharepoint.com.",
+        },
+        "path": {
+            "type": "string", "minLength": 1, "maxLength": 512,
+            "description": "Approved server-relative site path without a leading slash, for example sites/Finance.",
+        },
+    }, ["site-id", "path"]),
+    "get-sharepoint-site": identified_input("site-id"),
+    "list-sharepoint-site-drives": identified_input("site-id"),
     "list-chats": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
     "list-chat-messages": identified_input("chatId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
     "list-joined-teams": NO_ARGUMENTS_INPUT_SCHEMA,
@@ -620,9 +633,13 @@ MS365_READ_DESCRIPTIONS = {
     "get-calendar-event": "Read one Outlook event by eventId. timezone may request a qualified IANA response timezone.",
     "list-drives": LIST_DRIVES_DESCRIPTION,
     "get-drive-root-item": "Read the root item of one OneDrive or SharePoint drive using a driveId returned by list-drives.",
-    "list-folder-files": "List the direct children of one OneDrive folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
+    "list-folder-files": "List the direct children of one OneDrive or approved SharePoint folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
     "search-onedrive-files": SEARCH_ONEDRIVE_DESCRIPTION,
-    "get-drive-item": "Read bounded identity and version metadata for one OneDrive item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "get-drive-item": "Read bounded identity and version metadata for one OneDrive or approved SharePoint item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "list-approved-sharepoint-sites": "List the friendly names and exact URLs of SharePoint sites verified by an organization administrator. Use this before resolving a site when the user names a site but does not provide its URL.",
+    "get-sharepoint-site-by-path": "Resolve one organization-approved SharePoint site by its exact hostname and site path. The site must be verified by an administrator in LemmaComputer.",
+    "get-sharepoint-site": "Read metadata for one organization-approved SharePoint site using the opaque site-id returned by get-sharepoint-site-by-path.",
+    "list-sharepoint-site-drives": "List document libraries for one organization-approved SharePoint site. Use a returned drive ID with the existing file search and folder tools.",
     "list-chats": "List recent Microsoft Teams chats. Use a returned chatId to read messages or send a protected reply.",
     "list-chat-messages": "Read recent messages from one Teams chat using a chatId returned by list-chats.",
     "list-joined-teams": LIST_JOINED_TEAMS_DESCRIPTION,
@@ -1136,6 +1153,22 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
     contract_error = validate_contract_arguments(selected or {}, contract_arguments)
     if contract_error:
         return contract_error
+    if upstream_name == "list-approved-sharepoint-sites":
+        try:
+            response = request_json("/lemmacomputer/sharepoint-sites", None, agent_instance_id)
+            sites = response.get("sites") if isinstance(response, dict) else None
+            if not isinstance(sites, list):
+                raise ValueError("invalid approved SharePoint site list")
+            return {
+                "content": [{"type": "text", "text": json.dumps({"sites": sites}, separators=(",", ":"))}],
+                "isError": False,
+            }
+        except (OSError, ValueError, urllib.error.URLError):
+            return error_result(
+                "The approved SharePoint site list is temporarily unavailable.",
+                category="unknown_failure",
+                retryable=True,
+            )
     if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))

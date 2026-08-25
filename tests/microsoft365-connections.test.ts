@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import type { IdentityContext, LemmaComputerError, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
+import type { IdentityContext, LemmaComputerError, OwnedJson, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
 import {
@@ -48,6 +48,8 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   onRegister?: (input: McpConnectorRegistrationInput) => void | Promise<void>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
   toolsByServer = new Map<string, FixtureTool[]>();
+  calledTools: Array<{ identity: IdentityContext; serverName: string; toolName: string; argumentsValue: Record<string, OwnedJson> }> = [];
+  onCall?: (toolName: string, argumentsValue: Record<string, OwnedJson>) => OwnedJson | Promise<OwnedJson>;
 
   async beginUserOAuthConnection(input: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0]) {
     this.started.push(input);
@@ -73,6 +75,10 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
       ? await this.onTools(identity, serverName)
       : this.toolsByServer.get(serverName) ?? [];
     return tools.map(fixtureTool);
+  }
+  async callUserOAuthConnectionTool(identity: IdentityContext, serverName: string, toolName: string, argumentsValue: Record<string, OwnedJson>) {
+    this.calledTools.push({ identity, serverName, toolName, argumentsValue });
+    return this.onCall ? this.onCall(toolName, argumentsValue) : {};
   }
   async discoverOAuthMcpServer() {
     this.discoveries += 1;
@@ -134,6 +140,80 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   assert.equal(gateway.completed[0]!.identity, alpha);
   assert.equal(gateway.completed[0]!.serverName, "lemmacomputer_ms365");
   assert.notEqual(gateway.completed[0]!.codeVerifier, request.codeChallenge);
+});
+
+test("SharePoint site administration is tenant-scoped and verification stores only non-secret Graph identifiers", async () => {
+  const gateway = new FakeConnectionGateway();
+  const registry = new MemoryConnectorRegistryStore();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
+    registry,
+  });
+  const otherTenant = { ...alpha, tenantId: "other" };
+  const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: " Finance policies ",
+    siteUrl: "https://CONTOSO.sharepoint.com/sites/Finance/",
+  });
+  assert.equal(created.displayName, "Finance policies");
+  assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/Finance");
+  assert.equal((await service.listMicrosoft365SharePointSites(otherTenant)).sites.length, 0);
+
+  gateway.onCall = async (toolName, argumentsValue) => {
+    if (toolName === "get-sharepoint-site-by-path") {
+      assert.deepEqual(argumentsValue, { "site-id": "contoso.sharepoint.com", path: "sites/Finance" });
+      return { id: "contoso.sharepoint.com,collection,finance", displayName: "Finance" };
+    }
+    assert.equal(toolName, "list-sharepoint-site-drives");
+    assert.deepEqual(argumentsValue, { "site-id": "contoso.sharepoint.com,collection,finance" });
+    return { value: [{ id: "drive-a", name: "Documents" }, { id: "drive-b", name: "Policies" }] };
+  };
+  const verified = await service.verifyMicrosoft365SharePointSite(alpha, created.id);
+  assert.equal(verified.status, "verified");
+  assert.equal(verified.graphSiteId, "contoso.sharepoint.com,collection,finance");
+  assert.deepEqual(verified.driveIds, ["drive-a", "drive-b"]);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site-by-path", {
+    "site-id": "contoso.sharepoint.com",
+    path: "sites/Finance",
+  }), true);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "list-sharepoint-site-drives", {
+    "site-id": "contoso.sharepoint.com,collection,finance",
+  }), true);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site", {
+    "site-id": "contoso.sharepoint.com,collection,other",
+  }), false);
+  assert.deepEqual(await service.approvedMicrosoft365SharePointSites(alpha), [{
+    displayName: "Finance policies",
+    siteUrl: "https://contoso.sharepoint.com/sites/Finance",
+    hostname: "contoso.sharepoint.com",
+    sitePath: "sites/Finance",
+  }]);
+  assert.deepEqual(gateway.calledTools.map((call) => call.toolName), [
+    "get-sharepoint-site-by-path",
+    "list-sharepoint-site-drives",
+  ]);
+});
+
+test("SharePoint site URLs preserve a canonical encoded URL and reject malformed encoding", async () => {
+  const service = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry: new MemoryConnectorRegistryStore(),
+  });
+  const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: "People policies",
+    siteUrl: "https://CONTOSO.sharepoint.com/sites/People%20Policies/",
+  });
+  assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/People%20Policies");
+  assert.equal(created.sitePath, "sites/People Policies");
+  await assert.rejects(
+    service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+      displayName: "Broken",
+      siteUrl: "https://contoso.sharepoint.com/sites/Bad%ZZ",
+    }),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_URL_INVALID",
+  );
 });
 
 test("connection state is one-time and cannot be finished by another user", async () => {

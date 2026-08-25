@@ -9,7 +9,7 @@ mcp_servers:
     url: http://ms365-mcp:3000/mcp
     mcp_info:
       lemmacomputer_egress_profile: internal
-    description: Governed Outlook Mail, Calendar, OneDrive, and Teams connector
+    description: Governed Outlook Mail, Calendar, OneDrive, SharePoint, and Teams connector
     auth_type: oauth2
     oauth2_flow: authorization_code
     client_id: lemmacomputer-litellm
@@ -22,6 +22,7 @@ mcp_servers:
       - Mail.Send
       - Calendars.ReadWrite
       - Files.ReadWrite
+      - Sites.Selected
       - Chat.Read
       - ChatMessage.Read
       - ChatMessage.Send
@@ -55,6 +56,9 @@ mcp_servers:
       - list-folder-files
       - search-onedrive-files
       - get-drive-item
+      - get-sharepoint-site-by-path
+      - get-sharepoint-site
+      - list-sharepoint-site-drives
       - create-onedrive-folder
       - upload-file-content
       # Internal execution-only primitive. Workspace grants never expose this
