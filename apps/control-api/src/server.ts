@@ -18,6 +18,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { MicrosoftSharePointSitePermissionClient, type MicrosoftSharePointSitePermissionGateway } from "./microsoft-sharepoint-site-permissions.js";
 import { isStaticCredentialGroup, type StaticCredentialGroup } from "./connector-catalog.js";
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
@@ -541,6 +542,9 @@ const envSchema = z.object({
   // has not configured Microsoft 365, which leaves consent links unavailable
   // rather than broken.
   M365_CLIENT_ID: z.string().default(""),
+  M365_TENANT_ID: z.string().default(""),
+  M365_SITE_ADMIN_CLIENT_ID: z.string().default(""),
+  M365_SITE_ADMIN_CLIENT_SECRET: z.string().default(""),
   CONNECTOR_CONSENT_SECRET: z.string().default(""),
   AGENT_BRIDGE_URL: z.string().url().default("http://lemmacomputer-control:4100"),
   AGENT_BRIDGE_SECRET: z.string().min(32),
@@ -685,6 +689,8 @@ export function createControlServer(
     hostedCustomConnectorEgressOrigins?: string[];
     configuredStaticMcpClients?: StaticCredentialGroup[];
     microsoftAdminConsent?: { clientId: string; consentSecret: string };
+    microsoftSharePointSitePermissions?: MicrosoftSharePointSitePermissionGateway;
+    microsoftSharePointConnectorClientId?: string;
   } = {},
   security: {
     customerAuthentication?: CustomerAuthentication;
@@ -1058,6 +1064,8 @@ export function createControlServer(
     hostedCustomConnectorEgressOrigins: connectionOptions.hostedCustomConnectorEgressOrigins,
     configuredStaticMcpClients: connectionOptions.configuredStaticMcpClients,
     microsoftAdminConsent: connectionOptions.microsoftAdminConsent,
+    microsoftSharePointSitePermissions: connectionOptions.microsoftSharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectionOptions.microsoftSharePointConnectorClientId,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -4367,6 +4375,12 @@ export function createControlServer(
     const site = await requireConnections().verifyMicrosoft365SharePointSite(actor.identity, siteId);
     return { site };
   });
+  app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/grant", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    const siteId = z.uuid().parse(request.params.siteId);
+    const site = await requireConnections().grantMicrosoft365SharePointSite(actor.identity, siteId);
+    return { site };
+  });
   app.delete<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
     return requireConnections().deleteMicrosoft365SharePointSite(actor.identity, z.uuid().parse(request.params.siteId));
@@ -6542,6 +6556,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         .split(",").map((group) => group.trim()).filter(isStaticCredentialGroup),
       ...(env.M365_CLIENT_ID && env.CONNECTOR_CONSENT_SECRET
         ? { microsoftAdminConsent: { clientId: env.M365_CLIENT_ID, consentSecret: env.CONNECTOR_CONSENT_SECRET } }
+        : {}),
+      ...(env.M365_TENANT_ID && env.M365_CLIENT_ID && env.M365_SITE_ADMIN_CLIENT_ID && env.M365_SITE_ADMIN_CLIENT_SECRET
+        ? {
+          microsoftSharePointSitePermissions: new MicrosoftSharePointSitePermissionClient({
+            fallbackProviderTenantId: env.M365_TENANT_ID,
+            administrationClientId: env.M365_SITE_ADMIN_CLIENT_ID,
+            administrationClientSecret: env.M365_SITE_ADMIN_CLIENT_SECRET,
+          }),
+          microsoftSharePointConnectorClientId: env.M365_CLIENT_ID,
+        }
         : {}),
     },
     {

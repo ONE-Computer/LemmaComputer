@@ -334,6 +334,13 @@ test("optional OAuth applications require complete credential pairs", () => {
     }, { profile: "customer-managed", strict: true }),
     /Google Workspace MCP OAuth client ID and secret must be configured together/i,
   );
+  assert.throws(
+    () => validateDeploymentEnvironment({
+      ...validCustomerManagedEnvironment(),
+      LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID: "sharepoint-admin-without-secret",
+    }, { profile: "customer-managed", strict: true }),
+    /MS365_SITE_ADMIN_CLIENT_ID.*MS365_SITE_ADMIN_CLIENT_SECRET.*configured together/i,
+  );
   const services = projectServiceEnvironment({
     ...validCustomerManagedEnvironment(),
     LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID: "google-workspace-client",
@@ -548,7 +555,15 @@ test("strict validation rejects unregistered LEMMACOMPUTER variables", () => {
 });
 
 test("service projections preserve credential and TLS key custody", () => {
-  const services = projectServiceEnvironment(validHostedEnvironment());
+  const values = {
+    ...validHostedEnvironment(),
+    LEMMACOMPUTER_MS365_TENANT_ID: "11111111-1111-4111-8111-111111111111",
+    LEMMACOMPUTER_MS365_CLIENT_ID: "22222222-2222-4222-8222-222222222222",
+    LEMMACOMPUTER_MS365_CLIENT_SECRET: "connector-secret",
+    LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID: "33333333-3333-4333-8333-333333333333",
+    LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET: "site-administrator-secret",
+  };
+  const services = projectServiceEnvironment(values);
 
   assert.ok("CHANNEL_CREDENTIAL_SECRET" in services["channel-broker"]);
   assert.ok("TELEGRAM_INTAKE_ENCRYPTION_PRIVATE_KEY_B64" in services["channel-broker"]);
@@ -567,6 +582,11 @@ test("service projections preserve credential and TLS key custody", () => {
   assert.ok("PLATFORM_AUTH_DATABASE_URL" in services["control-api"]);
   assert.ok("PLATFORM_BETTER_AUTH_SECRETS" in services["control-api"]);
   assert.ok("PLATFORM_AUTH_BOOTSTRAP_SECRET" in services["control-api"]);
+  assert.equal(services["control-api"].M365_SITE_ADMIN_CLIENT_ID, values.LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID);
+  assert.equal(services["control-api"].M365_SITE_ADMIN_CLIENT_SECRET, values.LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET);
+  assert.ok(!("M365_SITE_ADMIN_CLIENT_SECRET" in services["ms365-mcp"]));
+  assert.ok(!("M365_SITE_ADMIN_CLIENT_SECRET" in services.litellm));
+  assert.ok(!("M365_SITE_ADMIN_CLIENT_SECRET" in services.web));
   assert.match(serializeEnvironment(services["channel-broker"]), /^CHANNEL_CREDENTIAL_SECRET=/m);
 });
 

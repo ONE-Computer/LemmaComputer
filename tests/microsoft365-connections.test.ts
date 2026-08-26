@@ -11,8 +11,10 @@ import {
   withheldConnectors,
 } from "../apps/control-api/src/connector-catalog.js";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
+import type { MicrosoftSharePointSitePermissionGateway } from "../apps/control-api/src/microsoft-sharepoint-site-permissions.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
+const connectorApplicationId = "33333333-3333-4333-8333-333333333333";
 // A deployment that has registered both provider OAuth applications. Without
 // them, the connectors depending on those credentials are not published.
 const allCredentials = [...staticCredentialGroups];
@@ -117,6 +119,13 @@ const saveCurrentConnectorToolPolicy = async (
 };
 
 const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
+const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
+  grantRead: async ({ hostname, sitePath }) => ({
+    graphSiteId: `${hostname},collection,${sitePath.split("/").at(-1)?.toLowerCase()}`,
+    permissionId: `permission-${sitePath.split("/").at(-1)?.toLowerCase()}`,
+  }),
+  revoke: async () => ({ revoked: true }),
+};
 
 test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
@@ -150,6 +159,8 @@ test("SharePoint site administration is tenant-scoped and verification stores on
     authorizationOrigin: "http://localhost:3001",
     configuredStaticMcpClients: allCredentials,
     registry,
+    microsoftSharePointSitePermissions: sharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
   });
   const otherTenant = { ...alpha, tenantId: "other" };
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
@@ -158,6 +169,8 @@ test("SharePoint site administration is tenant-scoped and verification stores on
   });
   assert.equal(created.displayName, "Finance policies");
   assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/Finance");
+  assert.equal(created.microsoftAccessStatus, "granted");
+  assert.equal(created.microsoftPermissionId, "permission-finance");
   assert.equal((await service.listMicrosoft365SharePointSites(otherTenant)).sites.length, 0);
 
   gateway.onCall = async (toolName, argumentsValue) => {
@@ -195,11 +208,46 @@ test("SharePoint site administration is tenant-scoped and verification stores on
   ]);
 });
 
+test("SharePoint grants target the tenant-owned connector application when configured", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const targetedClientIds: string[] = [];
+  const service = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+    microsoftSharePointSitePermissions: {
+      grantRead: async ({ connectorClientId }) => {
+        targetedClientIds.push(connectorClientId);
+        return { graphSiteId: "contoso.sharepoint.com,collection,finance", permissionId: "permission-finance" };
+      },
+      revoke: async () => ({ revoked: true }),
+    },
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await service.list(alpha, true);
+  const tenantConnectorApplicationId = "44444444-4444-4444-8444-444444444444";
+  await registry.saveConnectorCredentials(alpha.tenantId, "microsoft-365", {
+    serverId: "tenant-ms365-server",
+    serverName: "tenant_ms365",
+    oauthClientId: tenantConnectorApplicationId,
+    updatedBy: alpha.subjectId,
+  });
+
+  await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: "Finance",
+    siteUrl: "https://contoso.sharepoint.com/sites/Finance",
+  });
+
+  assert.deepEqual(targetedClientIds, [tenantConnectorApplicationId]);
+});
+
 test("SharePoint site URLs preserve a canonical encoded URL and reject malformed encoding", async () => {
   const service = new McpConnectionService(new FakeConnectionGateway(), {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
     registry: new MemoryConnectorRegistryStore(),
+    microsoftSharePointSitePermissions: sharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
   });
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: "People policies",
@@ -214,6 +262,56 @@ test("SharePoint site URLs preserve a canonical encoded URL and reject malformed
     }),
     (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_URL_INVALID",
   );
+});
+
+test("SharePoint provider failures remain visible and revocation fails closed", async () => {
+  let operation: "grant" | "revoke" | "ok" = "grant";
+  const gateway = new FakeConnectionGateway();
+  gateway.onCall = async (toolName) => toolName === "get-sharepoint-site-by-path"
+    ? { id: "contoso.sharepoint.com,collection,legal" }
+    : { value: [{ id: "legal-documents" }] };
+  const permissions: MicrosoftSharePointSitePermissionGateway = {
+    grantRead: async () => {
+      if (operation === "grant") throw new Error("Microsoft rejected the site grant");
+      return { graphSiteId: "contoso.sharepoint.com,collection,legal", permissionId: "permission-legal" };
+    },
+    revoke: async () => {
+      if (operation === "revoke") throw new Error("Microsoft rejected the site revocation");
+      return { revoked: true };
+    },
+  };
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry: new MemoryConnectorRegistryStore(),
+    microsoftSharePointSitePermissions: permissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await assert.rejects(
+    service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+      displayName: "Legal",
+      siteUrl: "https://contoso.sharepoint.com/sites/Legal",
+    }),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_GRANT_FAILED",
+  );
+  let [site] = (await service.listMicrosoft365SharePointSites(alpha)).sites;
+  assert.equal(site?.microsoftAccessStatus, "grant_failed");
+  assert.equal(site?.microsoftLastError, "Microsoft rejected the site grant");
+
+  operation = "ok";
+  site = await service.grantMicrosoft365SharePointSite(alpha, site!.id);
+  assert.equal(site.microsoftAccessStatus, "granted");
+  site = await service.verifyMicrosoft365SharePointSite(alpha, site.id);
+  assert.equal((await service.approvedMicrosoft365SharePointSites(alpha)).length, 1);
+
+  operation = "revoke";
+  await assert.rejects(
+    service.deleteMicrosoft365SharePointSite(alpha, site.id),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_REVOCATION_FAILED",
+  );
+  [site] = (await service.listMicrosoft365SharePointSites(alpha)).sites;
+  assert.equal(site?.microsoftAccessStatus, "revocation_failed");
+  assert.equal((await service.approvedMicrosoft365SharePointSites(alpha)).length, 0);
 });
 
 test("connection state is one-time and cannot be finished by another user", async () => {

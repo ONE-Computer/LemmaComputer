@@ -4,6 +4,7 @@ import type { IdentityContext } from "@lemmacomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
+import type { MicrosoftSharePointSitePermissionGateway } from "../apps/control-api/src/microsoft-sharepoint-site-permissions.js";
 import { withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -22,6 +23,14 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   const completedServers: string[] = [];
   let providerStatusCalls = 0;
   const disconnects: IdentityContext[] = [];
+  const revokedSitePermissions: string[] = [];
+  const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
+    grantRead: async () => ({ graphSiteId: "contoso.sharepoint.com,collection,finance", permissionId: "permission-finance" }),
+    revoke: async (input) => {
+      if (input.permissionId) revokedSitePermissions.push(input.permissionId);
+      return { revoked: true };
+    },
+  };
   const gateway: GatewayClient & OAuthConnectionGateway & Pick<McpConnectorAdministrationGateway, "ensureOAuthMcpServers"> = {
     ensureGrant: async () => ({ baseUrl: "http://gateway", credential: "scoped-test-credential-000001", modelAlias: "test", expiresAt: new Date(Date.now() + 60_000).toISOString() }),
     readiness: async () => ({ models: "ready", tools: "ready" }),
@@ -77,6 +86,8 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       publicWebUrl: "http://localhost:4174",
       authorizationOrigin: "http://localhost:3001",
       configuredStaticMcpClients: ["google-workspace", "github"],
+      microsoftSharePointSitePermissions: sharePointSitePermissions,
+      microsoftSharePointConnectorClientId: "33333333-3333-4333-8333-333333333333",
     },
     { testIdentityMode: true },
   );
@@ -175,6 +186,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     });
     assert.equal(addedSite.statusCode, 201);
     const siteId = addedSite.json().site.id as string;
+    assert.equal(addedSite.json().site.microsoftAccessStatus, "granted");
     const verifiedSite = await app.inject({
       method: "POST",
       url: `/v1/admin/connectors/microsoft-365/sharepoint-sites/${siteId}/verify`,
@@ -188,6 +200,14 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       headers: headersFor(alpha),
     });
     assert.deepEqual(sites.json().sites.map((site: { displayName: string; status: string }) => [site.displayName, site.status]), [["Finance", "verified"]]);
+
+    const removedSite = await app.inject({
+      method: "DELETE",
+      url: `/v1/admin/connectors/microsoft-365/sharepoint-sites/${siteId}`,
+      headers: headersFor(alpha),
+    });
+    assert.equal(removedSite.statusCode, 200);
+    assert.deepEqual(revokedSitePermissions, ["permission-finance"]);
 
     const disconnected = await app.inject({ method: "DELETE", url: "/v1/connections/microsoft-365", headers: headersFor(alpha) });
     assert.equal(disconnected.statusCode, 200);

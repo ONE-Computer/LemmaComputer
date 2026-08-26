@@ -4368,8 +4368,11 @@ a.chat-file-part:hover {
 .sharepoint-site-row p { margin: 7px 0 0; color: #9a2f2a; font-size: 12px; line-height: 1.45; }
 .sharepoint-site-row small { display: block; margin-top: 6px; color: var(--muted); }
 .sharepoint-site-status { padding: 3px 7px; border-radius: 999px; background: #edf1f6; color: #536174; font-size: 10px; font-weight: 700; }
-.sharepoint-site-status.verified { background: #e4f4ec; color: #226446; }
-.sharepoint-site-status.verification_failed { background: #fce9e7; color: #8c332d; }
+.sharepoint-site-status.verified,
+.sharepoint-site-status.granted { background: #e4f4ec; color: #226446; }
+.sharepoint-site-status.verification_failed,
+.sharepoint-site-status.grant_failed,
+.sharepoint-site-status.revocation_failed { background: #fce9e7; color: #8c332d; }
 .sharepoint-site-actions { display: flex; gap: 8px; align-items: center; }
 .sharepoint-site-connection-note,
 .sharepoint-site-empty { margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }

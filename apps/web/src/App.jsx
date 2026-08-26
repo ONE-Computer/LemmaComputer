@@ -4067,6 +4067,7 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
 
 function Microsoft365SharePointSites({ connected }) {
   const [sites, setSites] = useState([]);
+  const [siteAdministrationAvailable, setSiteAdministrationAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -4079,10 +4080,25 @@ function Microsoft365SharePointSites({ connected }) {
     try {
       const result = await adminApi.microsoft365SharePointSites();
       setSites(result.sites ?? []);
+      setSiteAdministrationAvailable(Boolean(result.microsoftSiteAdministrationAvailable));
     } catch (requestError) {
       setError(requestError.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const grant = async (siteId) => {
+    setBusy(`grant:${siteId}`);
+    setError("");
+    try {
+      await adminApi.grantMicrosoft365SharePointSite(siteId);
+      await load();
+    } catch (requestError) {
+      await load();
+      setError(requestError.message);
+    } finally {
+      setBusy("");
     }
   };
 
@@ -4097,6 +4113,7 @@ function Microsoft365SharePointSites({ connected }) {
       setDraft({ displayName: "", siteUrl: "" });
       await load();
     } catch (requestError) {
+      await load();
       setError(requestError.message);
     } finally {
       setBusy("");
@@ -4110,8 +4127,8 @@ function Microsoft365SharePointSites({ connected }) {
       await adminApi.verifyMicrosoft365SharePointSite(siteId);
       await load();
     } catch (requestError) {
-      setError(requestError.message);
       await load();
+      setError(requestError.message);
     } finally {
       setBusy("");
     }
@@ -4125,6 +4142,7 @@ function Microsoft365SharePointSites({ connected }) {
       setPendingRemoval(null);
       await load();
     } catch (requestError) {
+      await load();
       setError(requestError.message);
     } finally {
       setBusy("");
@@ -4136,16 +4154,17 @@ function Microsoft365SharePointSites({ connected }) {
       <header>
         <p>Selected site access</p>
         <h2>Choose the SharePoint sites agents can use</h2>
-        <span>Adding a site creates the LemmaComputer allowlist entry. Your SharePoint administrator must separately grant this Entra application read access to that site. Verify access after both steps are complete.</span>
+        <span>Add a site once. LemmaComputer grants the connector read-only access in Microsoft and adds the organization allowlist entry together.</span>
       </header>
       <section className="sharepoint-site-prerequisite" aria-label="SharePoint setup requirement">
-        <strong>Two gates protect every site</strong>
-        <span>Microsoft Graph <code>Sites.Selected</code> permission plus a site-specific read grant, and this organization allowlist. Tenant-wide SharePoint search is not enabled.</span>
+        <strong>Microsoft-enforced, site-specific access</strong>
+        <span>The everyday connector keeps <code>Sites.Selected</code>. A separate control-plane application performs grant and revoke operations; its administration credential is never delivered to agents or workspaces.</span>
       </section>
+      {!siteAdministrationAvailable && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint site administration is not configured</strong>Ask the LemmaComputer operator to configure the separate Entra site-administration application before adding sites.</span></div>}
       <form className="sharepoint-site-form" onSubmit={addSite}>
         <label><span>Site name</span><input value={draft.displayName} maxLength={120} placeholder="Finance policies" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} required /></label>
         <label><span>SharePoint site URL</span><input type="url" value={draft.siteUrl} maxLength={1000} placeholder="https://contoso.sharepoint.com/sites/Finance" onChange={(event) => setDraft({ ...draft, siteUrl: event.target.value })} required /></label>
-        <button className="primary-button compact-button" type="submit" disabled={busy === "add"}>{busy === "add" ? "Adding site" : "Add site"}</button>
+        <button className="primary-button compact-button" type="submit" disabled={!siteAdministrationAvailable || busy === "add"}>{busy === "add" ? "Granting access" : "Add and grant"}</button>
       </form>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint sites were not updated</strong>{error}</span></div>}
       {!connected && <p className="sharepoint-site-connection-note">Connect your own Microsoft 365 account on the Overview tab before verifying site access. The OAuth token remains in the gateway.</p>}
@@ -4153,22 +4172,29 @@ function Microsoft365SharePointSites({ connected }) {
         <div className="sharepoint-site-list">
           {sites.map((site) => <article key={site.id} className="sharepoint-site-row">
             <div>
-              <div className="sharepoint-site-title"><h3>{site.displayName}</h3><span className={`sharepoint-site-status ${site.status}`}>{site.status === "verified" ? "Verified" : site.status === "verification_failed" ? "Needs attention" : "Pending verification"}</span></div>
+              <div className="sharepoint-site-title">
+                <h3>{site.displayName}</h3>
+                <span className={`sharepoint-site-status ${site.microsoftAccessStatus}`}>Microsoft: {site.microsoftAccessStatus === "granted" ? "Read granted" : site.microsoftAccessStatus === "revocation_failed" ? "Revoke failed" : site.microsoftAccessStatus === "grant_failed" ? "Grant failed" : "Pending"}</span>
+                <span className={`sharepoint-site-status ${site.status}`}>Agent: {site.status === "verified" ? "Verified" : site.status === "verification_failed" ? "Needs attention" : "Not verified"}</span>
+              </div>
               <a href={site.siteUrl} target="_blank" rel="noreferrer">{site.siteUrl}</a>
+              {site.microsoftLastError && <p>{site.microsoftLastError}</p>}
               {site.lastVerificationError && <p>{site.lastVerificationError}</p>}
+              {site.microsoftGrantedAt && <small>Microsoft access granted {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.microsoftGrantedAt))}</small>}
               {site.lastVerifiedAt && <small>Verified {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.lastVerifiedAt))}</small>}
             </div>
             <div className="sharepoint-site-actions">
-              <button className="secondary-button" type="button" onClick={() => verify(site.id)} disabled={!connected || Boolean(busy)}>{busy === `verify:${site.id}` ? "Verifying" : site.status === "verified" ? "Verify again" : "Verify access"}</button>
-              <button className="connection-quiet-button" type="button" onClick={() => setPendingRemoval(site)} disabled={Boolean(busy)}>{busy === `delete:${site.id}` ? "Removing" : "Remove"}</button>
+              {site.microsoftAccessStatus !== "granted" && <button className="secondary-button" type="button" onClick={() => grant(site.id)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `grant:${site.id}` ? "Granting" : "Retry grant"}</button>}
+              <button className="secondary-button" type="button" onClick={() => verify(site.id)} disabled={!connected || site.microsoftAccessStatus !== "granted" || Boolean(busy)}>{busy === `verify:${site.id}` ? "Verifying" : site.status === "verified" ? "Verify again" : "Verify agent access"}</button>
+              <button className="connection-quiet-button" type="button" onClick={() => setPendingRemoval(site)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `delete:${site.id}` ? "Revoking" : "Revoke and remove"}</button>
             </div>
           </article>)}
         </div>
       ) : <p className="sharepoint-site-empty">No SharePoint sites have been added. Agents cannot resolve or browse any SharePoint site.</p>}
       {pendingRemoval && <ConfirmDialog
         title={`Remove ${pendingRemoval.displayName}?`}
-        description="Agents will immediately lose access through LemmaComputer. Revoke the separate SharePoint site grant in Microsoft 365 if the Entra application should also lose access."
-        confirmLabel="Remove site"
+        description="LemmaComputer will revoke the connector's Microsoft permission for this site, then remove it from the organization allowlist. Agents will immediately lose access."
+        confirmLabel="Revoke and remove"
         danger
         busy={busy === `delete:${pendingRemoval.id}`}
         onConfirm={() => void remove(pendingRemoval)}

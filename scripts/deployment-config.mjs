@@ -152,6 +152,8 @@ const sections = [
     variable("LEMMACOMPUTER_MS365_TENANT_ID", "", "Dedicated Microsoft 365 MCP Entra tenant ID."),
     variable("LEMMACOMPUTER_MS365_CLIENT_ID", "", "Dedicated Microsoft 365 MCP Entra client ID."),
     variable("LEMMACOMPUTER_MS365_CLIENT_SECRET", "", "Dedicated Microsoft 365 MCP Entra client secret.", { secret: true }),
+    variable("LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID", "", "Separate control-plane Entra client ID used to grant and revoke Sites.Selected access.", { requiredWhen: "SharePoint site administration is enabled; configure it with the matching secret and Sites.FullControl.All application permission." }),
+    variable("LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET", "", "Separate control-plane Entra client secret used only for SharePoint site grant administration.", { secret: true, requiredWhen: "SharePoint site administration is enabled; configure it with the matching client ID." }),
     variable("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID", "", "Dedicated Google Workspace MCP OAuth client ID for Gmail, Drive, and Calendar.", { requiredWhen: "The Google Workspace MCP connectors are enabled; configure it with the matching secret and the LiteLLM OAuth callback." }),
     variable("LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET", "", "Dedicated Google Workspace MCP OAuth client secret for Gmail, Drive, and Calendar.", { secret: true, requiredWhen: "The Google Workspace MCP connectors are enabled; configure it with the matching client ID and the LiteLLM OAuth callback." }),
     variable("LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID", "", "GitHub MCP OAuth app client ID.", { requiredWhen: "The GitHub MCP connector is enabled; configure it with the matching secret." }),
@@ -272,6 +274,7 @@ export const environmentAliases = new Map([
 
 export const coupledEnvironmentGroups = Object.freeze([
   ["LEMMACOMPUTER_MS365_TENANT_ID", "LEMMACOMPUTER_MS365_CLIENT_ID", "LEMMACOMPUTER_MS365_CLIENT_SECRET"],
+  ["LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID", "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET"],
   ["LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_URL", "LEMMACOMPUTER_PLATFORM_SECURITY_ALERT_WEBHOOK_SECRET"],
   ["LEMMACOMPUTER_WEB_PUSH_VAPID_PUBLIC_KEY", "LEMMACOMPUTER_WEB_PUSH_VAPID_PRIVATE_KEY", "LEMMACOMPUTER_WEB_PUSH_SUBSCRIPTION_SECRET"],
   ["LEMMACOMPUTER_POLICY_SIGNING_KEY_ID", "LEMMACOMPUTER_POLICY_SIGNING_PRIVATE_KEY_B64", "LEMMACOMPUTER_POLICY_VERIFICATION_KEYS_B64"],
@@ -447,6 +450,13 @@ export function validateDeploymentEnvironment(input = {}, { profile, strict = fa
   const dedicatedPresent = ms365DedicatedApp.filter((key) => hasValue(values[key]));
   if (dedicatedPresent.length > 0 && dedicatedPresent.length < ms365DedicatedApp.length) {
     errors.push(`${ms365DedicatedApp.join(", ")} must be configured together or all left empty`);
+  }
+  const sharePointAdministratorApp = [
+    "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID",
+    "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET",
+  ];
+  if (sharePointAdministratorApp.some((key) => hasValue(values[key])) && dedicatedPresent.length !== ms365DedicatedApp.length) {
+    errors.push(`${sharePointAdministratorApp.join(", ")} require the complete dedicated Microsoft 365 connector configuration`);
   }
 
   for (const [name, keys] of Object.entries({
@@ -665,6 +675,8 @@ export function projectServiceEnvironment(input = {}) {
   const ms365Client = v("LEMMACOMPUTER_MS365_CLIENT_ID");
   const ms365Tenant = v("LEMMACOMPUTER_MS365_TENANT_ID");
   const ms365Secret = v("LEMMACOMPUTER_MS365_CLIENT_SECRET");
+  const ms365SiteAdminClient = v("LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID");
+  const ms365SiteAdminSecret = v("LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET");
   const controlUrl = `http://control-api:${runtimeDefaults.controlPort}`;
   const controllerUrl = v("LEMMACOMPUTER_WORKSPACE_NODE_URL");
   const litellmUrl = `http://${runtimeDefaults.litellmHost}:4000`;
@@ -891,6 +903,9 @@ export function projectServiceEnvironment(input = {}) {
       // administrator-consent link a customer's IT administrator opens; the
       // client secret stays with the ms365-mcp service.
       M365_CLIENT_ID: ms365Client,
+      M365_TENANT_ID: ms365Tenant,
+      M365_SITE_ADMIN_CLIENT_ID: ms365SiteAdminClient,
+      M365_SITE_ADMIN_CLIENT_SECRET: ms365SiteAdminSecret,
       CONNECTOR_CONSENT_SECRET: v("LEMMACOMPUTER_CONNECTOR_CONSENT_SECRET"),
       AGENT_BRIDGE_URL: workspaceControlUrl,
       AGENT_BRIDGE_SECRET: v("LEMMACOMPUTER_AGENT_BRIDGE_SECRET"),

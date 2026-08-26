@@ -182,19 +182,50 @@ when the corresponding `ReadWrite` permission above is present. If they were
 copied from an earlier setup, remove them unless another application sharing
 the registration still needs them.
 
-`Sites.Selected` does not grant access to every SharePoint site. A SharePoint
-administrator must separately grant this Entra application read access to each
-approved site. After that provider-side grant is in place:
+`Sites.Selected` starts with access to no SharePoint sites. LemmaComputer's
+site-administration screen creates and revokes the provider-side read grant as
+well as the tenant-scoped product allowlist. Configure its separate privileged
+application before using that screen.
 
-1. Open **Connections → Microsoft 365 → SharePoint sites** as a LemmaComputer administrator.
-2. Add a friendly name and the exact site URL, such as `https://contoso.sharepoint.com/sites/Finance`.
-3. Connect or reconnect the administrator's Microsoft 365 account after adding the new delegated permission.
-4. Select **Verify access**. Verification resolves the non-secret Graph site and drive identifiers through the existing user connection; the OAuth token remains in LiteLLM.
+### Configure the SharePoint site-administration application
 
-Both gates remain active. Removing the site from LemmaComputer immediately
-blocks agent calls to that site, but does not remove the provider-side
-SharePoint grant. Remove that grant separately in the customer's normal
-SharePoint or Microsoft Graph administration workflow when access is retired.
+Create a second confidential Entra application named, for example,
+`LemmaComputer SharePoint Site Administrator`. Do not reuse the everyday
+connector application.
+
+1. Record its **Application (client) ID** for
+   `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID`.
+2. Create a client secret and store its value as
+   `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET`.
+3. Open **API permissions → Add a permission → Microsoft Graph → Application
+   permissions** and add only `Sites.FullControl.All`.
+4. Grant administrator consent and verify that the application permission is
+   shown as granted.
+
+This application has tenant-wide SharePoint administration authority. Its
+credential is projected only into Control, never into LiteLLM, the Microsoft
+365 MCP connector, an agent, or a workspace. Store it in the deployment secret
+manager, rotate it on an operational schedule, and restrict ownership of the
+application registration. The everyday connector remains delegated and keeps
+only `Sites.Selected`.
+
+After both applications are configured:
+
+1. Connect or reconnect the user's Microsoft 365 account after adding the new
+   delegated `Sites.Selected` permission.
+2. Open **Connections → Microsoft 365 → SharePoint sites** as a LemmaComputer
+   administrator.
+3. Add a friendly name and exact site URL, such as
+   `https://contoso.sharepoint.com/sites/Finance`.
+4. Select **Add and grant**. Control obtains a short-lived application token,
+   grants the connector `read` on that site, and stores only the non-secret
+   Graph site and permission identifiers.
+5. Select **Verify agent access** to confirm the connected user's delegated
+   token can resolve the site and its document libraries.
+
+**Revoke and remove** first deletes the Microsoft site permission, then removes
+the LemmaComputer allowlist row. A provider failure retains the local row and
+reports the failure so an external permission is not silently orphaned.
 
 Carefully review the resulting permission set, select **Grant admin consent for
 <tenant>**, and verify that every row shows **Granted**. In particular,
@@ -303,6 +334,8 @@ provider keys there. Supply Microsoft 365 values only when testing that connecto
 | `LEMMACOMPUTER_MS365_TENANT_ID` | Microsoft 365 only | Connector Directory (tenant) ID |
 | `LEMMACOMPUTER_MS365_CLIENT_ID` | Microsoft 365 only | Connector Application (client) ID |
 | `LEMMACOMPUTER_MS365_CLIENT_SECRET` | Microsoft 365 only | Connector client secret **Value** |
+| `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID` | Automated selected-site administration | Separate control-plane Application (client) ID with `Sites.FullControl.All` application permission |
+| `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET` | Automated selected-site administration | Separate control-plane client secret **Value** |
 | `LEMMACOMPUTER_WEB_PUSH_VAPID_SUBJECT` | Recommended | A monitored `mailto:` security/contact address |
 
 Customer accounts and organization ownership are created through Better Auth
@@ -324,6 +357,7 @@ their values, so remove them manually after the managed-provider cutover.
 | Variables | Set when |
 | --- | --- |
 | `LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, `LEMMACOMPUTER_MS365_CLIENT_SECRET` | A separate Microsoft 365 app registration is used |
+| `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID`, `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET` | The SharePoint selected-site grant UI is enabled; configure both against the same Entra tenant as the connector |
 | `LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID`, `LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET` | The built-in GitHub connector is enabled |
 | `LEMMACOMPUTER_BOOTSTRAP_TENANT_ID`, `LEMMACOMPUTER_BOOTSTRAP_USER_ID`, `LEMMACOMPUTER_TENANT_DISPLAY_NAME` | The initial local organization identifiers/display name need customization |
 | Public URL and port variables | The deployment is intentionally using origins other than the localhost defaults |

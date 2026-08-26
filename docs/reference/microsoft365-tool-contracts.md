@@ -25,7 +25,9 @@ a reviewed profile is omitted from discovery and cannot be called.
 SharePoint has two independent authorization gates. Microsoft Graph
 `Sites.Selected` plus the SharePoint site-specific grant limit what the Entra
 application can access. **Connections → Microsoft 365 → SharePoint sites** is
-the tenant-scoped LemmaComputer allowlist. A site must be verified in that
+the tenant-scoped administration surface: a separate control-plane application
+creates or revokes the Microsoft grant while Control maintains the product
+allowlist. A site must be provider-granted and user-token verified in that
 screen before Control authorizes its hostname/path or Graph site ID. Tenant-wide
 SharePoint site search is deliberately not exposed.
 
