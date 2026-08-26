@@ -3995,6 +3995,7 @@ function ConnectorPolicyAdministration({ connector, busy, onAccessPolicySave, mc
 
 function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
   const consent = connection?.adminConsent;
+  const sharePointConsent = consent?.sharePointSiteAdministration;
   const [link, setLink] = useState(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -4002,6 +4003,12 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
   const grantedAt = consent?.grantedAt
     ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(consent.grantedAt))
     : null;
+  const sharePointGrantedAt = sharePointConsent?.grantedAt
+    ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(sharePointConsent.grantedAt))
+    : null;
+  const approvalComplete = Boolean(grantedAt) && (!sharePointConsent?.required || Boolean(sharePointGrantedAt));
+  const approvalAvailable = consent?.available !== false
+    && (!sharePointConsent?.required || sharePointConsent?.available !== false);
   const requestLink = async () => {
     setBusy("link");
     setError("");
@@ -4040,14 +4047,20 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
     <section className="connector-consent-card" aria-labelledby="connector-consent-heading">
       <div>
         <h2 id="connector-consent-heading">Administrator approval</h2>
-        {grantedAt
-          ? <p>An administrator for your organization approved {connection.name} on {grantedAt}. Anyone here can connect their own account.</p>
-          : <p>{connection.name} reads Teams channels across your whole organization, which no individual can approve for themselves. If whoever administers your Microsoft directory has already approved it there, you can connect now. If not, send them this link; once they approve it, everyone here can connect their own account.</p>}
+        {approvalComplete
+          ? <p>An administrator approved the Microsoft 365 connector and SharePoint site management. People can connect their accounts, and LemmaComputer administrators can manage selected sites.</p>
+          : sharePointConsent?.required
+            ? <p>Send one approval link to your Microsoft directory administrator. Microsoft presents the connector permissions first and the separate SharePoint site-management permission second. This is a one-time setup for the organization.</p>
+            : <p>{connection.name} needs directory administrator approval before people can connect their accounts. Send the approval link to whoever administers your Microsoft directory.</p>}
+        <div className="connector-consent-progress" aria-label="Microsoft administrator approval progress">
+          <span><strong>1. Microsoft 365 connector</strong>{grantedAt ? `Approved ${grantedAt}` : "Waiting for approval"}</span>
+          {sharePointConsent?.required && <span><strong>2. SharePoint site management</strong>{sharePointGrantedAt ? `Approved ${sharePointGrantedAt}` : "Waiting for approval"}</span>}
+        </div>
         {error && <span role="alert">{error}</span>}
       </div>
-      {!grantedAt && <div className="connector-consent-actions">
-        {consent?.available === false
-          ? <p className="connector-consent-unavailable">This deployment has no Microsoft application configured, so there is nothing to approve yet. Ask whoever operates LemmaComputer to set one up.</p>
+      {!approvalComplete && <div className="connector-consent-actions">
+        {!approvalAvailable
+          ? <p className="connector-consent-unavailable">This deployment has not finished configuring both Microsoft applications, so the approval journey is unavailable. Ask whoever operates LemmaComputer to complete the platform setup.</p>
           : link
             ? <>
               <label>
@@ -4056,9 +4069,9 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
               </label>
               <button className="secondary-button" type="button" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
             </>
-            : <button className="primary-button" type="button" onClick={requestLink} disabled={Boolean(busy)}>{busy === "link" ? "Preparing link" : "Get approval link"}</button>}
+            : <button className="primary-button" type="button" onClick={requestLink} disabled={Boolean(busy)}>{busy === "link" ? "Preparing link" : "Get Microsoft approval link"}</button>}
       </div>}
-      {grantedAt && canManageConnector && <div className="connector-consent-actions">
+      {(grantedAt || sharePointGrantedAt) && canManageConnector && <div className="connector-consent-actions">
         <button className="connection-quiet-button" type="button" onClick={forget} disabled={Boolean(busy)}>{busy === "forget" ? "Clearing" : "Clear approval record"}</button>
       </div>}
     </section>
@@ -4067,6 +4080,7 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
 
 function Microsoft365SharePointSites({ connected }) {
   const [sites, setSites] = useState([]);
+  const [siteAdministrationConfigured, setSiteAdministrationConfigured] = useState(false);
   const [siteAdministrationAvailable, setSiteAdministrationAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -4080,6 +4094,7 @@ function Microsoft365SharePointSites({ connected }) {
     try {
       const result = await adminApi.microsoft365SharePointSites();
       setSites(result.sites ?? []);
+      setSiteAdministrationConfigured(Boolean(result.microsoftSiteAdministrationConfigured));
       setSiteAdministrationAvailable(Boolean(result.microsoftSiteAdministrationAvailable));
     } catch (requestError) {
       setError(requestError.message);
@@ -4160,7 +4175,9 @@ function Microsoft365SharePointSites({ connected }) {
         <strong>Microsoft-enforced, site-specific access</strong>
         <span>The everyday connector keeps <code>Sites.Selected</code>. A separate control-plane application performs grant and revoke operations; its administration credential is never delivered to agents or workspaces.</span>
       </section>
-      {!siteAdministrationAvailable && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint site administration is not configured</strong>Ask the LemmaComputer operator to configure the separate Entra site-administration application before adding sites.</span></div>}
+      {!siteAdministrationConfigured
+        ? <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint site administration is not configured</strong>Ask the LemmaComputer operator to configure the platform application before adding sites.</span></div>
+        : !siteAdministrationAvailable && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Microsoft administrator approval is required</strong>Complete the one-time Microsoft approval journey on the Overview tab before adding sites.</span></div>}
       <form className="sharepoint-site-form" onSubmit={addSite}>
         <label><span>Site name</span><input value={draft.displayName} maxLength={120} placeholder="Finance policies" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} required /></label>
         <label><span>SharePoint site URL</span><input type="url" value={draft.siteUrl} maxLength={1000} placeholder="https://contoso.sharepoint.com/sites/Finance" onChange={(event) => setDraft({ ...draft, siteUrl: event.target.value })} required /></label>

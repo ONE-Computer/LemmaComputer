@@ -573,7 +573,13 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
     brand: "microsoft",
     canAdministerConnector: false,
     credentials: null,
-    adminConsent: { required: true, available: true, grantedAt: null, providerTenantId: null },
+    adminConsent: {
+      required: true,
+      available: true,
+      grantedAt: null,
+      providerTenantId: null,
+      sharePointSiteAdministration: { required: true, available: true, grantedAt: null, providerTenantId: null },
+    },
   };
   const consentUrl = "https://login.microsoftonline.com/organizations/v2.0/adminconsent"
     + "?client_id=11111111-2222-3333-4444-555555555555"
@@ -605,11 +611,10 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
   // The employee is told what is blocking them and why they cannot fix it
   // themselves, instead of being sent to a Microsoft page they cannot act on.
   const approval = page.getByRole("region", { name: "Administrator approval" });
-  await expect(approval).toContainText("no individual can approve for themselves");
-  // A single-tenant installation whose operator already consented in the Entra
-  // portal must not be told it is blocked, so the copy covers both directories.
-  await expect(approval).toContainText("already approved it there, you can connect now");
-  await approval.getByRole("button", { name: "Get approval link" }).click();
+  await expect(approval).toContainText("one approval link");
+  await expect(approval).toContainText("1. Microsoft 365 connector");
+  await expect(approval).toContainText("2. SharePoint site management");
+  await approval.getByRole("button", { name: "Get Microsoft approval link" }).click();
   await expect(approval.getByLabel("Approval link")).toHaveValue(consentUrl);
   // Clearing the record is an administrator action, and this person is not one.
   await expect(approval.getByRole("button", { name: "Clear approval record" })).toHaveCount(0);
@@ -631,7 +636,18 @@ test("Microsoft 365 administrators can grant and verify a selected SharePoint si
     account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
     canAdministerConnector: true,
     canManageConnection: true,
-    adminConsent: { required: true, available: true, grantedAt: "2026-08-24T01:00:00.000Z", providerTenantId: "11111111-2222-3333-4444-555555555555" },
+    adminConsent: {
+      required: true,
+      available: true,
+      grantedAt: "2026-08-24T01:00:00.000Z",
+      providerTenantId: "11111111-2222-3333-4444-555555555555",
+      sharePointSiteAdministration: {
+        required: true,
+        available: true,
+        grantedAt: "2026-08-24T01:01:00.000Z",
+        providerTenantId: "11111111-2222-3333-4444-555555555555",
+      },
+    },
   };
   let sites: Array<Record<string, unknown>> = [];
   await page.route("**/api/v1/connections", async (route) => {
@@ -660,7 +676,7 @@ test("Microsoft 365 administrators can grant and verify a selected SharePoint si
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ site: sites[0] }) });
       return;
     }
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ microsoftSiteAdministrationAvailable: true, sites }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ microsoftSiteAdministrationConfigured: true, microsoftSiteAdministrationAvailable: true, sites }) });
   });
   await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites/*/verify", async (route) => {
     sites = sites.map((site) => ({ ...site, status: "verified", lastVerifiedAt: "2026-08-25T02:01:00.000Z" }));

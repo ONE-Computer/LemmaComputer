@@ -31,6 +31,12 @@ allowlist. A site must be provider-granted and user-token verified in that
 screen before Control authorizes its hostname/path or Graph site ID. Tenant-wide
 SharePoint site search is deliberately not exposed.
 
+Hosted customer administrators receive one organization-bound approval link.
+Microsoft presents the connector consent and the separate site-administration
+consent sequentially; consent creates service principals in the customer
+directory, not customer-owned app registrations. Control records both provider
+tenant IDs and refuses site administration when they differ.
+
 Raw OData `filter`, `search`, `orderby`, `skip`, and `count` fields are not
 part of the agent contract. Neither are Graph paths, arbitrary headers,
 unbounded pagination, or upstream response-shaping flags. The few constant

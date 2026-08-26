@@ -189,9 +189,12 @@ application before using that screen.
 
 ### Configure the SharePoint site-administration application
 
-Create a second confidential Entra application named, for example,
-`LemmaComputer SharePoint Site Administrator`. Do not reuse the everyday
-connector application.
+The LemmaComputer platform operator creates one second confidential Entra
+application named, for example, `LemmaComputer SharePoint Site Administrator`.
+Do not reuse the everyday connector application and do not ask every customer
+to create another registration. For hosted SaaS, register this once in the
+platform home tenant as **Accounts in any organizational directory**. Customer
+consent creates a tenant-local Enterprise Application (service principal).
 
 1. Record its **Application (client) ID** for
    `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID`.
@@ -199,8 +202,11 @@ connector application.
    `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET`.
 3. Open **API permissions → Add a permission → Microsoft Graph → Application
    permissions** and add only `Sites.FullControl.All`.
-4. Grant administrator consent and verify that the application permission is
-   shown as granted.
+4. Add the web redirect URI
+   `<public-url>/api/v1/connections/microsoft-365/sharepoint-admin-consent/callback`.
+5. In a customer-managed installation, grant administrator consent directly.
+   In hosted mode, each customer's directory administrator grants consent
+   through LemmaComputer's approval journey instead.
 
 This application has tenant-wide SharePoint administration authority. Its
 credential is projected only into Control, never into LiteLLM, the Microsoft
@@ -209,18 +215,22 @@ manager, rotate it on an operational schedule, and restrict ownership of the
 application registration. The everyday connector remains delegated and keeps
 only `Sites.Selected`.
 
-After both applications are configured:
+After both platform applications are configured:
 
-1. Connect or reconnect the user's Microsoft 365 account after adding the new
-   delegated `Sites.Selected` permission.
-2. Open **Connections → Microsoft 365 → SharePoint sites** as a LemmaComputer
+1. Open **Connections → Microsoft 365 → Overview** and select **Get Microsoft
+   approval link**. One signed, shareable link presents the connector consent
+   and then the SharePoint site-administration consent in sequence. The
+   customer administrator creates no registrations or secrets.
+2. Connect or reconnect the user's Microsoft 365 account after the approval
+   journey and after adding delegated `Sites.Selected`.
+3. Open **Connections → Microsoft 365 → SharePoint sites** as a LemmaComputer
    administrator.
-3. Add a friendly name and exact site URL, such as
+4. Add a friendly name and exact site URL, such as
    `https://contoso.sharepoint.com/sites/Finance`.
-4. Select **Add and grant**. Control obtains a short-lived application token,
+5. Select **Add and grant**. Control obtains a short-lived application token,
    grants the connector `read` on that site, and stores only the non-secret
    Graph site and permission identifiers.
-5. Select **Verify agent access** to confirm the connected user's delegated
+6. Select **Verify agent access** to confirm the connected user's delegated
    token can resolve the site and its document libraries.
 
 **Revoke and remove** first deletes the Microsoft site permission, then removes
@@ -244,15 +254,17 @@ registered the application usually grants consent once in the Entra portal
 under **API permissions → Grant admin consent**, and nothing else is needed.
 
 Where the connector is used by a directory the operator does not administer,
-the Connections screen offers an approval link that a member can send to their
-own directory administrator. That link points at Microsoft's
-`/organizations/v2.0/adminconsent` endpoint and returns the administrator to
-the redirect URI above, where LemmaComputer records the grant for that
-organization. It requires:
+the Connections screen offers one approval link that a member can send to
+their directory administrator. Microsoft first reviews the connector app and
+then the separate SharePoint site-administration app. Both return through
+signed, organization-bound callbacks, and LemmaComputer records each grant
+independently. It requires:
 
-- `LEMMACOMPUTER_MS365_CLIENT_ID`, so Control knows which application to name;
-  and
-- the admin-consent redirect URI registered on that application.
+- `LEMMACOMPUTER_MS365_CLIENT_ID`, so Control knows which connector application
+  to name;
+- `LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID`, so Control can name the isolated
+  SharePoint administrator application; and
+- the matching admin-consent redirect URI registered on each application.
 
 The recorded grant is LemmaComputer's own note that approval happened. It does
 not itself grant anything, and clearing it does not revoke anything: only a

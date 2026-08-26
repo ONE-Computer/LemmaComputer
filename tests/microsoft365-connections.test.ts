@@ -15,6 +15,7 @@ import type { MicrosoftSharePointSitePermissionGateway } from "../apps/control-a
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
 const connectorApplicationId = "33333333-3333-4333-8333-333333333333";
+const providerDirectoryId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 // A deployment that has registered both provider OAuth applications. Without
 // them, the connectors depending on those credentials are not published.
 const allCredentials = [...staticCredentialGroups];
@@ -127,6 +128,18 @@ const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
   revoke: async () => ({ revoked: true }),
 };
 
+const approveSharePointSiteAdministration = async (
+  service: McpConnectionService,
+  registry: MemoryConnectorRegistryStore,
+  identity: IdentityContext,
+) => {
+  await service.list(identity, true);
+  await registry.recordSharePointAdminConsent(identity.tenantId, "microsoft-365", {
+    providerTenantId: providerDirectoryId,
+    requestedBy: identity.subjectId,
+  });
+};
+
 test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
   const service = new Microsoft365ConnectionService(gateway, {
@@ -162,6 +175,7 @@ test("SharePoint site administration is tenant-scoped and verification stores on
     microsoftSharePointSitePermissions: sharePointSitePermissions,
     microsoftSharePointConnectorClientId: connectorApplicationId,
   });
+  await approveSharePointSiteAdministration(service, registry, alpha);
   const otherTenant = { ...alpha, tenantId: "other" };
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: " Finance policies ",
@@ -224,7 +238,7 @@ test("SharePoint grants target the tenant-owned connector application when confi
     },
     microsoftSharePointConnectorClientId: connectorApplicationId,
   });
-  await service.list(alpha, true);
+  await approveSharePointSiteAdministration(service, registry, alpha);
   const tenantConnectorApplicationId = "44444444-4444-4444-8444-444444444444";
   await registry.saveConnectorCredentials(alpha.tenantId, "microsoft-365", {
     serverId: "tenant-ms365-server",
@@ -242,13 +256,15 @@ test("SharePoint grants target the tenant-owned connector application when confi
 });
 
 test("SharePoint site URLs preserve a canonical encoded URL and reject malformed encoding", async () => {
+  const registry = new MemoryConnectorRegistryStore();
   const service = new McpConnectionService(new FakeConnectionGateway(), {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
-    registry: new MemoryConnectorRegistryStore(),
+    registry,
     microsoftSharePointSitePermissions: sharePointSitePermissions,
     microsoftSharePointConnectorClientId: connectorApplicationId,
   });
+  await approveSharePointSiteAdministration(service, registry, alpha);
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: "People policies",
     siteUrl: "https://CONTOSO.sharepoint.com/sites/People%20Policies/",
@@ -280,13 +296,15 @@ test("SharePoint provider failures remain visible and revocation fails closed", 
       return { revoked: true };
     },
   };
+  const registry = new MemoryConnectorRegistryStore();
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
-    registry: new MemoryConnectorRegistryStore(),
+    registry,
     microsoftSharePointSitePermissions: permissions,
     microsoftSharePointConnectorClientId: connectorApplicationId,
   });
+  await approveSharePointSiteAdministration(service, registry, alpha);
   await assert.rejects(
     service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
       displayName: "Legal",

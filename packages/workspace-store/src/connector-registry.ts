@@ -103,6 +103,15 @@ export type ConnectorRegistryRecord = {
   adminConsentGrantedAt: Date | null;
   adminConsentProviderTenantId: string | null;
   adminConsentRequestedBy: string | null;
+  /**
+   * Tenant-wide application consent for the separate SharePoint site-access
+   * administration app. This is intentionally distinct from the everyday
+   * connector's delegated consent so each trust boundary can be audited and
+   * withdrawn independently.
+   */
+  sharePointAdminConsentGrantedAt: Date | null;
+  sharePointAdminConsentProviderTenantId: string | null;
+  sharePointAdminConsentRequestedBy: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -125,7 +134,7 @@ export type SaveConnectorCredentialsInput = {
 
 export type SaveConnectorRegistryRecord = Omit<
   ConnectorRegistryRecord,
-  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt" | "adminConsentGrantedAt" | "adminConsentProviderTenantId" | "adminConsentRequestedBy"
+  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt" | "adminConsentGrantedAt" | "adminConsentProviderTenantId" | "adminConsentRequestedBy" | "sharePointAdminConsentGrantedAt" | "sharePointAdminConsentProviderTenantId" | "sharePointAdminConsentRequestedBy"
 > & {
   toolPolicies?: Record<string, McpToolPolicyDecision>;
   toolDefinitionHashes?: Record<string, string>;
@@ -270,6 +279,8 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput): Promise<ConnectorRegistryRecord | null>;
   recordConnectorAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput): Promise<ConnectorRegistryRecord | null>;
   clearConnectorAdminConsent(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
+  recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput): Promise<ConnectorRegistryRecord | null>;
+  clearSharePointAdminConsent(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
   clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }): Promise<ConnectorRegistryRecord | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
@@ -370,6 +381,7 @@ const cloneConnectorRecord = (record: ConnectorRegistryRecord): ConnectorRegistr
   accessPolicyUpdatedAt: new Date(record.accessPolicyUpdatedAt),
   credentialsUpdatedAt: record.credentialsUpdatedAt ? new Date(record.credentialsUpdatedAt) : null,
   adminConsentGrantedAt: record.adminConsentGrantedAt ? new Date(record.adminConsentGrantedAt) : null,
+  sharePointAdminConsentGrantedAt: record.sharePointAdminConsentGrantedAt ? new Date(record.sharePointAdminConsentGrantedAt) : null,
   createdAt: new Date(record.createdAt),
   updatedAt: new Date(record.updatedAt),
 });
@@ -421,6 +433,9 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   adminConsentGrantedAt: row.admin_consent_granted_at ? new Date(String(row.admin_consent_granted_at)) : null,
   adminConsentProviderTenantId: typeof row.admin_consent_provider_tenant_id === "string" ? row.admin_consent_provider_tenant_id : null,
   adminConsentRequestedBy: typeof row.admin_consent_requested_by === "string" ? row.admin_consent_requested_by : null,
+  sharePointAdminConsentGrantedAt: row.sharepoint_admin_consent_granted_at ? new Date(String(row.sharepoint_admin_consent_granted_at)) : null,
+  sharePointAdminConsentProviderTenantId: typeof row.sharepoint_admin_consent_provider_tenant_id === "string" ? row.sharepoint_admin_consent_provider_tenant_id : null,
+  sharePointAdminConsentRequestedBy: typeof row.sharepoint_admin_consent_requested_by === "string" ? row.sharepoint_admin_consent_requested_by : null,
   createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
@@ -1149,6 +1164,34 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
+  async recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         sharepoint_admin_consent_granted_at=$3,
+         sharepoint_admin_consent_provider_tenant_id=$4,
+         sharepoint_admin_consent_requested_by=$5,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.grantedAt ?? new Date(), input.providerTenantId, input.requestedBy],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async clearSharePointAdminConsent(tenantId: string, connectorId: string) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         sharepoint_admin_consent_granted_at=NULL,
+         sharepoint_admin_consent_provider_tenant_id=NULL,
+         sharepoint_admin_consent_requested_by=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
   async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {
     const result = await this.pool.query(
       `UPDATE connector_registry SET
@@ -1449,6 +1492,9 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       adminConsentGrantedAt: null,
       adminConsentProviderTenantId: null,
       adminConsentRequestedBy: null,
+      sharePointAdminConsentGrantedAt: null,
+      sharePointAdminConsentProviderTenantId: null,
+      sharePointAdminConsentRequestedBy: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1716,6 +1762,36 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       adminConsentGrantedAt: null,
       adminConsentProviderTenantId: null,
       adminConsentRequestedBy: null,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      sharePointAdminConsentGrantedAt: input.grantedAt ?? new Date(),
+      sharePointAdminConsentProviderTenantId: input.providerTenantId,
+      sharePointAdminConsentRequestedBy: input.requestedBy,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async clearSharePointAdminConsent(tenantId: string, connectorId: string) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      sharePointAdminConsentGrantedAt: null,
+      sharePointAdminConsentProviderTenantId: null,
+      sharePointAdminConsentRequestedBy: null,
       updatedAt: new Date(),
     };
     this.records.set(key, cloneConnectorRecord(saved));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { IdentityContext } from "@lemmacomputer/contracts";
 import type { GatewayClient, McpConnectorAdministrationGateway, OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
-import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
+import { MemoryConnectorRegistryStore, MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { MicrosoftSharePointSitePermissionGateway } from "../apps/control-api/src/microsoft-sharepoint-site-permissions.js";
 import { withheldConnectors } from "../apps/control-api/src/connector-catalog.js";
@@ -17,6 +17,7 @@ const headersFor = (identity: IdentityContext) => ({
 });
 
 test("Control exposes an owned Microsoft 365 redirect, callback, status, and disconnect surface", async () => {
+  const registry = new MemoryConnectorRegistryStore();
   let oauthState = "";
   const completions: string[] = [];
   const startedServers: string[] = [];
@@ -89,7 +90,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       microsoftSharePointSitePermissions: sharePointSitePermissions,
       microsoftSharePointConnectorClientId: "33333333-3333-4333-8333-333333333333",
     },
-    { testIdentityMode: true },
+    { testIdentityMode: true, connectorRegistryStore: registry },
   );
   try {
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(alpha) });
@@ -177,6 +178,11 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(linearCallback.headers.location, "http://localhost:4174/?view=connections&connector=linear&connection=connected");
     assert.deepEqual(startedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
     assert.deepEqual(completedServers, ["lemmacomputer_ms365", "lemmacomputer_linear"]);
+
+    await registry.recordSharePointAdminConsent(alpha.tenantId, "microsoft-365", {
+      providerTenantId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      requestedBy: alpha.subjectId,
+    });
 
     const addedSite = await app.inject({
       method: "POST",

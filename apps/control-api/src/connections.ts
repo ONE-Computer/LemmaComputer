@@ -82,6 +82,7 @@ type ConnectionServiceOptions = {
   microsoftAdminConsent?: { clientId: string; consentSecret: string };
   microsoftSharePointSitePermissions?: MicrosoftSharePointSitePermissionGateway;
   microsoftSharePointConnectorClientId?: string;
+  microsoftSharePointSiteAdministrationConsent?: { clientId: string };
   adminConsentTtlMs?: number;
   /**
    * Test/control-plane DNS resolver used only to reject unsafe custom URLs at
@@ -292,6 +293,7 @@ export class McpConnectionService {
   private readonly microsoftAdminConsent?: { clientId: string; consentSecret: string };
   private readonly microsoftSharePointSitePermissions?: MicrosoftSharePointSitePermissionGateway;
   private readonly microsoftSharePointConnectorClientId?: string;
+  private readonly microsoftSharePointSiteAdministrationConsent?: { clientId: string };
   private readonly adminConsentTtlMs: number;
   private readonly projectionCache = new Map<string, { expiresAt: number; policy: RuntimePolicy }>();
   private readonly connectionStatusStates = new Map<string, Promise<OAuthConnectionStatus>>();
@@ -323,6 +325,7 @@ export class McpConnectionService {
       : undefined;
     this.microsoftSharePointSitePermissions = options.microsoftSharePointSitePermissions;
     this.microsoftSharePointConnectorClientId = options.microsoftSharePointConnectorClientId;
+    this.microsoftSharePointSiteAdministrationConsent = options.microsoftSharePointSiteAdministrationConsent;
     // An administrator often receives the link by mail and acts on it days
     // later, so it deliberately outlives an ordinary authorization session.
     this.adminConsentTtlMs = options.adminConsentTtlMs ?? 30 * 24 * 60 * 60 * 1000;
@@ -492,9 +495,19 @@ export class McpConnectionService {
   }
 
   async listMicrosoft365SharePointSites(identity: IdentityContext) {
-    await this.connector(identity.tenantId, "microsoft-365");
+    const connector = await this.connector(identity.tenantId, "microsoft-365");
     const sites = await this.registry.listMicrosoft365SharePointSites(identity.tenantId);
-    return { microsoftSiteAdministrationAvailable: Boolean(this.microsoftSharePointSitePermissions), sites: sites.map((site) => ({
+    const consentReady = Boolean(
+      connector.sharePointAdminConsentGrantedAt
+      && connector.sharePointAdminConsentProviderTenantId
+      && (!connector.adminConsentProviderTenantId
+        || connector.sharePointAdminConsentProviderTenantId === connector.adminConsentProviderTenantId),
+    );
+    return {
+      microsoftSiteAdministrationConfigured: Boolean(this.microsoftSharePointSitePermissions),
+      microsoftSiteAdministrationAvailable: Boolean(this.microsoftSharePointSitePermissions) && consentReady,
+      microsoftSiteAdministrationConsentGrantedAt: connector.sharePointAdminConsentGrantedAt?.toISOString() ?? null,
+      sites: sites.map((site) => ({
       id: site.id,
       displayName: site.displayName,
       siteUrl: site.siteUrl,
@@ -507,7 +520,8 @@ export class McpConnectionService {
       lastVerifiedAt: site.lastVerifiedAt?.toISOString() ?? null,
       lastVerificationError: site.lastVerificationError,
       createdAt: site.createdAt.toISOString(),
-    })) };
+      })),
+    };
   }
 
   async createMicrosoft365SharePointSite(
@@ -515,7 +529,6 @@ export class McpConnectionService {
     createdBy: string,
     input: { displayName: string; siteUrl: string },
   ) {
-    await this.connector(identity.tenantId, "microsoft-365");
     if (!this.microsoftSharePointSitePermissions) {
       throw new LemmaComputerError(
         "M365_SHAREPOINT_SITE_ADMIN_NOT_CONFIGURED",
@@ -523,6 +536,8 @@ export class McpConnectionService {
         503,
       );
     }
+    const connector = await this.connector(identity.tenantId, "microsoft-365");
+    this.requireSharePointSiteAdministrationConsent(connector);
     const displayName = input.displayName.trim();
     if (!displayName || displayName.length > 120) {
       throw new LemmaComputerError("M365_SHAREPOINT_SITE_NAME_INVALID", "Enter a site name of 120 characters or fewer", 400);
@@ -558,6 +573,7 @@ export class McpConnectionService {
       this.connector(identity.tenantId, "microsoft-365"),
     ]);
     if (!site) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
+    this.requireSharePointSiteAdministrationConsent(connector);
     const connectorClientId = connector.credentialMode === "tenant"
       ? connector.oauthClientId
       : this.microsoftSharePointConnectorClientId;
@@ -566,7 +582,7 @@ export class McpConnectionService {
     }
     try {
       const grant = await permissions.grantRead({
-        providerTenantId: connector.adminConsentProviderTenantId,
+        providerTenantId: connector.sharePointAdminConsentProviderTenantId,
         connectorClientId,
         hostname: site.hostname,
         sitePath: site.sitePath,
@@ -633,6 +649,7 @@ export class McpConnectionService {
       this.connector(identity.tenantId, "microsoft-365"),
     ]);
     if (!site) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
+    this.requireSharePointSiteAdministrationConsent(connector);
     const connectorClientId = connector.credentialMode === "tenant"
       ? connector.oauthClientId
       : this.microsoftSharePointConnectorClientId;
@@ -641,7 +658,7 @@ export class McpConnectionService {
     }
     try {
       await permissions.revoke({
-        providerTenantId: connector.adminConsentProviderTenantId,
+        providerTenantId: connector.sharePointAdminConsentProviderTenantId,
         connectorClientId,
         hostname: site.hostname,
         sitePath: site.sitePath,
@@ -886,27 +903,40 @@ export class McpConnectionService {
         true,
       );
     }
+    const sharePointConsentPending = connector.id === "microsoft-365"
+      && Boolean(this.microsoftSharePointSiteAdministrationConsent)
+      && !connector.sharePointAdminConsentGrantedAt;
+    const purpose = connector.adminConsentGrantedAt && sharePointConsentPending
+      ? "sharepoint-site-administration" as const
+      : "connector" as const;
     const expiresAt = this.now() + this.adminConsentTtlMs;
     const state = this.signAdminConsentState({
       tenantId: identity.tenantId,
       connectorId: connector.id,
       expiresAt,
       requestedBy,
+      purpose,
     });
     // `organizations` lets the administrator sign in with their own directory
     // rather than pinning the deployment's. `.default` consents to exactly the
     // permissions the application registration declares, so the request cannot
     // widen beyond what an administrator can review in the Entra portal.
-    const url = new URL("https://login.microsoftonline.com/organizations/v2.0/adminconsent");
-    url.searchParams.set("client_id", this.microsoftAdminConsent.clientId);
+    const providerTenant = purpose === "sharepoint-site-administration"
+      ? connector.adminConsentProviderTenantId ?? "organizations"
+      : "organizations";
+    const url = new URL(`https://login.microsoftonline.com/${encodeURIComponent(providerTenant)}/v2.0/adminconsent`);
+    url.searchParams.set("client_id", purpose === "sharepoint-site-administration"
+      ? this.microsoftSharePointSiteAdministrationConsent!.clientId
+      : this.microsoftAdminConsent.clientId);
     url.searchParams.set("scope", "https://graph.microsoft.com/.default");
-    url.searchParams.set("redirect_uri", this.adminConsentRedirectUri(connector.id));
+    url.searchParams.set("redirect_uri", this.adminConsentRedirectUri(connector.id, purpose));
     url.searchParams.set("state", state);
     return {
       connectorId: connector.id,
       connectorName: connector.name,
       consentUrl: url.toString(),
-      redirectUri: this.adminConsentRedirectUri(connector.id),
+      redirectUri: this.adminConsentRedirectUri(connector.id, purpose),
+      purpose,
       expiresAt: new Date(expiresAt).toISOString(),
     };
   }
@@ -923,9 +953,9 @@ export class McpConnectionService {
     admin_consent?: string;
     error?: string;
     error_description?: string;
-  }): Promise<{ outcome: "granted" | "refused" | "invalid"; connectorName: string | null }> {
+  }): Promise<{ outcome: "granted" | "refused" | "invalid"; connectorName: string | null; nextConsentUrl?: string }> {
     const claims = query.state ? this.verifyAdminConsentState(query.state) : null;
-    if (!claims || claims.connectorId !== connectorId) return { outcome: "invalid", connectorName: null };
+    if (!claims || claims.connectorId !== connectorId || claims.purpose !== "connector") return { outcome: "invalid", connectorName: null };
     let connector;
     try {
       connector = await this.connector(claims.tenantId, claims.connectorId);
@@ -936,7 +966,44 @@ export class McpConnectionService {
       && !query.error
       && isDirectoryTenantId(query.tenant);
     if (!granted) return { outcome: "refused", connectorName: connector.name };
-    await this.registry.recordConnectorAdminConsent(claims.tenantId, connector.id, {
+    const saved = await this.registry.recordConnectorAdminConsent(claims.tenantId, connector.id, {
+      providerTenantId: query.tenant!,
+      requestedBy: claims.requestedBy,
+    });
+    this.invalidateTenantProjection(claims.tenantId);
+    if (saved && connector.id === "microsoft-365" && this.microsoftSharePointSiteAdministrationConsent && !saved.sharePointAdminConsentGrantedAt) {
+      return {
+        outcome: "granted",
+        connectorName: connector.name,
+        nextConsentUrl: this.sharePointAdminConsentUrl(saved, claims.requestedBy, query.tenant!),
+      };
+    }
+    return { outcome: "granted", connectorName: connector.name };
+  }
+
+  async completeSharePointAdminConsent(connectorId: string, query: {
+    state?: string;
+    tenant?: string;
+    admin_consent?: string;
+    error?: string;
+    error_description?: string;
+  }): Promise<{ outcome: "granted" | "refused" | "invalid"; connectorName: string | null }> {
+    const claims = query.state ? this.verifyAdminConsentState(query.state) : null;
+    if (!claims || claims.connectorId !== connectorId || claims.purpose !== "sharepoint-site-administration") {
+      return { outcome: "invalid", connectorName: null };
+    }
+    let connector;
+    try {
+      connector = await this.connector(claims.tenantId, claims.connectorId);
+    } catch {
+      return { outcome: "invalid", connectorName: null };
+    }
+    const granted = String(query.admin_consent ?? "").toLowerCase() === "true"
+      && !query.error
+      && isDirectoryTenantId(query.tenant)
+      && (!connector.adminConsentProviderTenantId || connector.adminConsentProviderTenantId === query.tenant);
+    if (!granted) return { outcome: "refused", connectorName: connector.name };
+    await this.registry.recordSharePointAdminConsent(claims.tenantId, connector.id, {
       providerTenantId: query.tenant!,
       requestedBy: claims.requestedBy,
     });
@@ -961,25 +1028,50 @@ export class McpConnectionService {
     }
     const saved = await this.registry.clearConnectorAdminConsent(identity.tenantId, connector.id);
     if (!saved) throw new LemmaComputerError("MCP_CONNECTOR_NOT_FOUND", "Connector not found", 404);
+    await this.registry.clearSharePointAdminConsent(identity.tenantId, connector.id);
     this.invalidateTenantProjection(identity.tenantId);
-    return this.publicConnector(saved);
+    const cleared = await this.registry.getConnector(identity.tenantId, connector.id);
+    return this.publicConnector(cleared ?? saved);
   }
 
-  private adminConsentRedirectUri(connectorId: string) {
-    return `${this.publicWebUrl}/api/v1/connections/${connectorId}/admin-consent/callback`;
+  private adminConsentRedirectUri(connectorId: string, purpose: "connector" | "sharepoint-site-administration" = "connector") {
+    const suffix = purpose === "connector" ? "admin-consent" : "sharepoint-admin-consent";
+    return `${this.publicWebUrl}/api/v1/connections/${connectorId}/${suffix}/callback`;
+  }
+
+  private sharePointAdminConsentUrl(connector: ConnectorDefinition, requestedBy: string | null, providerTenantId: string) {
+    if (!this.microsoftSharePointSiteAdministrationConsent) {
+      throw new LemmaComputerError("M365_SHAREPOINT_SITE_ADMIN_NOT_CONFIGURED", "SharePoint site administration is not configured", 503);
+    }
+    const expiresAt = this.now() + this.adminConsentTtlMs;
+    const state = this.signAdminConsentState({
+      tenantId: connector.tenantId,
+      connectorId: connector.id,
+      expiresAt,
+      requestedBy,
+      purpose: "sharepoint-site-administration",
+    });
+    const url = new URL(`https://login.microsoftonline.com/${encodeURIComponent(providerTenantId)}/v2.0/adminconsent`);
+    url.searchParams.set("client_id", this.microsoftSharePointSiteAdministrationConsent.clientId);
+    url.searchParams.set("scope", "https://graph.microsoft.com/.default");
+    url.searchParams.set("redirect_uri", this.adminConsentRedirectUri(connector.id, "sharepoint-site-administration"));
+    url.searchParams.set("state", state);
+    return url.toString();
   }
 
   private signAdminConsentState(claims: {
     tenantId: string;
     connectorId: string;
     expiresAt: number;
-    requestedBy: string;
+    requestedBy: string | null;
+    purpose: "connector" | "sharepoint-site-administration";
   }) {
     const payload = Buffer.from(JSON.stringify({
       t: claims.tenantId,
       c: claims.connectorId,
       e: claims.expiresAt,
       b: claims.requestedBy,
+      p: claims.purpose,
       n: randomBytes(9).toString("base64url"),
     })).toString("base64url");
     return `${payload}.${this.adminConsentSignature(payload)}`;
@@ -992,7 +1084,7 @@ export class McpConnectionService {
     const provided = Buffer.from(signature);
     const computed = Buffer.from(expected);
     if (provided.length !== computed.length || !timingSafeEqual(provided, computed)) return null;
-    let claims: { t?: unknown; c?: unknown; e?: unknown; b?: unknown };
+    let claims: { t?: unknown; c?: unknown; e?: unknown; b?: unknown; p?: unknown };
     try {
       claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     } catch {
@@ -1004,6 +1096,7 @@ export class McpConnectionService {
       tenantId: claims.t,
       connectorId: claims.c,
       requestedBy: typeof claims.b === "string" ? claims.b : null,
+      purpose: claims.p === "sharepoint-site-administration" ? "sharepoint-site-administration" as const : "connector" as const,
     };
   }
 
@@ -1019,7 +1112,30 @@ export class McpConnectionService {
       available: Boolean(this.microsoftAdminConsent),
       grantedAt: connector.adminConsentGrantedAt?.toISOString() ?? null,
       providerTenantId: connector.adminConsentProviderTenantId,
+      sharePointSiteAdministration: connector.id === "microsoft-365" ? {
+        required: true as const,
+        available: Boolean(this.microsoftSharePointSiteAdministrationConsent && this.microsoftSharePointSitePermissions),
+        grantedAt: connector.sharePointAdminConsentGrantedAt?.toISOString() ?? null,
+        providerTenantId: connector.sharePointAdminConsentProviderTenantId,
+      } : null,
     };
+  }
+
+  private requireSharePointSiteAdministrationConsent(connector: ConnectorDefinition) {
+    if (!connector.sharePointAdminConsentGrantedAt || !connector.sharePointAdminConsentProviderTenantId) {
+      throw new LemmaComputerError(
+        "M365_SHAREPOINT_ADMIN_CONSENT_REQUIRED",
+        "A Microsoft directory administrator must approve SharePoint site management before sites can be changed",
+        409,
+      );
+    }
+    if (connector.adminConsentProviderTenantId && connector.adminConsentProviderTenantId !== connector.sharePointAdminConsentProviderTenantId) {
+      throw new LemmaComputerError(
+        "M365_SHAREPOINT_ADMIN_CONSENT_TENANT_MISMATCH",
+        "The Microsoft 365 connector and SharePoint site manager were approved by different directories",
+        409,
+      );
+    }
   }
 
   /**

@@ -21,6 +21,7 @@ const globex: IdentityContext = { tenantId: "globex", subjectId: "sam", audience
 const proxyToken = "proxy-test-token-at-least-24-characters";
 const consentSecret = "connector-consent-secret-for-tests-000001";
 const clientId = "11111111-2222-3333-4444-555555555555";
+const sharePointAdminClientId = "22222222-3333-4444-8555-666666666666";
 const acmeDirectory = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 
 const headersFor = (identity: IdentityContext) => ({
@@ -53,6 +54,7 @@ const service = (registry = new MemoryConnectorRegistryStore(), overrides = {}) 
   authorizationOrigin: "http://localhost:3001",
   registry,
   microsoftAdminConsent: { clientId, consentSecret },
+  microsoftSharePointSiteAdministrationConsent: { clientId: sharePointAdminClientId },
   ...overrides,
 });
 
@@ -93,17 +95,43 @@ test("consent is recorded only for the organization the signed state names", asy
   const link = await connections.adminConsentLink(acme, "microsoft-365", "alex");
   const state = new URL(link.consentUrl).searchParams.get("state")!;
 
-  const granted = await connections.completeAdminConsent("microsoft-365", {
+  const connectorGranted = await connections.completeAdminConsent("microsoft-365", {
     state,
     tenant: acmeDirectory,
     admin_consent: "True",
   });
-  assert.deepEqual(granted, { outcome: "granted", connectorName: "Microsoft 365" });
+  assert.equal(connectorGranted.outcome, "granted");
+  assert.equal(connectorGranted.connectorName, "Microsoft 365");
+  assert.ok(connectorGranted.nextConsentUrl);
+  const sharePointUrl = new URL(connectorGranted.nextConsentUrl);
+  assert.equal(sharePointUrl.pathname, `/${acmeDirectory}/v2.0/adminconsent`);
+  assert.equal(sharePointUrl.searchParams.get("client_id"), sharePointAdminClientId);
+  assert.equal(
+    sharePointUrl.searchParams.get("redirect_uri"),
+    "http://localhost:4174/api/v1/connections/microsoft-365/sharepoint-admin-consent/callback",
+  );
+  const sharePointState = sharePointUrl.searchParams.get("state")!;
+  const wrongDirectory = await connections.completeSharePointAdminConsent("microsoft-365", {
+    state: sharePointState,
+    tenant: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+    admin_consent: "True",
+  });
+  assert.equal(wrongDirectory.outcome, "refused", "the two applications must be approved in the same provider directory");
+  assert.equal((await registry.getConnector("acme", "microsoft-365"))?.sharePointAdminConsentGrantedAt, null);
+  const sharePointGranted = await connections.completeSharePointAdminConsent("microsoft-365", {
+    state: sharePointState,
+    tenant: acmeDirectory,
+    admin_consent: "True",
+  });
+  assert.deepEqual(sharePointGranted, { outcome: "granted", connectorName: "Microsoft 365" });
 
   const acmeRecord = await registry.getConnector("acme", "microsoft-365");
   assert.equal(acmeRecord?.adminConsentProviderTenantId, acmeDirectory);
   assert.equal(acmeRecord?.adminConsentRequestedBy, "alex");
   assert.ok(acmeRecord?.adminConsentGrantedAt);
+  assert.equal(acmeRecord?.sharePointAdminConsentProviderTenantId, acmeDirectory);
+  assert.equal(acmeRecord?.sharePointAdminConsentRequestedBy, "alex");
+  assert.ok(acmeRecord?.sharePointAdminConsentGrantedAt);
   // The grant belongs to the organization named in the state and to no other.
   await connections.list(globex, true);
   assert.equal((await registry.getConnector("globex", "microsoft-365"))?.adminConsentGrantedAt, null);
@@ -208,6 +236,11 @@ test("an administrator with no LemmaComputer account can complete the approval",
       publicWebUrl: "http://localhost:4174",
       authorizationOrigin: "http://localhost:3001",
       microsoftAdminConsent: { clientId, consentSecret },
+      microsoftSharePointSiteAdministrationConsent: { clientId: sharePointAdminClientId },
+      microsoftSharePointSitePermissions: {
+        grantRead: async () => ({ graphSiteId: "site", permissionId: "permission" }),
+        revoke: async () => ({ revoked: true }),
+      },
     },
     { testIdentityMode: true, connectorRegistryStore: registry },
   );
@@ -226,19 +259,30 @@ test("an administrator with no LemmaComputer account can complete the approval",
       url: `/v1/connections/microsoft-365/admin-consent/callback?admin_consent=True&tenant=${acmeDirectory}&state=${encodeURIComponent(state)}`,
       headers: { "x-lemmacomputer-proxy-token": proxyToken },
     });
-    assert.equal(landed.statusCode, 200, "no LemmaComputer session is required to approve");
-    assert.match(String(landed.headers["content-type"]), /text\/html/);
-    assert.match(landed.body, /Approval recorded/);
-    assert.equal(landed.headers["cache-control"], "no-store");
+    assert.equal(landed.statusCode, 303, "the first approval continues directly to SharePoint administration consent");
+    const sharePointConsentUrl = new URL(String(landed.headers.location));
+    assert.equal(sharePointConsentUrl.searchParams.get("client_id"), sharePointAdminClientId);
+    const sharePointState = sharePointConsentUrl.searchParams.get("state")!;
+    const completed = await app.inject({
+      method: "GET",
+      url: `/v1/connections/microsoft-365/sharepoint-admin-consent/callback?admin_consent=True&tenant=${acmeDirectory}&state=${encodeURIComponent(sharePointState)}`,
+      headers: { "x-lemmacomputer-proxy-token": proxyToken },
+    });
+    assert.equal(completed.statusCode, 200, "no LemmaComputer session is required to approve either application");
+    assert.match(String(completed.headers["content-type"]), /text\/html/);
+    assert.match(completed.body, /Approval recorded/);
+    assert.equal(completed.headers["cache-control"], "no-store");
     // The page tells an unauthenticated reader nothing about the organization.
-    assert.ok(!landed.body.includes("acme"));
-    assert.ok(!landed.body.includes(consentSecret));
+    assert.ok(!completed.body.includes("acme"));
+    assert.ok(!completed.body.includes(consentSecret));
 
     const catalog = await app.inject({ method: "GET", url: "/v1/connections", headers: headersFor(acme) });
     const microsoft = (catalog.json().connections as Array<Record<string, never>>).find((connector) => connector.id === "microsoft-365");
     assert.equal(microsoft?.adminConsent.required, true);
     assert.equal(microsoft?.adminConsent.providerTenantId, acmeDirectory);
     assert.ok(microsoft?.adminConsent.grantedAt);
+    assert.equal(microsoft?.adminConsent.sharePointSiteAdministration.providerTenantId, acmeDirectory);
+    assert.ok(microsoft?.adminConsent.sharePointSiteAdministration.grantedAt);
 
     // A rejected approval reports a page rather than recording anything.
     const refused = await app.inject({
@@ -265,6 +309,7 @@ test("an administrator with no LemmaComputer account can complete the approval",
     });
     assert.equal(cleared.statusCode, 200);
     assert.equal(cleared.json().connector.adminConsent.grantedAt, null);
+    assert.equal(cleared.json().connector.adminConsent.sharePointSiteAdministration.grantedAt, null);
   } finally {
     await app.close();
   }
@@ -295,6 +340,11 @@ test("the approval landing route is the only connector route reachable without a
       publicWebUrl: "http://localhost:4174",
       authorizationOrigin: "http://localhost:3001",
       microsoftAdminConsent: { clientId, consentSecret },
+      microsoftSharePointSiteAdministrationConsent: { clientId: sharePointAdminClientId },
+      microsoftSharePointSitePermissions: {
+        grantRead: async () => ({ graphSiteId: "site", permissionId: "permission" }),
+        revoke: async () => ({ revoked: true }),
+      },
     },
     {
       customerProductAuthentication: refuseEveryone as never,
@@ -309,8 +359,15 @@ test("the approval landing route is the only connector route reachable without a
       url: `/v1/connections/microsoft-365/admin-consent/callback?admin_consent=True&tenant=${acmeDirectory}&state=${encodeURIComponent(state)}`,
       headers: proxied,
     });
-    assert.equal(landed.statusCode, 200, "an administrator without an account can still approve");
-    assert.match(landed.body, /Approval recorded/);
+    assert.equal(landed.statusCode, 303, "an administrator without an account can continue the approval journey");
+    const sharePointState = new URL(String(landed.headers.location)).searchParams.get("state")!;
+    const completed = await app.inject({
+      method: "GET",
+      url: `/v1/connections/microsoft-365/sharepoint-admin-consent/callback?admin_consent=True&tenant=${acmeDirectory}&state=${encodeURIComponent(sharePointState)}`,
+      headers: proxied,
+    });
+    assert.equal(completed.statusCode, 200, "the second approval callback is also sessionless");
+    assert.match(completed.body, /Approval recorded/);
     assert.ok(await registry.getConnector("acme", "microsoft-365"));
 
     // Every neighbouring connector route stays behind the session.
@@ -330,6 +387,12 @@ test("the approval landing route is the only connector route reachable without a
       headers: proxied,
     });
     assert.notEqual(nearMiss.statusCode, 200);
+    const sharePointNearMiss = await app.inject({
+      method: "GET",
+      url: "/v1/connections/microsoft-365/sharepoint-admin-consent/callback/extra",
+      headers: proxied,
+    });
+    assert.notEqual(sharePointNearMiss.statusCode, 200);
     // The proxy boundary still applies: a request that never passed the
     // ingress is refused before any of this is considered.
     const unproxied = await app.inject({

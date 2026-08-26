@@ -691,6 +691,7 @@ export function createControlServer(
     microsoftAdminConsent?: { clientId: string; consentSecret: string };
     microsoftSharePointSitePermissions?: MicrosoftSharePointSitePermissionGateway;
     microsoftSharePointConnectorClientId?: string;
+    microsoftSharePointSiteAdministrationConsent?: { clientId: string };
   } = {},
   security: {
     customerAuthentication?: CustomerAuthentication;
@@ -786,7 +787,7 @@ export function createControlServer(
   const app = Fastify({
     logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
-      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url)
+      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/(?:callback|admin-consent\/callback|sharepoint-admin-consent\/callback)/.test(request.url)
         || request.url.startsWith("/v1/auth/")
         || request.url.startsWith("/v1/platform/auth/"),
     }),
@@ -1066,6 +1067,7 @@ export function createControlServer(
     microsoftAdminConsent: connectionOptions.microsoftAdminConsent,
     microsoftSharePointSitePermissions: connectionOptions.microsoftSharePointSitePermissions,
     microsoftSharePointConnectorClientId: connectionOptions.microsoftSharePointConnectorClientId,
+    microsoftSharePointSiteAdministrationConsent: connectionOptions.microsoftSharePointSiteAdministrationConsent,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -1269,7 +1271,7 @@ export function createControlServer(
     // mail client and has no LemmaComputer session, and usually no account.
     // The signed state in the query is what binds the response to an
     // organization; the route reads nothing from the session.
-    if (/^\/v1\/connections\/[^/]+\/admin-consent\/callback$/.test(requestPath)) return;
+    if (/^\/v1\/connections\/[^/]+\/(?:admin-consent|sharepoint-admin-consent)\/callback$/.test(requestPath)) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
       || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
@@ -4666,6 +4668,24 @@ export function createControlServer(
     // the reply has to be a page they can read rather than a redirect into an
     // application they cannot sign into.
     const result = await requireConnections().completeAdminConsent(request.params.connectorId, request.query);
+    if (result.nextConsentUrl) {
+      return reply
+        .code(303)
+        .header("cache-control", "no-store")
+        .header("location", result.nextConsentUrl)
+        .send();
+    }
+    return reply
+      .code(result.outcome === "granted" ? 200 : 400)
+      .type("text/html; charset=utf-8")
+      .header("cache-control", "no-store")
+      .send(adminConsentPage(result));
+  });
+  app.get<{
+    Params: { connectorId: string };
+    Querystring: { state?: string; tenant?: string; admin_consent?: string; error?: string; error_description?: string };
+  }>("/v1/connections/:connectorId/sharepoint-admin-consent/callback", async (request, reply) => {
+    const result = await requireConnections().completeSharePointAdminConsent(request.params.connectorId, request.query);
     return reply
       .code(result.outcome === "granted" ? 200 : 400)
       .type("text/html; charset=utf-8")
@@ -6565,6 +6585,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
             administrationClientSecret: env.M365_SITE_ADMIN_CLIENT_SECRET,
           }),
           microsoftSharePointConnectorClientId: env.M365_CLIENT_ID,
+          microsoftSharePointSiteAdministrationConsent: {
+            clientId: env.M365_SITE_ADMIN_CLIENT_ID,
+          },
         }
         : {}),
     },
