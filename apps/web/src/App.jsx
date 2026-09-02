@@ -1497,7 +1497,7 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
 function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave, effectivePolicy }) {
   const serviceLabels = mcpPolicy?.connectorId
     ? { tools: `${mcpPolicy.connectorName} tools` }
-    : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", teams: "Teams" };
+    : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", sharepoint: "SharePoint", teams: "Teams" };
   const connectorChanges = mcpPolicy?.connectorId ? mcpPolicy.changes : null;
   const changeSummary = connectorChanges
     ? [
