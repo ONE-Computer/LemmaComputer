@@ -723,6 +723,10 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     const result = await this.pool.query(
       `UPDATE microsoft365_sharepoint_sites SET
          graph_site_id=$3,
+         drive_ids='[]'::jsonb,
+         status='verified',
+         last_verified_at=$5,
+         last_verification_error=NULL,
          microsoft_access_status='granted',
          microsoft_permission_id=$4,
          microsoft_granted_at=$5,
@@ -1408,12 +1412,17 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
     const current = this.microsoft365SharePointSites.get(key);
     if (!current) return null;
+    const grantedAt = input.grantedAt ?? new Date();
     const saved: Microsoft365SharePointSiteRecord = {
       ...current,
       graphSiteId: input.graphSiteId,
+      driveIds: [],
+      status: "verified",
+      lastVerifiedAt: grantedAt,
+      lastVerificationError: null,
       microsoftAccessStatus: "granted",
       microsoftPermissionId: input.microsoftPermissionId,
-      microsoftGrantedAt: input.grantedAt ?? new Date(),
+      microsoftGrantedAt: grantedAt,
       microsoftLastError: null,
       updatedAt: new Date(),
     };

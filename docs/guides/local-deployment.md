@@ -230,8 +230,10 @@ After both platform applications are configured:
 5. Select **Add and grant**. Control obtains a short-lived application token,
    grants the connector `read` on that site, and stores only the non-secret
    Graph site and permission identifiers.
-6. Select **Verify agent access** to confirm the connected user's delegated
-   token can resolve the site and its document libraries.
+6. Once Microsoft confirms the site-specific grant, the site is active for the
+   organization. Each person still connects their own Microsoft 365 account;
+   Microsoft checks that signed-in person's SharePoint membership whenever an
+   agent accesses site content.
 
 **Revoke and remove** first deletes the Microsoft site permission, then removes
 the LemmaComputer allowlist row. A provider failure retains the local row and

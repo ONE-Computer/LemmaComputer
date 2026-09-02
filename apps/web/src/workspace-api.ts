@@ -423,7 +423,6 @@ export const adminApi = {
   microsoft365SharePointSites: () => request("/api/v1/admin/connectors/microsoft-365/sharepoint-sites", { cache: "no-store" }),
   addMicrosoft365SharePointSite: (input: { displayName: string; siteUrl: string }) => request("/api/v1/admin/connectors/microsoft-365/sharepoint-sites", mutation("POST", input)),
   grantMicrosoft365SharePointSite: (siteId: string) => request(`/api/v1/admin/connectors/microsoft-365/sharepoint-sites/${encodeURIComponent(siteId)}/grant`, mutation("POST")),
-  verifyMicrosoft365SharePointSite: (siteId: string) => request(`/api/v1/admin/connectors/microsoft-365/sharepoint-sites/${encodeURIComponent(siteId)}/verify`, mutation("POST")),
   deleteMicrosoft365SharePointSite: (siteId: string) => request(`/api/v1/admin/connectors/microsoft-365/sharepoint-sites/${encodeURIComponent(siteId)}`, mutation("DELETE")),
   retryConnectorPolicyDelivery: (connectorId: string) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/policy-delivery/retry`, mutation("POST")),
   connectorToolPolicy: (connectorId: string) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/tool-policy`, { cache: "no-store" }),

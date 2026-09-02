@@ -4371,12 +4371,6 @@ export function createControlServer(
     const site = await requireConnections().createMicrosoft365SharePointSite(actor.identity, actor.userId, input);
     return reply.code(201).send({ site });
   });
-  app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/verify", async (request) => {
-    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
-    const siteId = z.uuid().parse(request.params.siteId);
-    const site = await requireConnections().verifyMicrosoft365SharePointSite(actor.identity, siteId);
-    return { site };
-  });
   app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/grant", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
     const siteId = z.uuid().parse(request.params.siteId);

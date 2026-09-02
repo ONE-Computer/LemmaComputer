@@ -193,13 +193,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
     assert.equal(addedSite.statusCode, 201);
     const siteId = addedSite.json().site.id as string;
     assert.equal(addedSite.json().site.microsoftAccessStatus, "granted");
-    const verifiedSite = await app.inject({
-      method: "POST",
-      url: `/v1/admin/connectors/microsoft-365/sharepoint-sites/${siteId}/verify`,
-      headers: headersFor(alpha),
-    });
-    assert.equal(verifiedSite.statusCode, 200);
-    assert.equal(verifiedSite.json().site.status, "verified");
+    assert.equal(addedSite.json().site.status, "verified");
     const sites = await app.inject({
       method: "GET",
       url: "/v1/admin/connectors/microsoft-365/sharepoint-sites",

@@ -164,7 +164,7 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   assert.notEqual(gateway.completed[0]!.codeVerifier, request.codeChallenge);
 });
 
-test("SharePoint site administration is tenant-scoped and verification stores only non-secret Graph identifiers", async () => {
+test("SharePoint site administration is tenant-scoped and confirmed grants become active", async () => {
   const gateway = new FakeConnectionGateway();
   const registry = new MemoryConnectorRegistryStore();
   const service = new McpConnectionService(gateway, {
@@ -185,21 +185,10 @@ test("SharePoint site administration is tenant-scoped and verification stores on
   assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/Finance");
   assert.equal(created.microsoftAccessStatus, "granted");
   assert.equal(created.microsoftPermissionId, "permission-finance");
+  assert.equal(created.status, "verified");
+  assert.equal(created.graphSiteId, "contoso.sharepoint.com,collection,finance");
+  assert.deepEqual(created.driveIds, []);
   assert.equal((await service.listMicrosoft365SharePointSites(otherTenant)).sites.length, 0);
-
-  gateway.onCall = async (toolName, argumentsValue) => {
-    if (toolName === "get-sharepoint-site-by-path") {
-      assert.deepEqual(argumentsValue, { "site-id": "contoso.sharepoint.com", path: "sites/Finance" });
-      return { id: "contoso.sharepoint.com,collection,finance", displayName: "Finance" };
-    }
-    assert.equal(toolName, "list-sharepoint-site-drives");
-    assert.deepEqual(argumentsValue, { "site-id": "contoso.sharepoint.com,collection,finance" });
-    return { value: [{ id: "drive-a", name: "Documents" }, { id: "drive-b", name: "Policies" }] };
-  };
-  const verified = await service.verifyMicrosoft365SharePointSite(alpha, created.id);
-  assert.equal(verified.status, "verified");
-  assert.equal(verified.graphSiteId, "contoso.sharepoint.com,collection,finance");
-  assert.deepEqual(verified.driveIds, ["drive-a", "drive-b"]);
   assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site-by-path", {
     "site-id": "contoso.sharepoint.com",
     path: "sites/Finance",
@@ -216,10 +205,7 @@ test("SharePoint site administration is tenant-scoped and verification stores on
     hostname: "contoso.sharepoint.com",
     sitePath: "sites/Finance",
   }]);
-  assert.deepEqual(gateway.calledTools.map((call) => call.toolName), [
-    "get-sharepoint-site-by-path",
-    "list-sharepoint-site-drives",
-  ]);
+  assert.deepEqual(gateway.calledTools, []);
 });
 
 test("SharePoint grants target the tenant-owned connector application when configured", async () => {
@@ -319,7 +305,7 @@ test("SharePoint provider failures remain visible and revocation fails closed", 
   operation = "ok";
   site = await service.grantMicrosoft365SharePointSite(alpha, site!.id);
   assert.equal(site.microsoftAccessStatus, "granted");
-  site = await service.verifyMicrosoft365SharePointSite(alpha, site.id);
+  assert.equal(site.status, "verified");
   assert.equal((await service.approvedMicrosoft365SharePointSites(alpha)).length, 1);
 
   operation = "revoke";

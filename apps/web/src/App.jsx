@@ -4078,7 +4078,7 @@ function AdminConsentCard({ connection, canManageConnector, onForgotten }) {
   );
 }
 
-function Microsoft365SharePointSites({ connected }) {
+function Microsoft365SharePointSites() {
   const [sites, setSites] = useState([]);
   const [siteAdministrationConfigured, setSiteAdministrationConfigured] = useState(false);
   const [siteAdministrationAvailable, setSiteAdministrationAvailable] = useState(false);
@@ -4135,20 +4135,6 @@ function Microsoft365SharePointSites({ connected }) {
     }
   };
 
-  const verify = async (siteId) => {
-    setBusy(`verify:${siteId}`);
-    setError("");
-    try {
-      await adminApi.verifyMicrosoft365SharePointSite(siteId);
-      await load();
-    } catch (requestError) {
-      await load();
-      setError(requestError.message);
-    } finally {
-      setBusy("");
-    }
-  };
-
   const remove = async (site) => {
     setBusy(`delete:${site.id}`);
     setError("");
@@ -4168,12 +4154,13 @@ function Microsoft365SharePointSites({ connected }) {
     <div className="sharepoint-site-administration">
       <header>
         <p>Selected site access</p>
-        <h2>Choose the SharePoint sites agents can use</h2>
-        <span>Add a site once. LemmaComputer grants the connector read-only access in Microsoft and adds the organization allowlist entry together.</span>
+        <h2>Approve SharePoint sites for your organization</h2>
+        <span>Adding a site gives the Workplace Connector read access to that site and adds it to your organization's allowlist.</span>
       </header>
       <section className="sharepoint-site-prerequisite" aria-label="SharePoint setup requirement">
-        <strong>Microsoft-enforced, site-specific access</strong>
-        <span>The everyday connector keeps <code>Sites.Selected</code>. A separate control-plane application performs grant and revoke operations; its administration credential is never delivered to agents or workspaces.</span>
+        <strong>Two Microsoft controls apply</strong>
+        <span>The Site Manager creates and revokes site-specific grants for the Workplace Connector. Microsoft also checks each signed-in user's own SharePoint membership whenever an agent accesses content.</span>
+        <span>The Site Manager uses a separate tenant-wide SharePoint administration permission. Its credential stays in the control service and is never delivered to agents or workspaces.</span>
       </section>
       {!siteAdministrationConfigured
         ? <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint site administration is not configured</strong>Ask the LemmaComputer operator to configure the platform application before adding sites.</span></div>
@@ -4184,25 +4171,21 @@ function Microsoft365SharePointSites({ connected }) {
         <button className="primary-button compact-button" type="submit" disabled={!siteAdministrationAvailable || busy === "add"}>{busy === "add" ? "Granting access" : "Add and grant"}</button>
       </form>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint sites were not updated</strong>{error}</span></div>}
-      {!connected && <p className="sharepoint-site-connection-note">Connect your own Microsoft 365 account on the Overview tab before verifying site access. The OAuth token remains in the gateway.</p>}
       {loading ? <p className="sharepoint-site-empty">Loading SharePoint sites…</p> : sites.length ? (
         <div className="sharepoint-site-list">
           {sites.map((site) => <article key={site.id} className="sharepoint-site-row">
             <div>
               <div className="sharepoint-site-title">
                 <h3>{site.displayName}</h3>
-                <span className={`sharepoint-site-status ${site.microsoftAccessStatus}`}>Microsoft: {site.microsoftAccessStatus === "granted" ? "Read granted" : site.microsoftAccessStatus === "revocation_failed" ? "Revoke failed" : site.microsoftAccessStatus === "grant_failed" ? "Grant failed" : "Pending"}</span>
-                <span className={`sharepoint-site-status ${site.status}`}>Agent: {site.status === "verified" ? "Verified" : site.status === "verification_failed" ? "Needs attention" : "Not verified"}</span>
+                <span className={`sharepoint-site-status ${site.microsoftAccessStatus}`}>{site.microsoftAccessStatus === "granted" ? "Organization: Active" : site.microsoftAccessStatus === "revocation_failed" ? "Microsoft: Revoke failed" : site.microsoftAccessStatus === "grant_failed" ? "Microsoft: Grant failed" : "Microsoft: Pending"}</span>
               </div>
               <a href={site.siteUrl} target="_blank" rel="noreferrer">{site.siteUrl}</a>
               {site.microsoftLastError && <p>{site.microsoftLastError}</p>}
-              {site.lastVerificationError && <p>{site.lastVerificationError}</p>}
+              {site.microsoftAccessStatus === "granted" && <p>Users still need membership in this SharePoint site.</p>}
               {site.microsoftGrantedAt && <small>Microsoft access granted {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.microsoftGrantedAt))}</small>}
-              {site.lastVerifiedAt && <small>Verified {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.lastVerifiedAt))}</small>}
             </div>
             <div className="sharepoint-site-actions">
               {site.microsoftAccessStatus !== "granted" && <button className="secondary-button" type="button" onClick={() => grant(site.id)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `grant:${site.id}` ? "Granting" : "Retry grant"}</button>}
-              <button className="secondary-button" type="button" onClick={() => verify(site.id)} disabled={!connected || site.microsoftAccessStatus !== "granted" || Boolean(busy)}>{busy === `verify:${site.id}` ? "Verifying" : site.status === "verified" ? "Verify again" : "Verify agent access"}</button>
               <button className="connection-quiet-button" type="button" onClick={() => setPendingRemoval(site)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `delete:${site.id}` ? "Revoking" : "Revoke and remove"}</button>
             </div>
           </article>)}
@@ -4254,7 +4237,7 @@ function Microsoft365Detail({ connection, loading, busy, error, onConnect, onDis
       {activeTab === "tools" && canManagePolicy ? (
         <ConnectorPolicyAdministration connector={connection} busy={busy} onAccessPolicySave={onAccessPolicySave} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} canManageAccess={canManageConnector} />
       ) : activeTab === "sharepoint" && canManageConnector ? (
-        <Microsoft365SharePointSites connected={connected} />
+        <Microsoft365SharePointSites />
       ) : (
         <div className="connector-overview">
           <section className="connector-overview-card">

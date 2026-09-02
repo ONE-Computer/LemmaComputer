@@ -620,7 +620,7 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
   await expect(approval.getByRole("button", { name: "Clear approval record" })).toHaveCount(0);
 });
 
-test("Microsoft 365 administrators can grant and verify a selected SharePoint site", async ({ page }) => {
+test("Microsoft 365 administrators can activate a selected SharePoint site without coupling it to their account", async ({ page }) => {
   const microsoft = {
     ...exaConnector,
     id: "microsoft-365",
@@ -665,11 +665,11 @@ test("Microsoft 365 administrators can grant and verify a selected SharePoint si
         siteUrl: input.siteUrl,
         hostname: "contoso.sharepoint.com",
         sitePath: "sites/Finance",
-        status: "pending",
+        status: "verified",
         microsoftAccessStatus: "granted",
         microsoftGrantedAt: "2026-08-25T02:00:00.000Z",
         microsoftLastError: null,
-        lastVerifiedAt: null,
+        lastVerifiedAt: "2026-08-25T02:00:00.000Z",
         lastVerificationError: null,
         createdAt: "2026-08-25T02:00:00.000Z",
       }];
@@ -678,24 +678,18 @@ test("Microsoft 365 administrators can grant and verify a selected SharePoint si
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ microsoftSiteAdministrationConfigured: true, microsoftSiteAdministrationAvailable: true, sites }) });
   });
-  await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites/*/verify", async (route) => {
-    sites = sites.map((site) => ({ ...site, status: "verified", lastVerifiedAt: "2026-08-25T02:01:00.000Z" }));
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ site: sites[0] }) });
-  });
-
   await page.goto("/");
   await page.getByRole("button", { name: "Connectors" }).click();
   await page.getByRole("button", { name: "Manage" }).click();
   await page.getByRole("button", { name: "SharePoint sites" }).click();
 
-  await expect(page.getByRole("heading", { name: "Choose the SharePoint sites agents can use" })).toBeVisible();
-  await expect(page.getByText("Microsoft-enforced, site-specific access")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Approve SharePoint sites for your organization" })).toBeVisible();
+  await expect(page.getByText("Microsoft also checks each signed-in user's own SharePoint membership", { exact: false })).toBeVisible();
   await page.getByLabel("Site name").fill("Finance policies");
   await page.getByLabel("SharePoint site URL").fill("https://contoso.sharepoint.com/sites/Finance");
   await page.getByRole("button", { name: "Add and grant" }).click();
   await expect(page.getByRole("heading", { name: "Finance policies" })).toBeVisible();
-  await expect(page.getByText("Microsoft: Read granted")).toBeVisible();
-  await expect(page.getByText("Agent: Not verified")).toBeVisible();
-  await page.getByRole("button", { name: "Verify agent access" }).click();
-  await expect(page.getByText("Agent: Verified", { exact: true })).toBeVisible();
+  await expect(page.getByText("Organization: Active")).toBeVisible();
+  await expect(page.getByText("Users still need membership in this SharePoint site.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Verify agent access" })).toHaveCount(0);
 });

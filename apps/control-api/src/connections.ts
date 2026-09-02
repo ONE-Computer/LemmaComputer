@@ -264,14 +264,6 @@ const canonicalSharePointSite = (input: string) => {
   };
 };
 
-const ownedObject = (value: OwnedJson): Record<string, OwnedJson> => (
-  value && typeof value === "object" && !Array.isArray(value) ? value : {}
-);
-
-const boundedVerificationMessage = (error: unknown) => error instanceof LemmaComputerError
-  ? error.message.slice(0, 320)
-  : "Microsoft 365 could not verify the site. Confirm the SharePoint site grant, then try again.";
-
 const boundedSiteAdministrationMessage = (error: unknown, action: "grant" | "revoke") => {
   const fallback = action === "grant"
     ? "Microsoft could not grant read access to this SharePoint site."
@@ -597,41 +589,6 @@ export class McpConnectionService {
       const message = boundedSiteAdministrationMessage(error, "grant");
       await this.registry.recordMicrosoft365SharePointSiteGrantFailure(identity.tenantId, site.id, message);
       throw new LemmaComputerError("M365_SHAREPOINT_SITE_GRANT_FAILED", message, 502);
-    }
-  }
-
-  async verifyMicrosoft365SharePointSite(identity: IdentityContext, siteId: string) {
-    const site = await this.registry.getMicrosoft365SharePointSite(identity.tenantId, siteId);
-    if (!site) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
-    if (site.microsoftAccessStatus !== "granted") {
-      throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_GRANTED", "Grant Microsoft read access to this site before verifying the connected account", 409);
-    }
-    const call = this.gateway.callUserOAuthConnectionTool;
-    if (!call) throw new LemmaComputerError("M365_SHAREPOINT_VERIFICATION_UNAVAILABLE", "SharePoint site verification is unavailable", 503, true);
-    try {
-      const resolved = ownedObject(await call.call(this.gateway, identity, "lemmacomputer_ms365", "get-sharepoint-site-by-path", {
-        "site-id": site.hostname,
-        path: site.sitePath,
-      }));
-      const graphSiteId = typeof resolved.id === "string" && resolved.id.trim() ? resolved.id.trim() : null;
-      if (!graphSiteId) throw new LemmaComputerError("M365_SHAREPOINT_VERIFICATION_INVALID", "Microsoft 365 did not return a site identifier", 502, true);
-      const drivesDocument = ownedObject(await call.call(this.gateway, identity, "lemmacomputer_ms365", "list-sharepoint-site-drives", {
-        "site-id": graphSiteId,
-      }));
-      const drives = Array.isArray(drivesDocument.value) ? drivesDocument.value : [];
-      const driveIds = drives
-        .map((drive) => ownedObject(drive).id)
-        .filter((driveId): driveId is string => typeof driveId === "string" && Boolean(driveId.trim()))
-        .map((driveId) => driveId.trim());
-      const saved = await this.registry.recordMicrosoft365SharePointSiteVerification(identity.tenantId, site.id, {
-        graphSiteId,
-        driveIds,
-      });
-      if (!saved) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
-      return saved;
-    } catch (error) {
-      await this.registry.recordMicrosoft365SharePointSiteVerificationFailure(identity.tenantId, site.id, boundedVerificationMessage(error));
-      throw error;
     }
   }
 
