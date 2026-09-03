@@ -64,6 +64,7 @@ export type TelegramUpdate = {
   mediaGroupId?: string;
   callbackData?: string;
   callbackQueryId?: string;
+  addressedToBot?: boolean;
 };
 
 export type TelegramInlineButton = {
@@ -78,7 +79,7 @@ export type TelegramMessageOptions = {
 
 export interface TelegramBotClient {
   validate(token: string): Promise<{ botId: string; username: string | null }>;
-  getUpdates(token: string, offset: string, timeoutSeconds?: number): Promise<TelegramUpdate[]>;
+  getUpdates(token: string, offset: string, timeoutSeconds?: number, botUsername?: string | null): Promise<TelegramUpdate[]>;
   downloadFile(token: string, fileId: string, maxBytes: number): Promise<Buffer>;
   sendMessage(token: string, chatId: string, text: string, options?: TelegramMessageOptions): Promise<string>;
   sendDocument(token: string, chatId: string, artifact: ChatArtifact, data: Buffer): Promise<string>;
@@ -436,6 +437,40 @@ const botResponseSchema = {
   },
 };
 
+const telegramMessageAddressesBot = (
+  message: Record<string, unknown>,
+  text: string | undefined,
+  botUsername: string | null | undefined,
+) => {
+  if (!botUsername) return false;
+  const normalizedBot = botUsername.toLowerCase();
+  const reply = message.reply_to_message && typeof message.reply_to_message === "object"
+    ? message.reply_to_message as Record<string, unknown>
+    : null;
+  const replyFrom = reply?.from && typeof reply.from === "object"
+    ? reply.from as Record<string, unknown>
+    : null;
+  if (
+    replyFrom?.is_bot === true
+    && typeof replyFrom.username === "string"
+    && replyFrom.username.toLowerCase() === normalizedBot
+  ) return true;
+  if (!text) return false;
+  const rawEntities = Array.isArray(message.entities)
+    ? message.entities
+    : Array.isArray(message.caption_entities) ? message.caption_entities : [];
+  return rawEntities.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    const entity = raw as Record<string, unknown>;
+    if (!["mention", "bot_command"].includes(String(entity.type))) return false;
+    if (!Number.isSafeInteger(entity.offset) || !Number.isSafeInteger(entity.length)) return false;
+    const offset = Number(entity.offset);
+    const length = Number(entity.length);
+    if (offset < 0 || length <= 0) return false;
+    return text.slice(offset, offset + length).toLowerCase().endsWith(`@${normalizedBot}`);
+  });
+};
+
 export class TelegramBotApiClient implements TelegramBotClient {
   constructor(
     private readonly fetcher: typeof fetch = fetch,
@@ -478,7 +513,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
     };
   }
 
-  async getUpdates(token: string, offset: string, timeoutSeconds = 20) {
+  async getUpdates(token: string, offset: string, timeoutSeconds = 20, botUsername?: string | null) {
     const result = await this.request(token, "getUpdates", {
       offset,
       timeout: Math.max(0, Math.min(30, Math.trunc(timeoutSeconds))),
@@ -546,6 +581,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
       const text = typeof message?.text === "string"
         ? message.text
         : typeof message?.caption === "string" ? message.caption : undefined;
+      const addressedToBot = Boolean(callback) || telegramMessageAddressesBot(message!, text, botUsername);
       return [{
         updateId: String(update.update_id),
         senderId: String(sender!.id),
@@ -556,6 +592,7 @@ export class TelegramBotApiClient implements TelegramBotClient {
         ...(typeof message?.media_group_id === "string" ? { mediaGroupId: message.media_group_id } : {}),
         ...(typeof callback?.data === "string" ? { callbackData: callback.data } : {}),
         ...(typeof callback?.id === "string" ? { callbackQueryId: callback.id } : {}),
+        ...(addressedToBot ? { addressedToBot: true } : {}),
       }];
     });
   }
@@ -686,6 +723,8 @@ const status = (record: ChannelConnectionRecord): TelegramChannelConnectionStatu
     credentialId: record.credentialId,
     allowedUserIds: record.allowedUserIds,
     allowedUserCount: record.allowedUserIds.length,
+    allowedGroupChatIds: record.allowedGroupChatIds,
+    allowedGroupChatCount: record.allowedGroupChatIds.length,
     defaultAgentId: record.defaultAgentId,
     allowAgentSwitch: record.allowAgentSwitch,
     botUsername: record.botUsername,
@@ -725,7 +764,7 @@ const telegramMessageLimit = 4_000;
 const telegramStreamStartCharacters = 24;
 const telegramStreamEditCharacters = 160;
 const telegramStreamEditMs = 900;
-const telegramCommandPattern = /^\/(?:agent|new)(?:@\w+)?(?:\s|$)/;
+const telegramCommandPattern = /^\/(?:agent|new|chatid)(?:@\w+)?(?:\s|$)/;
 
 const immediateTelegramUpdate = (update: TelegramUpdate) => Boolean(
   update.callbackData || (update.text && !update.attachment && telegramCommandPattern.test(update.text)),
@@ -895,7 +934,7 @@ export class ChannelBrokerService {
     if (linked?.workspaceId) {
       const connection = await this.store.getOwnedChannelConnection(identity, "telegram", linked.workspaceId);
       if (connection) {
-        const backlog = await this.telegram.getUpdates(input.botToken, "-1");
+        const backlog = await this.telegram.getUpdates(input.botToken, "-1", undefined, bot.username);
         const telegramUpdateOffset = backlog.length
           ? String(backlog.reduce((latest, update) => BigInt(update.updateId) > latest ? BigInt(update.updateId) : latest, -1n) + 1n)
           : "0";
@@ -905,6 +944,7 @@ export class ChannelBrokerService {
           adapter: "telegram",
           credentialId: saved.id,
           allowedUserIds: connection.allowedUserIds,
+          allowedGroupChatIds: connection.allowedGroupChatIds,
           defaultAgentId: connection.defaultAgentId,
           allowAgentSwitch: connection.allowAgentSwitch,
           telegramUpdateOffset,
@@ -974,17 +1014,19 @@ export class ChannelBrokerService {
     }
     const id = prior?.id ?? randomUUID();
     const token = this.vault.unprotect(identity, credential.id, credential.credentialCiphertext);
-    const backlog = prior?.credentialId === credential.id ? [] : await this.telegram.getUpdates(token, "-1");
+    const backlog = prior?.credentialId === credential.id ? [] : await this.telegram.getUpdates(token, "-1", undefined, credential.botUsername);
     const telegramUpdateOffset = backlog.length
       ? String(backlog.reduce((latest, update) => BigInt(update.updateId) > latest ? BigInt(update.updateId) : latest, -1n) + 1n)
       : prior?.credentialId === credential.id ? prior.telegramUpdateOffset : "0";
     const allowedUserIds = [...new Set(input.allowedUserIds)];
+    const allowedGroupChatIds = [...new Set(input.allowedGroupChatIds)];
     const record = await this.store.saveChannelConnection(identity, {
       id,
       workspaceId: input.workspaceId,
       adapter: "telegram",
       credentialId: credential.id,
       allowedUserIds,
+      allowedGroupChatIds,
       defaultAgentId: input.defaultAgentId,
       allowAgentSwitch: input.allowAgentSwitch,
       telegramUpdateOffset,
@@ -1021,14 +1063,14 @@ export class ChannelBrokerService {
     };
     const token = this.vault.unprotect(identity, connection.credentialId, connection.credentialCiphertext);
     await this.deliverPendingResponses(connection, token);
-    let updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset))
+    let updates = (await this.telegram.getUpdates(token, connection.telegramUpdateOffset, undefined, connection.botUsername))
       .sort((left, right) => Number(BigInt(left.updateId) - BigInt(right.updateId)));
     if (this.compositionWindowMs > 0 && updates.some((update) => !immediateTelegramUpdate(update))) {
       await new Promise((resolve) => setTimeout(resolve, this.compositionWindowMs));
       const nextOffset = updates.length
         ? String(BigInt(updates.at(-1)!.updateId) + 1n)
         : connection.telegramUpdateOffset;
-      const followUps = await this.telegram.getUpdates(token, nextOffset, 0);
+      const followUps = await this.telegram.getUpdates(token, nextOffset, 0, connection.botUsername);
       const byId = new Map(updates.map((update) => [update.updateId, update]));
       for (const update of followUps) byId.set(update.updateId, update);
       updates = [...byId.values()]
@@ -1056,7 +1098,10 @@ export class ChannelBrokerService {
     for (let index = response.artifactOffset; index < response.artifacts.length; index += 1) {
       const artifact = response.artifacts[index]!;
       const identity = { tenantId: connection.tenantId, subjectId: connection.subjectId, audience: "lemmacomputer-control" as const };
-      const data = await this.control.downloadArtifact(this.route(connection, identity, response.senderId, response.agentCatalogId!), artifact);
+      const data = await this.control.downloadArtifact(
+        this.route(connection, identity, response.senderId, response.chatId, response.agentCatalogId!),
+        artifact,
+      );
       await this.telegram.sendDocument(token, response.chatId, artifact, data);
       await this.store.advanceChannelArtifactDelivery(response.connectionId, response.updateId, index + 1);
     }
@@ -1070,6 +1115,7 @@ export class ChannelBrokerService {
     connection: ChannelConnectionRecord,
     identity: IdentityContext,
     senderId: string,
+    chatId: string,
     agentCatalogId: ChatAgentCatalogId,
   ): ChannelRoute {
     return channelRouteSchema.parse({
@@ -1078,6 +1124,7 @@ export class ChannelBrokerService {
       workspaceId: connection.workspaceId,
       agentCatalogId,
       externalSenderId: senderId,
+      externalChatId: chatId,
     });
   }
 
@@ -1092,7 +1139,7 @@ export class ChannelBrokerService {
       await this.telegram.sendMessage(token, update.chatId, "Agent switching is disabled for this workspace.");
       return false;
     }
-    const route = this.route(connection, identity, update.senderId, agentCatalogId);
+    const route = this.route(connection, identity, update.senderId, update.chatId, agentCatalogId);
     await this.control.validateRoute(route);
     await this.store.setChannelSenderAgent(connection.id, update.senderId, agentCatalogId);
     await this.telegram.sendMessage(token, update.chatId, `Agent changed to ${displayNames[agentCatalogId]}.`);
@@ -1111,7 +1158,7 @@ export class ChannelBrokerService {
     }
     const available = (await Promise.all(switchableAgentIds.map(async (agentCatalogId) => {
       try {
-        await this.control.validateRoute(this.route(connection, identity, update.senderId, agentCatalogId));
+        await this.control.validateRoute(this.route(connection, identity, update.senderId, update.chatId, agentCatalogId));
         return agentCatalogId;
       } catch {
         return undefined;
@@ -1166,6 +1213,11 @@ export class ChannelBrokerService {
     const updateIds = updates.map((item) => item.updateId);
     const text = groupedText(updates);
     const telegramAttachments = updates.flatMap((item) => item.attachment ? [item.attachment] : []);
+    const allowedSender = connection.allowedUserIds.includes(update.senderId);
+    const privateChat = update.chatType === "private" && update.chatId === update.senderId;
+    const groupChat = ["group", "supergroup"].includes(update.chatType);
+    const approvedGroup = groupChat && connection.allowedGroupChatIds.includes(update.chatId);
+    const addressedToBot = updates.some((item) => item.addressedToBot || agentFromCallback(item.callbackData));
     const finishUpdates = async (
       state: "delivered" | "rejected" | "failed",
       failureCode?: string,
@@ -1176,10 +1228,22 @@ export class ChannelBrokerService {
         this.store.finishChannelUpdate(connection.id, updateId, state, failureCode)
       )));
     };
+    const chatIdCommand = !telegramAttachments.length && /^\/chatid(?:@\w+)?\s*$/.test(text);
+    if (allowedSender && chatIdCommand && (privateChat || (groupChat && addressedToBot))) {
+      await this.telegram.sendMessage(
+        token,
+        update.chatId,
+        groupChat
+          ? `This Telegram group ID is ${update.chatId}. Add it under Allowed Telegram group IDs in LemmaComputer.`
+          : `This Telegram chat ID is ${update.chatId}.`,
+      );
+      await finishUpdates("delivered");
+      return;
+    }
     if (
-      update.chatType !== "private"
-      || !connection.allowedUserIds.includes(update.senderId)
-      || update.chatId !== update.senderId
+      !allowedSender
+      || (!privateChat && !approvedGroup)
+      || (groupChat && !addressedToBot)
       || (!text && !telegramAttachments.length && !agentFromCallback(update.callbackData))
       || text.length > 4_096
     ) {
@@ -1265,7 +1329,7 @@ export class ChannelBrokerService {
         update.chatId,
         () => this.control.turn(
           channelTurnRequestSchema.parse({
-            ...this.route(connection, identity, update.senderId, agentCatalogId),
+            ...this.route(connection, identity, update.senderId, update.chatId, agentCatalogId),
             updateId: update.updateId,
             ...(sessionId ? { sessionId } : {}),
             ...(text ? { text } : {}),

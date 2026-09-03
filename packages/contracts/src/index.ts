@@ -577,6 +577,7 @@ export const chatAgentCatalogIdForWorkspaceManifest = (catalogId: WorkspaceManif
 );
 
 export const telegramUserIdSchema = z.string().regex(/^\d{1,20}$/);
+export const telegramGroupChatIdSchema = z.string().regex(/^-\d{1,20}$/);
 
 export const workspaceManifestSandboxSchema = z.object({
   schemaVersion: z.literal(1),
@@ -606,9 +607,10 @@ export const workspaceManifestChannelSchema = z.object({
   credentialRef: z.uuid(),
   credentialVersion: z.number().int().positive(),
   allowedSenderIds: z.array(telegramUserIdSchema).min(1).max(20),
+  allowedGroupChatIds: z.array(telegramGroupChatIdSchema).max(20).default([]),
   defaultAgentId: workspaceManifestChatAgentCatalogIdSchema,
   allowAgentSwitch: z.boolean(),
-  inboundPolicy: z.literal("private-dm-only"),
+  inboundPolicy: z.enum(["private-dm-only", "private-dm-and-approved-groups"]),
 }).strict();
 export type WorkspaceManifestChannel = z.infer<typeof workspaceManifestChannelSchema>;
 
@@ -1291,6 +1293,7 @@ export const saveTelegramChannelConnectionSchema = z.object({
   workspaceId: z.uuid(),
   credentialId: z.uuid(),
   allowedUserIds: z.array(telegramUserIdSchema).min(1).max(20),
+  allowedGroupChatIds: z.array(telegramGroupChatIdSchema).max(20).default([]),
   defaultAgentId: chatAgentCatalogIdSchema,
   allowAgentSwitch: z.boolean().default(false),
 }).strict();
@@ -1301,6 +1304,8 @@ export const telegramChannelConnectionStatusSchema = z.object({
   credentialId: z.uuid().nullable(),
   allowedUserIds: z.array(telegramUserIdSchema).max(20),
   allowedUserCount: z.number().int().nonnegative(),
+  allowedGroupChatIds: z.array(telegramGroupChatIdSchema).max(20).default([]),
+  allowedGroupChatCount: z.number().int().nonnegative().default(0),
   defaultAgentId: chatAgentCatalogIdSchema.nullable(),
   allowAgentSwitch: z.boolean(),
   botUsername: z.string().regex(/^[A-Za-z0-9_]{5,32}$/).nullable(),
@@ -1548,6 +1553,7 @@ export const channelRouteSchema = z.object({
   workspaceId: z.uuid(),
   agentCatalogId: chatAgentCatalogIdSchema,
   externalSenderId: telegramUserIdSchema,
+  externalChatId: z.union([telegramUserIdSchema, telegramGroupChatIdSchema]),
 }).strict();
 export const channelTurnRequestSchema = channelRouteSchema.extend({
   updateId: z.string().regex(/^\d{1,20}$/),

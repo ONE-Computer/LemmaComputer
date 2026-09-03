@@ -106,6 +106,9 @@ test("workspace channels are compact, optional, and do not participate in config
   assert.match(channels, /href="\?view=settings&section=credentials">Set up a Telegram credential/);
   assert.match(channels, /href="#sandbox-agents-heading">Review AI agents/);
   assert.doesNotMatch(channels, /telegram-allowed-user-ids"[^>]+required/);
+  assert.match(channels, /name="telegram-allowed-group-chat-ids"/);
+  assert.match(channels, /keep BotFather privacy mode enabled/);
+  assert.match(channels, /\/chatid@/);
   const footer = app.slice(app.indexOf('<div className="sandbox-management-footer">'), app.indexOf("<details className=\"sandbox-json\""));
   assert.doesNotMatch(footer, /telegram|credential|channel/i);
 });

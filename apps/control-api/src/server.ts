@@ -1132,9 +1132,12 @@ export function createControlServer(
         credentialRef: telegram.credentialId,
         credentialVersion: telegram.tokenVersion,
         allowedSenderIds: telegram.allowedUserIds,
+        allowedGroupChatIds: telegram.allowedGroupChatIds ?? [],
         defaultAgentId: workspaceManifestChatAgentIdFor(telegram.defaultAgentId),
         allowAgentSwitch: telegram.allowAgentSwitch,
-        inboundPolicy: "private-dm-only",
+        inboundPolicy: (telegram.allowedGroupChatIds ?? []).length
+          ? "private-dm-and-approved-groups"
+          : "private-dm-only",
       }]
       : [],
   });
@@ -1863,6 +1866,10 @@ export function createControlServer(
       || connection.id !== route.connectionId
       || connection.workspaceId !== route.workspaceId
       || !connection.allowedUserIds.includes(route.externalSenderId)
+      || (
+        route.externalChatId !== route.externalSenderId
+        && !connection.allowedGroupChatIds.includes(route.externalChatId)
+      )
     ) {
       throw new LemmaComputerError("CHANNEL_ROUTE_REJECTED", "The channel route is not authorized", 403);
     }

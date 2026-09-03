@@ -4387,6 +4387,7 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
   const [credentialId, setCredentialId] = useState("");
   const [defaultAgentId, setDefaultAgentId] = useState("");
   const [allowedUserIds, setAllowedUserIds] = useState("");
+  const [allowedGroupChatIds, setAllowedGroupChatIds] = useState("");
   const [allowAgentSwitch, setAllowAgentSwitch] = useState(true);
   const [newBotToken, setNewBotToken] = useState("");
   const agentOptions = agents.filter((agent) => messagingAgentIds.has(agent.id))
@@ -4397,6 +4398,7 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
     setCredentialId(connection?.credentialId ?? availableCredentials[0]?.id ?? "");
     setDefaultAgentId(connection?.defaultAgentId ?? "");
     setAllowedUserIds((connection?.allowedUserIds ?? []).join(", "));
+    setAllowedGroupChatIds((connection?.allowedGroupChatIds ?? []).join(", "));
     setAllowAgentSwitch(connection?.state === "connected" ? connection.allowAgentSwitch : true);
   }, [connection?.updatedAt, connection?.state, availableCredentials.map((item) => item.id).join(",")]);
 
@@ -4407,11 +4409,13 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
   }, [agentOptions.map((agent) => agent.value).join(","), defaultAgentId]);
 
   const parsedUserIds = [...new Set(allowedUserIds.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))];
+  const parsedGroupChatIds = [...new Set(allowedGroupChatIds.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))];
   const save = () => {
     if (!credentialId || !defaultAgentId || !parsedUserIds.length) return;
     onSave({
       credentialId,
       allowedUserIds: parsedUserIds,
+      allowedGroupChatIds: parsedGroupChatIds,
       defaultAgentId,
       allowAgentSwitch,
     });
@@ -4448,7 +4452,7 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
             <div>
               <p>Telegram</p>
               <h3>{loading ? "Checking connection" : configured ? `Connected${connection.botUsername ? ` as @${connection.botUsername}` : ""}` : "Not connected"}</h3>
-              <span>{configured ? `${connection.allowedUserCount} approved ${connection.allowedUserCount === 1 ? "sender" : "senders"} · token version ${connection.tokenVersion}` : "One dedicated bot credential can be attached to this workspace."}</span>
+              <span>{configured ? `${connection.allowedUserCount} approved ${connection.allowedUserCount === 1 ? "sender" : "senders"} · ${connection.allowedGroupChatCount ?? 0} approved ${(connection.allowedGroupChatCount ?? 0) === 1 ? "group" : "groups"} · token version ${connection.tokenVersion}` : "One dedicated bot credential can be attached to this workspace."}</span>
             </div>
             {!workspaceExists ? (
               <div className="telegram-empty-workspace" role="status"><Info24Regular aria-hidden="true" /><span><strong>Available after creation</strong><span>Create this workspace without a channel, then return here to attach Telegram.</span><a className="workspace-inline-recovery-link" href="?view=settings&section=credentials">Set up a Telegram credential</a></span></div>
@@ -4470,7 +4474,12 @@ function TelegramChannelSection({ connection, credentials, agents, workspaceExis
               <label>
                 <span>Allowed Telegram user IDs</span>
                 <textarea name="telegram-allowed-user-ids" value={allowedUserIds} onChange={(event) => setAllowedUserIds(event.target.value)} placeholder="123456789, 987654321" disabled={busy || loading} rows="3" />
-                <small>Numeric user IDs only, separated by commas or new lines. Usernames and group membership never authorize access.</small>
+                <small>Numeric user IDs only, separated by commas or new lines. Every person must be approved, including people using an approved group.</small>
+              </label>
+              <label>
+                <span>Allowed Telegram group IDs</span>
+                <textarea name="telegram-allowed-group-chat-ids" value={allowedGroupChatIds} onChange={(event) => setAllowedGroupChatIds(event.target.value)} placeholder="-1001234567890" disabled={busy || loading} rows="2" />
+                <small>Optional. Add the bot to a group, keep BotFather privacy mode enabled, then have an approved user send <code>/chatid@{connection?.botUsername ?? "your_bot"}</code> to find its negative group ID. In groups, mention the bot or reply to one of its messages.</small>
               </label>
               <label className="telegram-switch-option">
                 <input name="telegram-allow-agent-switch" type="checkbox" checked={allowAgentSwitch} onChange={(event) => setAllowAgentSwitch(event.target.checked)} disabled={busy || loading} />
