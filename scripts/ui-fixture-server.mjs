@@ -1089,6 +1089,8 @@ const responses = new Map([
     credentialId: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
     allowedUserIds: ["10001"],
     allowedUserCount: 1,
+    allowedGroupChatIds: ["-1001234567890"],
+    allowedGroupChatCount: 1,
     defaultAgentId: "hermes-claw",
     allowAgentSwitch: true,
     botUsername: "lemmacomputer_demo_bot",

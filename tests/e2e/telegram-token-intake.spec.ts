@@ -76,3 +76,47 @@ test("Telegram credential setup encrypts in the browser before the broker-only i
   expect(controlBodies).toEqual(["{}"]);
   expect(intakeBodies).toHaveLength(1);
 });
+
+test("Telegram workspace routing saves approved group IDs", async ({ page }) => {
+  const savedBodies: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/workspaces/*/channels/telegram", async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    savedBodies.push(body);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        state: "connected",
+        connectionId: "92b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
+        workspaceId: "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508",
+        credentialId: body.credentialId,
+        allowedUserIds: body.allowedUserIds,
+        allowedUserCount: (body.allowedUserIds as unknown[]).length,
+        allowedGroupChatIds: body.allowedGroupChatIds,
+        allowedGroupChatCount: (body.allowedGroupChatIds as unknown[]).length,
+        defaultAgentId: body.defaultAgentId,
+        allowAgentSwitch: body.allowAgentSwitch,
+        botUsername: "lemmacomputer_demo_bot",
+        tokenVersion: 1,
+        updatedAt: new Date().toISOString(),
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Acme Workspace" }).getByRole("button", { name: "Manage configuration" }).click();
+  await page.getByRole("heading", { name: "Channels" }).click();
+  const groupIds = page.locator('textarea[name="telegram-allowed-group-chat-ids"]');
+  await expect(groupIds).toHaveValue("-1001234567890");
+  await groupIds.fill("-1001234567890, -1009876543210");
+  await page.getByRole("button", { name: "Save channel" }).click();
+
+  await expect(page.getByText("Telegram routing updated.")).toBeVisible();
+  expect(savedBodies).toHaveLength(1);
+  assert.deepEqual(savedBodies[0].allowedUserIds, ["10001"]);
+  assert.deepEqual(savedBodies[0].allowedGroupChatIds, ["-1001234567890", "-1009876543210"]);
+});

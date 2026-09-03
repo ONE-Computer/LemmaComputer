@@ -392,12 +392,17 @@ internal token authenticates management calls from Control and route/turn calls
 back to Control.
 
 The current adapter polls Telegram, deduplicates update IDs in PostgreSQL,
-checks sender/workspace routing with Control, supports per-sender agent and
+checks sender/workspace/chat routing with Control, supports per-sender agent and
 session selection, forwards turns to the agent-neutral chat API, and returns
 typing indicators, safe failures, and bounded generated files through Telegram
 `sendDocument`. Artifact downloads are re-authorized against the tenant, workspace,
-sender, and assigned agent route, while the broker remains the only holder of the
-Telegram credential. Incoming Telegram files are bounded by the hosted Bot API's
+sender, approved private or group chat, and assigned agent route, while the broker
+remains the only holder of the Telegram credential. Private chats require an
+approved sender. Group and supergroup chats require both an approved sender and
+an approved negative group ID, and messages must mention the bot or reply to one
+of its messages. The `/chatid@bot_username` command lets an approved sender discover
+a group's ID before authorizing it. Keep Telegram bot privacy mode enabled.
+Incoming Telegram files are bounded by the hosted Bot API's
 20 MB download ceiling (80 MB across a four-file turn). Generated files use
 Telegram's 50 MB `sendDocument` ceiling and a 100 MB aggregate response limit.
 The browser chat retains its separate 8 MB per-file and 16 MB aggregate limits.

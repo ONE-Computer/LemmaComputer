@@ -172,6 +172,7 @@ test("the channel control client owns a long response timeout instead of inherit
     workspaceId: "fcebb39a-df27-4b69-acde-44c9542fca29",
     agentCatalogId: "hermes-claw" as const,
     externalSenderId: "10001",
+    externalChatId: "10001",
     updateId: "1",
     text: "Complete a long-running task.",
   };
@@ -235,7 +236,8 @@ test("the channel control client downloads only hash-bound generated artifacts",
   const address = server.address(); assert.ok(address && typeof address === "object");
   const client = new HttpChannelControlClient(`http://127.0.0.1:${address.port}`, "channel-control-test-secret-at-least-32-characters");
   const route = { connectionId: "29637bba-a710-49b6-8b44-7dac938a6088", identity: alpha,
-    workspaceId: "fcebb39a-df27-4b69-acde-44c9542fca29", agentCatalogId: "hermes-claw" as const, externalSenderId: "10001" };
+    workspaceId: "fcebb39a-df27-4b69-acde-44c9542fca29", agentCatalogId: "hermes-claw" as const,
+    externalSenderId: "10001", externalChatId: "10001" };
   try {
     assert.deepEqual(await client.downloadArtifact(route, artifact), deck);
     await assert.rejects(client.downloadArtifact(route, { ...artifact, sha256: "0".repeat(64) }), /changed before delivery/);
@@ -329,6 +331,46 @@ test("Telegram parses document captions and largest photos, then downloads throu
     client.downloadFile(token, "traversal", channelAttachmentMaxBytes),
     (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "TELEGRAM_INVALID_RESPONSE"),
   );
+});
+
+test("Telegram recognizes bot mentions and replies in group messages", async () => {
+  const mention = "@lemmacomputer_test_bot";
+  const fetcher = (async () => Response.json({
+    ok: true,
+    result: [
+      {
+        update_id: 21,
+        message: {
+          from: { id: 10001 },
+          chat: { id: -100777, type: "supergroup" },
+          text: `${mention} summarize this`,
+          entities: [{ type: "mention", offset: 0, length: mention.length }],
+        },
+      },
+      {
+        update_id: 22,
+        message: {
+          from: { id: 10001 },
+          chat: { id: -100777, type: "supergroup" },
+          text: "continue",
+          reply_to_message: { from: { id: 123456789, is_bot: true, username: "lemmacomputer_test_bot" } },
+        },
+      },
+      {
+        update_id: 23,
+        message: {
+          from: { id: 10001 },
+          chat: { id: -100777, type: "supergroup" },
+          text: "unrelated discussion",
+        },
+      },
+    ],
+  })) as typeof fetch;
+  const client = new TelegramBotApiClient(fetcher);
+
+  const updates = await client.getUpdates(token, "0", 0, "lemmacomputer_test_bot");
+
+  assert.deepEqual(updates.map((update) => update.addressedToBot ?? false), [true, true, false]);
 });
 
 test("Telegram uploads generated documents with sendDocument multipart metadata", async () => {
@@ -604,6 +646,50 @@ test("the broker allowlists senders, deduplicates updates, and isolates sessions
 
   assert.equal(control.turns[2]!.agentCatalogId, "hermes-claw");
   assert.equal(control.turns[2]!.sessionId, "session-hermes-claw");
+});
+
+test("approved Telegram groups require an approved sender and a bot mention or reply", async () => {
+  const store = new MemoryChannelStore();
+  const telegram = new FakeTelegram();
+  const control = new FakeControl();
+  const service = new ChannelBrokerService(
+    store,
+    new ChannelCredentialVault("channel-vault-test-secret-at-least-32-characters"),
+    telegram,
+    control,
+  );
+  const workspace = await store.createOrGet(alpha, "personal", "channel-group-workspace");
+  const credential = await service.saveCredential(alpha, { botToken: token });
+  const saved = await service.saveConnection(alpha, {
+    workspaceId: workspace.id,
+    credentialId: credential.id,
+    allowedUserIds: ["10001", "10002"],
+    allowedGroupChatIds: ["-100777", "-100777"],
+    defaultAgentId: "hermes-claw",
+    allowAgentSwitch: false,
+  });
+  assert.deepEqual(saved.allowedGroupChatIds, ["-100777"]);
+
+  telegram.updates = [
+    { updateId: "1", chatId: "-100888", senderId: "10001", chatType: "supergroup", text: "@bot private data", addressedToBot: true },
+    { updateId: "2", chatId: "-100777", senderId: "99999", chatType: "supergroup", text: "@bot private data", addressedToBot: true },
+    { updateId: "3", chatId: "-100777", senderId: "10001", chatType: "supergroup", text: "ordinary group discussion" },
+    { updateId: "4", chatId: "-100888", senderId: "10001", chatType: "supergroup", text: "/chatid@lemmacomputer_test_bot", addressedToBot: true },
+    { updateId: "5", chatId: "-100777", senderId: "10001", chatType: "supergroup", text: "@bot summarize the wiki", addressedToBot: true },
+    { updateId: "6", chatId: "-100777", senderId: "10002", chatType: "supergroup", text: "follow up", addressedToBot: true },
+  ];
+
+  await service.pollOnce();
+
+  assert.equal(telegram.sent.some((message) => message.text.includes("This Telegram group ID is -100888")), true);
+  assert.deepEqual(control.turns.map((turn) => ({
+    sender: turn.externalSenderId,
+    chat: turn.externalChatId,
+    session: turn.sessionId ?? null,
+  })), [
+    { sender: "10001", chat: "-100777", session: null },
+    { sender: "10002", chat: "-100777", session: null },
+  ]);
 });
 
 test("/agent presents available agent buttons and callback selections switch the sender route", async () => {

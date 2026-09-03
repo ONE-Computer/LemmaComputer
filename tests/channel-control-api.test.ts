@@ -121,7 +121,7 @@ class FakeBroker implements ChannelBrokerManagementClient {
   }
 
   async save(_identity: IdentityContext, raw: unknown) {
-    const input = raw as { workspaceId: string; credentialId: string; allowedUserIds: string[]; defaultAgentId: "hermes-claw" };
+    const input = raw as { workspaceId: string; credentialId: string; allowedUserIds: string[]; allowedGroupChatIds?: string[]; defaultAgentId: "hermes-claw" };
     this.savedCredentialId = input.credentialId;
     this.connection = {
       state: "connected" as const,
@@ -130,6 +130,8 @@ class FakeBroker implements ChannelBrokerManagementClient {
       credentialId: input.credentialId,
       allowedUserIds: input.allowedUserIds,
       allowedUserCount: input.allowedUserIds.length,
+      allowedGroupChatIds: input.allowedGroupChatIds ?? [],
+      allowedGroupChatCount: input.allowedGroupChatIds?.length ?? 0,
       defaultAgentId: input.defaultAgentId,
       allowAgentSwitch: true,
       botUsername: "lemmacomputer_test_bot",
@@ -292,6 +294,7 @@ class FakeAgentChat implements AgentChatClient {
       workspaceId: "00000000-0000-4000-8000-000000000000",
       agentCatalogId: access.catalogId as "hermes-claw",
       externalSenderId: "10001",
+      externalChatId: "10001",
       updateId: "1",
       sessionId,
       text: message.parts.find((part) => part.type === "text")?.text ?? "",
@@ -495,6 +498,7 @@ test("workspace settings expose one manifest with a non-secret Telegram binding"
     workspaceId: workspace.id,
     credentialId: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
     allowedUserIds: ["10001"],
+    allowedGroupChatIds: ["-100777"],
     defaultAgentId: "hermes-claw",
     allowAgentSwitch: true,
   });
@@ -514,9 +518,10 @@ test("workspace settings expose one manifest with a non-secret Telegram binding"
       credentialRef: "72b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
       credentialVersion: 1,
       allowedSenderIds: ["10001"],
+      allowedGroupChatIds: ["-100777"],
       defaultAgentId: "hermes-agent",
       allowAgentSwitch: true,
-      inboundPolicy: "private-dm-only",
+      inboundPolicy: "private-dm-and-approved-groups",
     }]);
     assert.ok(!JSON.stringify(manifest).includes("botToken"));
   } finally {
@@ -546,6 +551,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     adapter: "telegram",
     credentialId,
     allowedUserIds: ["10001"],
+    allowedGroupChatIds: ["-100777"],
     defaultAgentId: "hermes-claw",
     allowAgentSwitch: true,
     telegramUpdateOffset: "0",
@@ -571,6 +577,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     workspaceId: workspace.id,
     agentCatalogId: "hermes-claw",
     externalSenderId: "10001",
+    externalChatId: "10001",
     updateId: "1",
     text: "hello",
     attachments: [{
@@ -623,6 +630,23 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     assert.match(response.sessionId, /^[0-9a-f-]{36}$/);
     assert.equal(response.text, "Hello from Hermes");
     assert.deepEqual(response.notices, ["Approval needed: Send Teams chat message. Open LemmaComputer to review this protected action."]);
+
+    await store.reserveChannelUpdate(connectionId, "2", "10001");
+    const acceptedGroup = await app.inject({
+      method: "POST",
+      url: "/internal/v1/channels/turns",
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
+      payload: { ...payload, externalChatId: "-100777", updateId: "2" },
+    });
+    assert.equal(acceptedGroup.statusCode, 200);
+
+    const rejectedGroup = await app.inject({
+      method: "POST",
+      url: "/internal/v1/channels/turns",
+      headers: { "x-lemmacomputer-channel-token": channelToken, "content-type": "application/json" },
+      payload: { ...payload, externalChatId: "-100888", updateId: "3" },
+    });
+    assert.equal(rejectedGroup.statusCode, 403);
     assert.equal(response.state, "completed");
     assert.equal(response.artifacts.length, 1);
     const [canonicalArtifact] = response.artifacts;
@@ -632,7 +656,7 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     assert.equal(canonicalArtifact.sha256, generatedArtifact.sha256);
 
     const artifactRequest = { connectionId, identity: alpha, workspaceId: workspace.id, agentCatalogId: "hermes-claw",
-      externalSenderId: "10001", artifact: canonicalArtifact };
+      externalSenderId: "10001", externalChatId: "10001", artifact: canonicalArtifact };
     const unauthenticatedArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts", payload: artifactRequest });
     assert.equal(unauthenticatedArtifact.statusCode, 401);
     const deliveredArtifact = await app.inject({ method: "POST", url: "/internal/v1/channels/artifacts",

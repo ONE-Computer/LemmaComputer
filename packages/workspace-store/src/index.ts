@@ -101,6 +101,7 @@ export type ChannelConnectionRecord = {
   credentialKeyVersion: number;
   tokenVersion: number;
   allowedUserIds: string[];
+  allowedGroupChatIds: string[];
   defaultAgentId: ChatAgentCatalogId;
   allowAgentSwitch: boolean;
   botUsername: string | null;
@@ -162,6 +163,7 @@ export interface ChannelStore {
     adapter: "telegram";
     credentialId: string;
     allowedUserIds: string[];
+    allowedGroupChatIds?: string[];
     defaultAgentId: ChatAgentCatalogId;
     allowAgentSwitch: boolean;
     telegramUpdateOffset: string;
@@ -576,6 +578,8 @@ const mapChannelConnectionRow = (row: Record<string, unknown>): ChannelConnectio
   credentialKeyVersion: Number(row.credential_key_version),
   tokenVersion: Number(row.credential_version),
   allowedUserIds: (Array.isArray(row.allowed_user_ids) ? row.allowed_user_ids : [])
+    .filter((value): value is string => typeof value === "string"),
+  allowedGroupChatIds: (Array.isArray(row.allowed_group_chat_ids) ? row.allowed_group_chat_ids : [])
     .filter((value): value is string => typeof value === "string"),
   defaultAgentId: String(row.default_agent_id) as ChatAgentCatalogId,
   allowAgentSwitch: Boolean(row.allow_agent_switch),
@@ -1421,6 +1425,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     adapter: "telegram";
     credentialId: string;
     allowedUserIds: string[];
+    allowedGroupChatIds?: string[];
     defaultAgentId: ChatAgentCatalogId;
     allowAgentSwitch: boolean;
     telegramUpdateOffset: string;
@@ -1428,15 +1433,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     const result = await this.pool.query(
       `INSERT INTO channel_connections (
          id,tenant_id,subject_id,workspace_id,adapter,credential_id,
-         allowed_user_ids,default_agent_id,allow_agent_switch,telegram_update_offset,state,created_at,updated_at
+         allowed_user_ids,allowed_group_chat_ids,default_agent_id,allow_agent_switch,telegram_update_offset,state,created_at,updated_at
        )
-       SELECT $1,$2,$3,w.id,$5,v.id,$7::jsonb,$8,$9,$10::bigint,'active',now(),now()
+       SELECT $1,$2,$3,w.id,$5,v.id,$7::jsonb,$8::jsonb,$9,$10,$11::bigint,'active',now(),now()
        FROM workspaces w
        JOIN channel_credentials v ON v.id=$6 AND v.tenant_id=$2 AND v.subject_id=$3
        WHERE w.id=$4 AND w.tenant_id=$2 AND w.subject_id=$3
        ON CONFLICT (workspace_id,adapter) DO UPDATE SET
          credential_id=EXCLUDED.credential_id,
          allowed_user_ids=EXCLUDED.allowed_user_ids,
+         allowed_group_chat_ids=EXCLUDED.allowed_group_chat_ids,
          default_agent_id=EXCLUDED.default_agent_id,
          allow_agent_switch=EXCLUDED.allow_agent_switch,
          telegram_update_offset=EXCLUDED.telegram_update_offset,
@@ -1444,8 +1450,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
          updated_at=now()
        RETURNING id`,
       [input.id, identity.tenantId, identity.subjectId, input.workspaceId, input.adapter,
-        input.credentialId, JSON.stringify(input.allowedUserIds), input.defaultAgentId,
-        input.allowAgentSwitch, input.telegramUpdateOffset],
+        input.credentialId, JSON.stringify(input.allowedUserIds), JSON.stringify(input.allowedGroupChatIds ?? []),
+        input.defaultAgentId, input.allowAgentSwitch, input.telegramUpdateOffset],
     );
     if (!result.rowCount) throw new Error("Channel workspace is missing or belongs to another user");
     const saved = await this.pool.query(`${channelConnectionSelect} WHERE c.id=$1`, [result.rows[0].id]);
@@ -2780,6 +2786,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     adapter: "telegram";
     credentialId: string;
     allowedUserIds: string[];
+    allowedGroupChatIds?: string[];
     defaultAgentId: ChatAgentCatalogId;
     allowAgentSwitch: boolean;
     telegramUpdateOffset: string;
@@ -2797,6 +2804,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const now = new Date();
     const record: ChannelConnectionRecord = {
       ...input,
+      allowedGroupChatIds: input.allowedGroupChatIds ?? [],
       tenantId: identity.tenantId,
       subjectId: identity.subjectId,
       credentialCiphertext: credential.credentialCiphertext,
