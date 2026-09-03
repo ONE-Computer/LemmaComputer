@@ -187,6 +187,24 @@ assert adapt("list-folder-files", {"driveId": "drive", "driveItemId": "item"}) =
     "driveId": "drive",
     "driveItemId": "item",
 }
+
+class Auth:
+    metadata = {}
+    object_permission = {"mcp_servers": ["ms365-server"]}
+
+callback = module["LemmaComputerMcpPolicyCallback"]()
+dispatcher_data = {
+    "mcp_tool_name": "get-sharepoint-site-by-path",
+    "mcp_arguments": governed,
+}
+result = __import__("asyncio").run(callback.async_pre_call_hook(
+    Auth(), None, dispatcher_data, "call_mcp_tool"
+))
+assert result["modified_arguments"] == {
+    "siteId": "contoso.sharepoint.com",
+    "path": "sites/Finance",
+}
+assert result["mcp_arguments"] == governed
 `;
   const result = spawnSync("python3", ["-c", script, callback], { encoding: "utf8", timeout: 10_000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
