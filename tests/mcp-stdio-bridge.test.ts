@@ -774,6 +774,93 @@ test("workspace-local uploads use the approval-bound resumable broker without pu
   assert.match(called.content[0]?.text ?? "", /Signed approval is required for resumable upload operation/);
 });
 
+test("Microsoft 365 downloads write binary files into the workspace without putting base64 in model text", async (context) => {
+  const downloadDirectory = await mkdtemp(join(homedir(), ".lemmacomputer-download-test-"));
+  const downloadPath = join(downloadDirectory, "finance-deck.pptx");
+  const fileBytes = Buffer.from("PK\u0003\u0004test-presentation");
+  context.after(() => rm(downloadDirectory, { recursive: true, force: true }));
+  const calls: Array<Record<string, unknown>> = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && request.url === "/mcp-rest/tools/list") {
+      response.end(JSON.stringify({ tools: [{
+        name: "download-bytes",
+        description: "Return a base64 file body.",
+        inputSchema: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+        mcp_info: { server_id: "microsoft365-id", server_name: "lemmacomputer_ms365" },
+      }] }));
+      return;
+    }
+    if (request.method === "POST" && request.url === "/mcp-rest/tools/call") {
+      calls.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      response.end(JSON.stringify({
+        content: [{ type: "text", text: JSON.stringify({
+          message: "OK!",
+          contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          encoding: "base64",
+          contentLength: fileBytes.length,
+          contentBytes: fileBytes.toString("base64"),
+        }) }],
+        isError: false,
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  server.listen(4312, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const child = spawn("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => child.kill());
+  const responses: Array<Record<string, unknown>> = [];
+  createInterface({ input: child.stdout }).on("line", (line) => responses.push(JSON.parse(line)));
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
+  child.stdin.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "microsoft365__download-bytes",
+      arguments: {
+        target: "/drives/finance/items/deck/content",
+        localFilePath: downloadPath,
+      },
+    },
+  })}\n`);
+
+  const deadline = Date.now() + 5_000;
+  while (responses.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  const advertised = (responses.find((response) => response.id === 1)?.result as {
+    tools: Array<{ name: string; description: string; inputSchema: { required: string[] } }>;
+  }).tools.find((tool) => tool.name === "microsoft365__download-bytes")!;
+  assert.deepEqual(advertised.inputSchema.required, ["target", "localFilePath"]);
+  assert.match(advertised.description, /corresponding document skill/);
+  assert.deepEqual(calls, [{
+    server_id: "microsoft365-id",
+    name: "download-bytes",
+    arguments: { target: "/drives/finance/items/deck/content" },
+  }]);
+  assert.deepEqual(await readFile(downloadPath), fileBytes);
+  const result = responses.find((response) => response.id === 2)?.result as {
+    isError: boolean; content: Array<{ text: string }>;
+  };
+  assert.equal(result.isError, false);
+  assert.deepEqual(JSON.parse(result.content[0]!.text), {
+    message: "File downloaded into the workspace.",
+    localFilePath: downloadPath,
+    contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    contentLength: fileBytes.length,
+  });
+  assert.doesNotMatch(result.content[0]!.text, new RegExp(fileBytes.toString("base64")));
+});
+
 test("managed Microsoft schemas hide unsupported OData and read-only Graph fields", async (context) => {
   const server = createServer((request, response) => {
     response.setHeader("content-type", "application/json");

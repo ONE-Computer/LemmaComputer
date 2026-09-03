@@ -27,7 +27,7 @@
       "id": "sharepoint-resolve-and-read-document",
       "prompt": "Read the approved budget.docx from the Finance SharePoint site.",
       "expectedSequence": ["list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "list-sharepoint-site-drives", "get-drive-root-item", "list-folder-files", "download-bytes"],
-      "requiredArguments": ["site-id", "path", "driveId", "driveItemId", "target"],
+      "requiredArguments": ["site-id", "path", "driveId", "driveItemId", "target", "localFilePath"],
       "forbiddenArguments": ["filter", "search", "orderby", "headers", "fetchAllPages"]
     },
     {
