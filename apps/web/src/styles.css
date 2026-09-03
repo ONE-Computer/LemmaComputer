@@ -4281,6 +4281,9 @@ a.chat-file-part:hover {
 .connector-consent-card h2 { color: #1d2c40; font-size: 15px; }
 .connector-consent-card p { max-width: 660px; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .connector-consent-card div > span[role="alert"] { display: block; margin-top: 5px; color: #9a2f2a; font-size: 12px; }
+.connector-consent-progress { display: grid; gap: 8px; margin-top: 14px; }
+.connector-consent-progress span { display: flex; justify-content: space-between; gap: 18px; padding: 9px 11px; border-radius: 8px; background: #f5f7fa; color: var(--muted); font-size: 12px; }
+.connector-consent-progress strong { color: var(--ink); }
 .connector-consent-actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .connector-consent-actions label { display: grid; flex: 1 1 320px; gap: 5px; font-size: 12px; }
 .connector-consent-actions label span { color: #1d2c40; font-weight: 600; }
@@ -4343,6 +4346,46 @@ a.chat-file-part:hover {
 .connector-policy-administration-heading h2 { margin: 6px 0 8px; color: #142135; font-size: 24px; letter-spacing: -.02em; }
 .connector-policy-administration-heading span { color: var(--muted); font-size: 13px; line-height: 1.55; }
 .connector-policy-administration .connector-tool-policy { margin-top: 16px; }
+
+.sharepoint-site-administration { padding-top: 28px; max-width: 960px; }
+.sharepoint-site-administration > header { max-width: 780px; }
+.sharepoint-site-administration > header p,
+.sharepoint-site-administration > header h2,
+.sharepoint-site-administration > header span { margin: 0; }
+.sharepoint-site-administration > header p { color: #5e6874; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.sharepoint-site-administration > header h2 { margin: 6px 0 8px; color: #142135; font-size: 24px; letter-spacing: -.02em; }
+.sharepoint-site-administration > header span { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.sharepoint-site-prerequisite { display: grid; gap: 5px; margin-top: 18px; padding: 14px 16px; border: 1px solid #d8e2ee; border-radius: 12px; background: #f7f9fc; }
+.sharepoint-site-prerequisite strong { color: #1d2c40; font-size: 13px; }
+.sharepoint-site-prerequisite span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.sharepoint-site-prerequisite code { font-size: 11px; }
+.sharepoint-site-form { display: grid; grid-template-columns: minmax(140px, .6fr) minmax(260px, 1.2fr) minmax(130px, .5fr) auto; gap: 12px; align-items: end; margin-top: 16px; padding: 16px; border: 1px solid #dce3eb; border-radius: 12px; background: white; }
+.sharepoint-site-form label { display: grid; gap: 6px; }
+.sharepoint-site-form label > span { color: #37465a; font-size: 12px; font-weight: 650; }
+.sharepoint-site-form input { min-width: 0; height: 38px; padding: 0 11px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; font: inherit; }
+.sharepoint-site-form .select-menu,
+.sharepoint-site-form .select-menu-trigger,
+.sharepoint-site-actions .select-menu,
+.sharepoint-site-actions .select-menu-trigger { width: 100%; }
+.sharepoint-site-form .select-menu-trigger,
+.sharepoint-site-actions .select-menu-trigger { min-height: 38px; border-color: #cbd5e1; border-radius: 8px; }
+.sharepoint-site-list { display: grid; gap: 10px; margin-top: 16px; }
+.sharepoint-site-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 16px; border: 1px solid #dce3eb; border-radius: 12px; background: white; }
+.sharepoint-site-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sharepoint-site-title h3 { margin: 0; color: #1d2c40; font-size: 15px; }
+.sharepoint-site-row a { display: inline-block; max-width: 100%; margin-top: 5px; overflow: hidden; color: #315f9c; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sharepoint-site-row p { margin: 7px 0 0; color: #9a2f2a; font-size: 12px; line-height: 1.45; }
+.sharepoint-site-row small { display: block; margin-top: 6px; color: var(--muted); }
+.sharepoint-site-status { padding: 3px 7px; border-radius: 999px; background: #edf1f6; color: #536174; font-size: 10px; font-weight: 700; }
+.sharepoint-site-status.verified,
+.sharepoint-site-status.granted { background: #e4f4ec; color: #226446; }
+.sharepoint-site-status.verification_failed,
+.sharepoint-site-status.grant_failed,
+.sharepoint-site-status.revocation_failed { background: #fce9e7; color: #8c332d; }
+.sharepoint-site-actions { display: flex; gap: 8px; align-items: center; }
+.sharepoint-site-actions label { display: grid; min-width: 138px; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.sharepoint-site-connection-note,
+.sharepoint-site-empty { margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 .connector-effective-policy-card {
   margin-top: 16px;
@@ -7214,6 +7257,11 @@ a.chat-file-part:hover {
   .firewall-editor-rule-builder .firewall-editor-purpose { grid-column: auto; }
   .firewall-editor-actions > div { justify-content: flex-end; }
   .tool-policy-card { padding: 22px 18px; }
+  .sharepoint-site-form,
+  .sharepoint-site-row { grid-template-columns: 1fr; }
+  .sharepoint-site-form .primary-button,
+  .sharepoint-site-actions { width: 100%; }
+  .sharepoint-site-actions button { flex: 1; }
   .tool-policy-heading,
   .tool-policy-actions { align-items: stretch; flex-direction: column; }
   .tool-policy-list label,

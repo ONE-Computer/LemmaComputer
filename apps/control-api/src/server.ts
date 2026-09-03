@@ -18,6 +18,7 @@ import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
+import { MicrosoftSharePointSitePermissionClient, type MicrosoftSharePointSitePermissionGateway } from "./microsoft-sharepoint-site-permissions.js";
 import { isStaticCredentialGroup, type StaticCredentialGroup } from "./connector-catalog.js";
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
@@ -541,6 +542,9 @@ const envSchema = z.object({
   // has not configured Microsoft 365, which leaves consent links unavailable
   // rather than broken.
   M365_CLIENT_ID: z.string().default(""),
+  M365_TENANT_ID: z.string().default(""),
+  M365_SITE_ADMIN_CLIENT_ID: z.string().default(""),
+  M365_SITE_ADMIN_CLIENT_SECRET: z.string().default(""),
   CONNECTOR_CONSENT_SECRET: z.string().default(""),
   AGENT_BRIDGE_URL: z.string().url().default("http://lemmacomputer-control:4100"),
   AGENT_BRIDGE_SECRET: z.string().min(32),
@@ -610,7 +614,10 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
     path === "/internal/v1/agent/instances"
     || /^\/internal\/v1\/agent\/instances\/[^/]+\/(?:running|end)$/.test(path)
   )) return "agent:instances";
-  if (method === "GET" && path === "/internal/v1/agent/mcp-discovery-plan") return "agent:mcp-discovery";
+  if (method === "GET" && (
+    path === "/internal/v1/agent/mcp-discovery-plan"
+    || path === "/internal/v1/agent/sharepoint-sites"
+  )) return "agent:mcp-discovery";
   if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
   if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
   if (method === "POST" && (
@@ -682,6 +689,9 @@ export function createControlServer(
     hostedCustomConnectorEgressOrigins?: string[];
     configuredStaticMcpClients?: StaticCredentialGroup[];
     microsoftAdminConsent?: { clientId: string; consentSecret: string };
+    microsoftSharePointSitePermissions?: MicrosoftSharePointSitePermissionGateway;
+    microsoftSharePointConnectorClientId?: string;
+    microsoftSharePointSiteAdministrationConsent?: { clientId: string };
   } = {},
   security: {
     customerAuthentication?: CustomerAuthentication;
@@ -777,7 +787,7 @@ export function createControlServer(
   const app = Fastify({
     logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
-      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/callback/.test(request.url)
+      disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/(?:callback|admin-consent\/callback|sharepoint-admin-consent\/callback)/.test(request.url)
         || request.url.startsWith("/v1/auth/")
         || request.url.startsWith("/v1/platform/auth/"),
     }),
@@ -1055,6 +1065,9 @@ export function createControlServer(
     hostedCustomConnectorEgressOrigins: connectionOptions.hostedCustomConnectorEgressOrigins,
     configuredStaticMcpClients: connectionOptions.configuredStaticMcpClients,
     microsoftAdminConsent: connectionOptions.microsoftAdminConsent,
+    microsoftSharePointSitePermissions: connectionOptions.microsoftSharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectionOptions.microsoftSharePointConnectorClientId,
+    microsoftSharePointSiteAdministrationConsent: connectionOptions.microsoftSharePointSiteAdministrationConsent,
   }) : undefined;
   if (Boolean(security.providerSettingsStore) !== Boolean(security.providerAdministration)) {
     throw new Error("Provider settings dependencies must be configured together");
@@ -1074,6 +1087,7 @@ export function createControlServer(
       return effective ? (await policyForGrant(actor, effective, grantId)).policy : null;
     },
     connections ? (actor, serverName, toolName) => connections.hostedToolPolicy(actor, serverName, toolName) : undefined,
+    connections ? (actor, toolName, argumentsValue) => connections.authorizeMicrosoft365SharePointTarget(actor, toolName, argumentsValue) : undefined,
   ) : undefined;
   const toolAudit = security.toolAuditStore ? new ToolAuditService(
     security.toolAuditStore,
@@ -1260,7 +1274,7 @@ export function createControlServer(
     // mail client and has no LemmaComputer session, and usually no account.
     // The signed state in the query is what binds the response to an
     // organization; the route reads nothing from the session.
-    if (/^\/v1\/connections\/[^/]+\/admin-consent\/callback$/.test(requestPath)) return;
+    if (/^\/v1\/connections\/[^/]+\/(?:admin-consent|sharepoint-admin-consent)\/callback$/.test(requestPath)) return;
     if (requestPath === "/v1/auth/product-session" || requestPath === "/v1/auth/customer-capabilities"
       || (requestPath === "/v1/auth/development-email-capture" && security.developmentEmailCapture)
       || requestPath === "/v1/auth/customer-sso"
@@ -2223,10 +2237,38 @@ export function createControlServer(
     if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "Connector discovery is not assigned to this workspace agent", 403);
     }
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const assignedTools = assigned?.allowedTools ?? policy.allowedTools;
+    const assignedToolPolicies = assigned?.toolPolicies ?? policy.toolPolicies;
+    const servers = policy.activeMcpServers ?? policy.mcpServers ?? [policy.mcpServer];
     return {
-      servers: policy.activeMcpServers ?? policy.mcpServers ?? [policy.mcpServer],
+      servers,
+      localTools: servers.includes("lemmacomputer_ms365")
+        && assignedTools.includes("list-approved-sharepoint-sites")
+        && assignedToolPolicies["list-approved-sharepoint-sites"] !== "deny"
+        ? ["list-approved-sharepoint-sites"]
+        : [],
       projectionHash: policy.connectionProjectionHash ?? null,
     };
+  });
+  app.get("/internal/v1/agent/sharepoint-sites", async (request) => {
+    const actor = agentPrincipals.get(request);
+    if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
+    const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
+    await requireAgentInstance(request, actor);
+    const { policy } = await channelPolicy(owner, actor.workspaceId);
+    const assigned = policy.agents?.find((candidate) => candidate.agentId === actor.agentId);
+    const allowedAgentIds = new Set([policy.agentId, ...(policy.agents?.map((candidate) => candidate.agentId) ?? [])]);
+    const assignedTools = assigned?.allowedTools ?? policy.allowedTools;
+    const assignedToolPolicies = assigned?.toolPolicies ?? policy.toolPolicies;
+    if (
+      !allowedAgentIds.has(actor.agentId)
+      || !assignedTools.includes("list-approved-sharepoint-sites")
+      || assignedToolPolicies["list-approved-sharepoint-sites"] === "deny"
+    ) {
+      throw new LemmaComputerError("MCP_POLICY_BINDING_MISMATCH", "SharePoint site discovery is not assigned to this workspace agent", 403);
+    }
+    return { sites: await requireConnections().approvedMicrosoft365SharePointSites(owner) };
   });
   app.post("/internal/v1/agent/usage-bindings", async (request) => {
     const actor = agentPrincipals.get(request);
@@ -4323,6 +4365,31 @@ export function createControlServer(
       resourceId: connector.id,
     })) };
   });
+  app.get("/v1/admin/connectors/microsoft-365/sharepoint-sites", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    return requireConnections().listMicrosoft365SharePointSites(actor.identity);
+  });
+  app.post("/v1/admin/connectors/microsoft-365/sharepoint-sites", async (request, reply) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    const input = z.strictObject({
+      displayName: z.string().trim().min(1).max(120),
+      siteUrl: z.string().trim().min(12).max(1000),
+      accessLevel: z.enum(["read", "write"]).default("read"),
+    }).parse(request.body ?? {});
+    const site = await requireConnections().createMicrosoft365SharePointSite(actor.identity, actor.userId, input);
+    return reply.code(201).send({ site });
+  });
+  app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/grant", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    const siteId = z.uuid().parse(request.params.siteId);
+    const input = z.strictObject({ accessLevel: z.enum(["read", "write"]).optional() }).parse(request.body ?? {});
+    const site = await requireConnections().grantMicrosoft365SharePointSite(actor.identity, siteId, input.accessLevel);
+    return { site };
+  });
+  app.delete<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId", async (request) => {
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
+    return requireConnections().deleteMicrosoft365SharePointSite(actor.identity, z.uuid().parse(request.params.siteId));
+  });
   app.get<{ Params: { connectorId: string } }>("/v1/admin/connectors/:connectorId/effective-policy", async (request) => {
     const connectorId = request.params.connectorId;
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: connectorId });
@@ -4604,6 +4671,24 @@ export function createControlServer(
     // the reply has to be a page they can read rather than a redirect into an
     // application they cannot sign into.
     const result = await requireConnections().completeAdminConsent(request.params.connectorId, request.query);
+    if (result.nextConsentUrl) {
+      return reply
+        .code(303)
+        .header("cache-control", "no-store")
+        .header("location", result.nextConsentUrl)
+        .send();
+    }
+    return reply
+      .code(result.outcome === "granted" ? 200 : 400)
+      .type("text/html; charset=utf-8")
+      .header("cache-control", "no-store")
+      .send(adminConsentPage(result));
+  });
+  app.get<{
+    Params: { connectorId: string };
+    Querystring: { state?: string; tenant?: string; admin_consent?: string; error?: string; error_description?: string };
+  }>("/v1/connections/:connectorId/sharepoint-admin-consent/callback", async (request, reply) => {
+    const result = await requireConnections().completeSharePointAdminConsent(request.params.connectorId, request.query);
     return reply
       .code(result.outcome === "granted" ? 200 : 400)
       .type("text/html; charset=utf-8")
@@ -6494,6 +6579,19 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
         .split(",").map((group) => group.trim()).filter(isStaticCredentialGroup),
       ...(env.M365_CLIENT_ID && env.CONNECTOR_CONSENT_SECRET
         ? { microsoftAdminConsent: { clientId: env.M365_CLIENT_ID, consentSecret: env.CONNECTOR_CONSENT_SECRET } }
+        : {}),
+      ...(env.M365_TENANT_ID && env.M365_CLIENT_ID && env.M365_SITE_ADMIN_CLIENT_ID && env.M365_SITE_ADMIN_CLIENT_SECRET
+        ? {
+          microsoftSharePointSitePermissions: new MicrosoftSharePointSitePermissionClient({
+            fallbackProviderTenantId: env.M365_TENANT_ID,
+            administrationClientId: env.M365_SITE_ADMIN_CLIENT_ID,
+            administrationClientSecret: env.M365_SITE_ADMIN_CLIENT_SECRET,
+          }),
+          microsoftSharePointConnectorClientId: env.M365_CLIENT_ID,
+          microsoftSharePointSiteAdministrationConsent: {
+            clientId: env.M365_SITE_ADMIN_CLIENT_ID,
+          },
+        }
         : {}),
     },
     {

@@ -21,6 +21,38 @@ export type ConnectorConnectionStateRecord = {
 
 export type SaveConnectorConnectionStateRecord = Omit<ConnectorConnectionStateRecord, "updatedAt">;
 
+export type Microsoft365SharePointSiteStatus = "pending" | "verified" | "verification_failed";
+export type Microsoft365SharePointMicrosoftAccessStatus = "pending" | "granted" | "grant_failed" | "revocation_failed";
+export type Microsoft365SharePointSiteAccessLevel = "read" | "write";
+
+export type Microsoft365SharePointSiteRecord = {
+  tenantId: string;
+  id: string;
+  connectorId: "microsoft-365";
+  displayName: string;
+  siteUrl: string;
+  hostname: string;
+  sitePath: string;
+  accessLevel: Microsoft365SharePointSiteAccessLevel;
+  graphSiteId: string | null;
+  driveIds: string[];
+  status: Microsoft365SharePointSiteStatus;
+  microsoftAccessStatus: Microsoft365SharePointMicrosoftAccessStatus;
+  microsoftPermissionId: string | null;
+  microsoftGrantedAt: Date | null;
+  microsoftLastError: string | null;
+  lastVerifiedAt: Date | null;
+  lastVerificationError: string | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type CreateMicrosoft365SharePointSiteInput = Pick<
+  Microsoft365SharePointSiteRecord,
+  "tenantId" | "displayName" | "siteUrl" | "hostname" | "sitePath" | "accessLevel" | "createdBy"
+>;
+
 export type ConnectorRegistryRecord = {
   tenantId: string;
   id: string;
@@ -73,6 +105,15 @@ export type ConnectorRegistryRecord = {
   adminConsentGrantedAt: Date | null;
   adminConsentProviderTenantId: string | null;
   adminConsentRequestedBy: string | null;
+  /**
+   * Tenant-wide application consent for the separate SharePoint site-access
+   * administration app. This is intentionally distinct from the everyday
+   * connector's delegated consent so each trust boundary can be audited and
+   * withdrawn independently.
+   */
+  sharePointAdminConsentGrantedAt: Date | null;
+  sharePointAdminConsentProviderTenantId: string | null;
+  sharePointAdminConsentRequestedBy: string | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -95,7 +136,7 @@ export type SaveConnectorCredentialsInput = {
 
 export type SaveConnectorRegistryRecord = Omit<
   ConnectorRegistryRecord,
-  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt" | "adminConsentGrantedAt" | "adminConsentProviderTenantId" | "adminConsentRequestedBy"
+  "createdAt" | "updatedAt" | "toolPolicies" | "toolDefinitionHashes" | "iconDataUrl" | "enabled" | "membersCanManage" | "accessPolicyVersion" | "accessPolicyUpdatedBy" | "accessPolicyUpdatedAt" | "credentialMode" | "oauthClientId" | "credentialsUpdatedBy" | "credentialsUpdatedAt" | "adminConsentGrantedAt" | "adminConsentProviderTenantId" | "adminConsentRequestedBy" | "sharePointAdminConsentGrantedAt" | "sharePointAdminConsentProviderTenantId" | "sharePointAdminConsentRequestedBy"
 > & {
   toolPolicies?: Record<string, McpToolPolicyDecision>;
   toolDefinitionHashes?: Record<string, string>;
@@ -196,6 +237,25 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
    * previously issued authorizations unusable.
    */
   deleteConnectorConnectionStates(tenantId: string, connectorId: string): Promise<number>;
+  listMicrosoft365SharePointSites(tenantId: string): Promise<Microsoft365SharePointSiteRecord[]>;
+  getMicrosoft365SharePointSite(tenantId: string, siteId: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput): Promise<Microsoft365SharePointSiteRecord>;
+  recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }): Promise<Microsoft365SharePointSiteRecord | null>;
+  recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
+    microsoftPermissionId: string;
+    grantedAt?: Date;
+  }): Promise<Microsoft365SharePointSiteRecord | null>;
+  recordMicrosoft365SharePointSiteGrantFailure(tenantId: string, siteId: string, error: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  recordMicrosoft365SharePointSiteRevocationFailure(tenantId: string, siteId: string, error: string): Promise<Microsoft365SharePointSiteRecord | null>;
+  deleteMicrosoft365SharePointSite(tenantId: string, siteId: string): Promise<Microsoft365SharePointSiteRecord | null>;
   saveConnector(record: SaveConnectorRegistryRecord): Promise<ConnectorRegistryRecord>;
   updateAccessPolicy(tenantId: string, connectorId: string, input: { enabled: boolean; membersCanManage: boolean; updatedBy: string }): Promise<ConnectorRegistryRecord | null>;
   updateToolPolicies(tenantId: string, connectorId: string, review: ConnectorToolPolicyReview): Promise<ConnectorRegistryRecord | null>;
@@ -223,6 +283,8 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput): Promise<ConnectorRegistryRecord | null>;
   recordConnectorAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput): Promise<ConnectorRegistryRecord | null>;
   clearConnectorAdminConsent(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
+  recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput): Promise<ConnectorRegistryRecord | null>;
+  clearSharePointAdminConsent(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
   clearConnectorCredentials(tenantId: string, connectorId: string, input: { serverId: string; serverName: string }): Promise<ConnectorRegistryRecord | null>;
   updateIcon(tenantId: string, connectorId: string, iconDataUrl: string | null): Promise<ConnectorRegistryRecord | null>;
   deleteConnector(tenantId: string, connectorId: string): Promise<ConnectorRegistryRecord | null>;
@@ -323,6 +385,7 @@ const cloneConnectorRecord = (record: ConnectorRegistryRecord): ConnectorRegistr
   accessPolicyUpdatedAt: new Date(record.accessPolicyUpdatedAt),
   credentialsUpdatedAt: record.credentialsUpdatedAt ? new Date(record.credentialsUpdatedAt) : null,
   adminConsentGrantedAt: record.adminConsentGrantedAt ? new Date(record.adminConsentGrantedAt) : null,
+  sharePointAdminConsentGrantedAt: record.sharePointAdminConsentGrantedAt ? new Date(record.sharePointAdminConsentGrantedAt) : null,
   createdAt: new Date(record.createdAt),
   updatedAt: new Date(record.updatedAt),
 });
@@ -332,6 +395,15 @@ const cloneDiscoveryPermit = (permit: ConnectorDiscoveryEgressPermit): Connector
   origins: [...permit.origins],
   expiresAt: new Date(permit.expiresAt),
   createdAt: new Date(permit.createdAt),
+});
+
+const cloneMicrosoft365SharePointSite = (site: Microsoft365SharePointSiteRecord): Microsoft365SharePointSiteRecord => ({
+  ...site,
+  driveIds: [...site.driveIds],
+  microsoftGrantedAt: site.microsoftGrantedAt ? new Date(site.microsoftGrantedAt) : null,
+  lastVerifiedAt: site.lastVerifiedAt ? new Date(site.lastVerifiedAt) : null,
+  createdAt: new Date(site.createdAt),
+  updatedAt: new Date(site.updatedAt),
 });
 
 const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
@@ -365,6 +437,9 @@ const mapRow = (row: Record<string, unknown>): ConnectorRegistryRecord => ({
   adminConsentGrantedAt: row.admin_consent_granted_at ? new Date(String(row.admin_consent_granted_at)) : null,
   adminConsentProviderTenantId: typeof row.admin_consent_provider_tenant_id === "string" ? row.admin_consent_provider_tenant_id : null,
   adminConsentRequestedBy: typeof row.admin_consent_requested_by === "string" ? row.admin_consent_requested_by : null,
+  sharePointAdminConsentGrantedAt: row.sharepoint_admin_consent_granted_at ? new Date(String(row.sharepoint_admin_consent_granted_at)) : null,
+  sharePointAdminConsentProviderTenantId: typeof row.sharepoint_admin_consent_provider_tenant_id === "string" ? row.sharepoint_admin_consent_provider_tenant_id : null,
+  sharePointAdminConsentRequestedBy: typeof row.sharepoint_admin_consent_requested_by === "string" ? row.sharepoint_admin_consent_requested_by : null,
   createdBy: String(row.created_by),
   createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
@@ -377,6 +452,29 @@ const mapConnectionStateRow = (row: Record<string, unknown>): ConnectorConnectio
   state: row.state as ConnectorConnectionState,
   connectedAt: row.connected_at ? new Date(String(row.connected_at)) : null,
   expiresAt: row.expires_at ? new Date(String(row.expires_at)) : null,
+  updatedAt: new Date(String(row.updated_at)),
+});
+
+const mapMicrosoft365SharePointSiteRow = (row: Record<string, unknown>): Microsoft365SharePointSiteRecord => ({
+  tenantId: String(row.tenant_id),
+  id: String(row.id),
+  connectorId: "microsoft-365",
+  displayName: String(row.display_name),
+  siteUrl: String(row.site_url),
+  hostname: String(row.hostname),
+  sitePath: String(row.site_path),
+  accessLevel: row.access_level === "write" ? "write" : "read",
+  graphSiteId: typeof row.graph_site_id === "string" ? row.graph_site_id : null,
+  driveIds: Array.isArray(row.drive_ids) ? row.drive_ids.map(String) : [],
+  status: row.status as Microsoft365SharePointSiteStatus,
+  microsoftAccessStatus: row.microsoft_access_status as Microsoft365SharePointMicrosoftAccessStatus,
+  microsoftPermissionId: typeof row.microsoft_permission_id === "string" ? row.microsoft_permission_id : null,
+  microsoftGrantedAt: row.microsoft_granted_at ? new Date(String(row.microsoft_granted_at)) : null,
+  microsoftLastError: typeof row.microsoft_last_error === "string" ? row.microsoft_last_error : null,
+  lastVerifiedAt: row.last_verified_at ? new Date(String(row.last_verified_at)) : null,
+  lastVerificationError: typeof row.last_verification_error === "string" ? row.last_verification_error : null,
+  createdBy: String(row.created_by),
+  createdAt: new Date(String(row.created_at)),
   updatedAt: new Date(String(row.updated_at)),
 });
 
@@ -556,6 +654,141 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
       [tenantId, connectorId],
     );
     return result.rowCount ?? 0;
+  }
+
+  async listMicrosoft365SharePointSites(tenantId: string) {
+    const result = await this.pool.query(
+      `SELECT * FROM microsoft365_sharepoint_sites
+       WHERE tenant_id=$1 ORDER BY display_name,id`,
+      [tenantId],
+    );
+    return result.rows.map(mapMicrosoft365SharePointSiteRow);
+  }
+
+  async getMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const result = await this.pool.query(
+      "SELECT * FROM microsoft365_sharepoint_sites WHERE tenant_id=$1 AND id=$2::uuid",
+      [tenantId, siteId],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput) {
+    const result = await this.pool.query(
+      `INSERT INTO microsoft365_sharepoint_sites (
+         tenant_id,id,display_name,site_url,hostname,site_path,access_level,created_by
+       ) VALUES ($1,$2::uuid,$3,$4,$5,$6,$7,$8)
+       RETURNING *`,
+      [input.tenantId, randomUUID(), input.displayName, input.siteUrl, input.hostname, input.sitePath, input.accessLevel, input.createdBy],
+    );
+    return mapMicrosoft365SharePointSiteRow(result.rows[0]);
+  }
+
+  async recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         graph_site_id=$3,
+         drive_ids=$4::jsonb,
+         status='verified',
+         last_verified_at=$5,
+         last_verification_error=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, input.graphSiteId, JSON.stringify([...new Set(input.driveIds)].sort()), input.verifiedAt ?? new Date()],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         graph_site_id=CASE WHEN microsoft_access_status='granted' THEN graph_site_id ELSE NULL END,
+         drive_ids='[]'::jsonb,
+         status='verification_failed',
+         last_verified_at=NULL,
+         last_verification_error=$3,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, error.slice(0, 320)],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
+    microsoftPermissionId: string;
+    grantedAt?: Date;
+  }) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         graph_site_id=$3,
+         drive_ids=$4::jsonb,
+         access_level=$5,
+         status='verified',
+         last_verified_at=$7,
+         last_verification_error=NULL,
+         microsoft_access_status='granted',
+         microsoft_permission_id=$6,
+         microsoft_granted_at=$7,
+         microsoft_last_error=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [
+        tenantId,
+        siteId,
+        input.graphSiteId,
+        JSON.stringify([...new Set(input.driveIds)].sort()),
+        input.accessLevel,
+        input.microsoftPermissionId,
+        input.grantedAt ?? new Date(),
+      ],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async recordMicrosoft365SharePointSiteGrantFailure(tenantId: string, siteId: string, error: string) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         microsoft_access_status='grant_failed',
+         microsoft_permission_id=NULL,
+         microsoft_granted_at=NULL,
+         microsoft_last_error=$3,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, error.slice(0, 320)],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async recordMicrosoft365SharePointSiteRevocationFailure(tenantId: string, siteId: string, error: string) {
+    const result = await this.pool.query(
+      `UPDATE microsoft365_sharepoint_sites SET
+         microsoft_access_status='revocation_failed',
+         microsoft_last_error=$3,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2::uuid
+       RETURNING *`,
+      [tenantId, siteId, error.slice(0, 320)],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
+  }
+
+  async deleteMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const result = await this.pool.query(
+      "DELETE FROM microsoft365_sharepoint_sites WHERE tenant_id=$1 AND id=$2::uuid RETURNING *",
+      [tenantId, siteId],
+    );
+    return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
   }
 
   async saveConnector(record: SaveConnectorRegistryRecord) {
@@ -951,6 +1184,34 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
+  async recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         sharepoint_admin_consent_granted_at=$3,
+         sharepoint_admin_consent_provider_tenant_id=$4,
+         sharepoint_admin_consent_requested_by=$5,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId, input.grantedAt ?? new Date(), input.providerTenantId, input.requestedBy],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async clearSharePointAdminConsent(tenantId: string, connectorId: string) {
+    const result = await this.pool.query(
+      `UPDATE connector_registry SET
+         sharepoint_admin_consent_granted_at=NULL,
+         sharepoint_admin_consent_provider_tenant_id=NULL,
+         sharepoint_admin_consent_requested_by=NULL,
+         updated_at=now()
+       WHERE tenant_id=$1 AND id=$2
+       RETURNING *`,
+      [tenantId, connectorId],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
   async saveConnectorCredentials(tenantId: string, connectorId: string, input: SaveConnectorCredentialsInput) {
     const result = await this.pool.query(
       `UPDATE connector_registry SET
@@ -1005,11 +1266,13 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
 export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
   private readonly records = new Map<string, ConnectorRegistryRecord>();
   private readonly connectionStates = new Map<string, ConnectorConnectionStateRecord>();
+  private readonly microsoft365SharePointSites = new Map<string, Microsoft365SharePointSiteRecord>();
   private readonly discoveryEgressPermits = new Map<string, ConnectorDiscoveryEgressPermit>();
   private readonly policyChangeEvents: ConnectorPolicyChangeEvent[] = [];
   private readonly policyDeliveryReceipts: ConnectorPolicyWorkspaceDeliveryReceipt[] = [];
   private key(tenantId: string, connectorId: string) { return `${tenantId}:${connectorId}`; }
   private connectionStateKey(tenantId: string, subjectId: string, connectorId: string) { return `${tenantId}\u0000${subjectId}\u0000${connectorId}`; }
+  private microsoft365SharePointSiteKey(tenantId: string, siteId: string) { return `${tenantId}\u0000${siteId}`; }
   private discoveryPermitKey(tenantId: string, permitId: string) { return `${tenantId}\u0000${permitId}`; }
 
   async seedConnectors(_tenantId: string, connectors: SaveConnectorRegistryRecord[]) {
@@ -1081,6 +1344,149 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     return removed;
   }
 
+  async listMicrosoft365SharePointSites(tenantId: string) {
+    return [...this.microsoft365SharePointSites.values()]
+      .filter((site) => site.tenantId === tenantId)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id))
+      .map(cloneMicrosoft365SharePointSite);
+  }
+
+  async getMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const site = this.microsoft365SharePointSites.get(this.microsoft365SharePointSiteKey(tenantId, siteId));
+    return site ? cloneMicrosoft365SharePointSite(site) : null;
+  }
+
+  async createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput) {
+    if (!this.records.has(this.key(input.tenantId, "microsoft-365"))) throw new Error("Microsoft 365 connector does not exist");
+    if ([...this.microsoft365SharePointSites.values()].some((site) => site.tenantId === input.tenantId && site.siteUrl === input.siteUrl)) {
+      throw new Error("SharePoint site already exists");
+    }
+    const now = new Date();
+    const site: Microsoft365SharePointSiteRecord = {
+      ...input,
+      id: randomUUID(),
+      connectorId: "microsoft-365",
+      graphSiteId: null,
+      driveIds: [],
+      status: "pending",
+      microsoftAccessStatus: "pending",
+      microsoftPermissionId: null,
+      microsoftGrantedAt: null,
+      microsoftLastError: null,
+      lastVerifiedAt: null,
+      lastVerificationError: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.microsoft365SharePointSites.set(this.microsoft365SharePointSiteKey(site.tenantId, site.id), site);
+    return cloneMicrosoft365SharePointSite(site);
+  }
+
+  async recordMicrosoft365SharePointSiteVerification(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    verifiedAt?: Date;
+  }) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      graphSiteId: input.graphSiteId,
+      driveIds: [...new Set(input.driveIds)].sort(),
+      status: "verified",
+      lastVerifiedAt: input.verifiedAt ?? new Date(),
+      lastVerificationError: null,
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      graphSiteId: current.microsoftAccessStatus === "granted" ? current.graphSiteId : null,
+      driveIds: [],
+      status: "verification_failed",
+      lastVerifiedAt: null,
+      lastVerificationError: error.slice(0, 320),
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
+    graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
+    microsoftPermissionId: string;
+    grantedAt?: Date;
+  }) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const grantedAt = input.grantedAt ?? new Date();
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      graphSiteId: input.graphSiteId,
+      driveIds: [...new Set(input.driveIds)].sort(),
+      accessLevel: input.accessLevel,
+      status: "verified",
+      lastVerifiedAt: grantedAt,
+      lastVerificationError: null,
+      microsoftAccessStatus: "granted",
+      microsoftPermissionId: input.microsoftPermissionId,
+      microsoftGrantedAt: grantedAt,
+      microsoftLastError: null,
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async recordMicrosoft365SharePointSiteGrantFailure(tenantId: string, siteId: string, error: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      microsoftAccessStatus: "grant_failed",
+      microsoftPermissionId: null,
+      microsoftGrantedAt: null,
+      microsoftLastError: error.slice(0, 320),
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async recordMicrosoft365SharePointSiteRevocationFailure(tenantId: string, siteId: string, error: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    const saved: Microsoft365SharePointSiteRecord = {
+      ...current,
+      microsoftAccessStatus: "revocation_failed",
+      microsoftLastError: error.slice(0, 320),
+      updatedAt: new Date(),
+    };
+    this.microsoft365SharePointSites.set(key, saved);
+    return cloneMicrosoft365SharePointSite(saved);
+  }
+
+  async deleteMicrosoft365SharePointSite(tenantId: string, siteId: string) {
+    const key = this.microsoft365SharePointSiteKey(tenantId, siteId);
+    const current = this.microsoft365SharePointSites.get(key);
+    if (!current) return null;
+    this.microsoft365SharePointSites.delete(key);
+    return cloneMicrosoft365SharePointSite(current);
+  }
+
   async saveConnector(record: SaveConnectorRegistryRecord) {
     const key = this.key(record.tenantId, record.id);
     if (this.records.has(key)) throw new Error("Connector already exists");
@@ -1114,6 +1520,9 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       adminConsentGrantedAt: null,
       adminConsentProviderTenantId: null,
       adminConsentRequestedBy: null,
+      sharePointAdminConsentGrantedAt: null,
+      sharePointAdminConsentProviderTenantId: null,
+      sharePointAdminConsentRequestedBy: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1381,6 +1790,36 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
       adminConsentGrantedAt: null,
       adminConsentProviderTenantId: null,
       adminConsentRequestedBy: null,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async recordSharePointAdminConsent(tenantId: string, connectorId: string, input: RecordConnectorAdminConsentInput) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      sharePointAdminConsentGrantedAt: input.grantedAt ?? new Date(),
+      sharePointAdminConsentProviderTenantId: input.providerTenantId,
+      sharePointAdminConsentRequestedBy: input.requestedBy,
+      updatedAt: new Date(),
+    };
+    this.records.set(key, cloneConnectorRecord(saved));
+    return cloneConnectorRecord(saved);
+  }
+
+  async clearSharePointAdminConsent(tenantId: string, connectorId: string) {
+    const key = this.key(tenantId, connectorId);
+    const record = this.records.get(key);
+    if (!record) return null;
+    const saved: ConnectorRegistryRecord = {
+      ...record,
+      sharePointAdminConsentGrantedAt: null,
+      sharePointAdminConsentProviderTenantId: null,
+      sharePointAdminConsentRequestedBy: null,
       updatedAt: new Date(),
     };
     this.records.set(key, cloneConnectorRecord(saved));

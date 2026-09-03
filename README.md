@@ -292,7 +292,7 @@ paths and identifies which decisions remain authoritative in Control.
 | `workspace-controller` | Runs the Lemma-owned Docker/KasmVNC workspace-node API in colocated or private remote topology | Private; mTLS when remote |
 | `litellm` | Model routing, per-user OAuth custody, scoped virtual keys, and MCP dispatch | Private |
 | `litellm-admin-proxy` | Dedicated Control-to-LiteLLM administration transport; requires mTLS in hosted deployments | Private |
-| `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, and Teams | Private; callbacks use workspace ingress |
+| `ms365-mcp` | Pinned Microsoft 365 MCP connector for Mail, Calendar, OneDrive, selected-site SharePoint, and Teams | Private; callbacks use workspace ingress |
 | `openvtc-consent` | OpenVTC executor identity, request signing, and proof verification | Private |
 | `channel-broker` | Encrypted external-channel credentials and policy-checked message routing | Private |
 | `scheduler-worker` | Claims due schedule runs from the Control database and dispatches each one back through Control without decrypting prompts. Shares Control's database and network, so it is a separate process for operational reasons rather than an isolation boundary | Private |

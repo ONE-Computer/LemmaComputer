@@ -68,6 +68,34 @@ MS365_ACCOUNT_LOOKUP_ARGUMENTS = {
 }
 AUDIT_ONLY_ARGUMENTS = {"lemmacomputerAudit"}
 
+# LemmaComputer publishes the Graph path placeholder as ``site-id`` so the
+# policy contract matches the Microsoft resource shape. Softeria normalizes
+# that OpenAPI placeholder to ``siteId`` in its generated MCP schema. Keep the
+# governed arguments unchanged while Control authorizes them, then adapt only
+# the provider-bound copy after an allow decision.
+SHAREPOINT_SITE_ID_TO_PROVIDER = {
+    "get-sharepoint-site-by-path",
+    "get-sharepoint-site",
+    "list-sharepoint-site-drives",
+}
+
+
+def _provider_mcp_arguments(tool_name, arguments):
+    if not isinstance(arguments, dict):
+        return arguments
+    provider_arguments = {
+        key: value
+        for key, value in arguments.items()
+        if key not in AUDIT_ONLY_ARGUMENTS
+        and not (
+            tool_name == "create-upload-session"
+            and key == "lemmacomputerFile"
+        )
+    }
+    if tool_name in SHAREPOINT_SITE_ID_TO_PROVIDER and "site-id" in provider_arguments:
+        provider_arguments["siteId"] = provider_arguments.pop("site-id")
+    return provider_arguments
+
 _PROVIDER_INTERNAL_FIELDS = (
     "user_api_key_dict",
     "user_api_key_metadata",
@@ -1486,8 +1514,21 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
         if not isinstance(permitted_servers, list) or not permitted_servers:
             raise HTTPException(status_code=403, detail={"error": "MCP_SERVER_BINDING_INVALID"})
         # LiteLLM invokes the hook once during request parsing and again from
-        # the resolved MCP dispatcher. Enforce policy on the resolved call.
+        # the resolved MCP dispatcher. The dispatcher exposes MCP-specific
+        # field names and only forwards a transformation returned as
+        # ``modified_arguments``. Policy was enforced by the parsing-stage
+        # invocation; adapt its authorized arguments for the provider here.
         if data.get("name") is None and data.get("arguments") is None:
+            tool_name = data.get("mcp_tool_name")
+            dispatcher_arguments = data.get("modified_arguments")
+            if not isinstance(dispatcher_arguments, dict):
+                dispatcher_arguments = data.get("mcp_arguments")
+            if isinstance(tool_name, str) and isinstance(dispatcher_arguments, dict):
+                provider_arguments = _provider_mcp_arguments(
+                    tool_name, dispatcher_arguments
+                )
+                if provider_arguments != dispatcher_arguments:
+                    return {**data, "modified_arguments": provider_arguments}
             return data
         if not isinstance(data.get("server_id"), str) and len(permitted_servers) > 1:
             bindings = metadata.get("lemmacomputer_mcp_server_bindings")
@@ -1569,15 +1610,9 @@ class LemmaComputerMcpPolicyCallback(CustomLogger):
             # Audit context and lemmacomputerFile are bound into the signed
             # operation but are LemmaComputer metadata, not Softeria arguments.
             if isinstance(data.get("arguments"), dict):
-                data["arguments"] = {
-                    key: value
-                    for key, value in data["arguments"].items()
-                    if key not in AUDIT_ONLY_ARGUMENTS
-                    and not (
-                        payload["toolName"] == "create-upload-session"
-                        and key == "lemmacomputerFile"
-                    )
-                }
+                data["arguments"] = _provider_mcp_arguments(
+                    payload["toolName"], data["arguments"]
+                )
             return data
         if decision["decision"] == "approval_required":
             raise HTTPException(

@@ -2,7 +2,7 @@
 
 LemmaComputer does not expose the broad schema published by
 `@softeria/ms-365-mcp-server` directly to workspace agents. The managed
-connector bridge projects contract version 1 for the 38 tools in
+connector bridge projects contract version 1 for the 43 tools in
 `m365ToolCatalog`; Control independently validates the same bounded calls
 before Microsoft Graph execution.
 
@@ -18,11 +18,28 @@ a reviewed profile is omitted from discovery and cannot be called.
 | --- | --- | --- |
 | Outlook mail | list folders and recent messages, then read by `messageId` | draft, update, move, send, reply, forward, or delete with resolved IDs and strictly typed message bodies |
 | Calendar | list calendars or series, or read occurrences using an explicit `startDateTime` and `endDateTime` window | create, update, or delete with resolved IDs, explicit timezone-bearing start/end values, and bounded event fields |
-| OneDrive | resolve a drive and item, search by a bounded filename query, and read exact metadata | create, upload, move, copy, or delete using resolved IDs and governed human-facing audit metadata |
+| Files (OneDrive and SharePoint) | resolve a drive and item, search by a bounded filename query, read exact metadata, and download one resolved file through a constrained content path | create, upload or replace, move, copy, or delete using resolved IDs and governed human-facing audit metadata |
+| SharePoint sites | list administrator-approved sites, resolve one exact site, and list its document libraries | each selected site is independently granted read-only or read-and-write access |
 | Teams | resolve chats, teams, channels, and messages in sequence | send or reply using resolved IDs and a bounded HTML message body |
 
+SharePoint has two independent authorization gates. Microsoft Graph
+`Sites.Selected` plus the SharePoint site-specific grant limit what the Entra
+application can access. **Connections → Microsoft 365 → SharePoint sites** is
+the tenant-scoped administration surface: a separate control-plane application
+creates or revokes the Microsoft grant while Control maintains the product
+allowlist. A site must be provider-granted in that screen before Control
+authorizes its hostname/path or Graph site ID. Microsoft still evaluates the
+signed-in person's site membership for every delegated request. Tenant-wide
+SharePoint site search is deliberately not exposed.
+
+Hosted customer administrators receive one organization-bound approval link.
+Microsoft presents the connector consent and the separate site-administration
+consent sequentially; consent creates service principals in the customer
+directory, not customer-owned app registrations. Control records both provider
+tenant IDs and refuses site administration when they differ.
+
 Raw OData `filter`, `search`, `orderby`, `skip`, and `count` fields are not
-part of the agent contract. Neither are Graph paths, arbitrary headers,
+part of the agent contract. Neither are arbitrary Graph paths or headers,
 unbounded pagination, or upstream response-shaping flags. The few constant
 metadata fields used by a governed workflow, such as the exact OneDrive
 `select=id,name,eTag,parentReference` value, are enumerated rather than free

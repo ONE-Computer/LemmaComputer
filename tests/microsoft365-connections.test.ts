@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import type { IdentityContext, LemmaComputerError, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
+import type { IdentityContext, LemmaComputerError, OwnedJson, RuntimeAgentPolicy, RuntimePolicy } from "@lemmacomputer/contracts";
 import type { McpConnectorRegistrationInput, OAuthConnectionGateway, OAuthConnectionStatus, OAuthConnectionTool } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore } from "@lemmacomputer/workspace-store";
 import {
@@ -11,8 +11,11 @@ import {
   withheldConnectors,
 } from "../apps/control-api/src/connector-catalog.js";
 import { McpConnectionService, Microsoft365ConnectionService } from "../apps/control-api/src/connections.js";
+import type { MicrosoftSharePointSitePermissionGateway } from "../apps/control-api/src/microsoft-sharepoint-site-permissions.js";
 
 const alpha: IdentityContext = { tenantId: "acme", subjectId: "alpha", audience: "lemmacomputer-control" };
+const connectorApplicationId = "33333333-3333-4333-8333-333333333333";
+const providerDirectoryId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 // A deployment that has registered both provider OAuth applications. Without
 // them, the connectors depending on those credentials are not published.
 const allCredentials = [...staticCredentialGroups];
@@ -48,6 +51,8 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   onRegister?: (input: McpConnectorRegistrationInput) => void | Promise<void>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
   toolsByServer = new Map<string, FixtureTool[]>();
+  calledTools: Array<{ identity: IdentityContext; serverName: string; toolName: string; argumentsValue: Record<string, OwnedJson> }> = [];
+  onCall?: (toolName: string, argumentsValue: Record<string, OwnedJson>) => OwnedJson | Promise<OwnedJson>;
 
   async beginUserOAuthConnection(input: Parameters<OAuthConnectionGateway["beginUserOAuthConnection"]>[0]) {
     this.started.push(input);
@@ -73,6 +78,10 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
       ? await this.onTools(identity, serverName)
       : this.toolsByServer.get(serverName) ?? [];
     return tools.map(fixtureTool);
+  }
+  async callUserOAuthConnectionTool(identity: IdentityContext, serverName: string, toolName: string, argumentsValue: Record<string, OwnedJson>) {
+    this.calledTools.push({ identity, serverName, toolName, argumentsValue });
+    return this.onCall ? this.onCall(toolName, argumentsValue) : {};
   }
   async discoverOAuthMcpServer() {
     this.discoveries += 1;
@@ -111,6 +120,26 @@ const saveCurrentConnectorToolPolicy = async (
 };
 
 const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
+const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
+  grant: async ({ hostname, sitePath }) => ({
+    graphSiteId: `${hostname},collection,${sitePath.split("/").at(-1)?.toLowerCase()}`,
+    driveIds: [`drive-${sitePath.split("/").at(-1)?.toLowerCase()}`],
+    permissionId: `permission-${sitePath.split("/").at(-1)?.toLowerCase()}`,
+  }),
+  revoke: async () => ({ revoked: true }),
+};
+
+const approveSharePointSiteAdministration = async (
+  service: McpConnectionService,
+  registry: MemoryConnectorRegistryStore,
+  identity: IdentityContext,
+) => {
+  await service.list(identity, true);
+  await registry.recordSharePointAdminConsent(identity.tenantId, "microsoft-365", {
+    providerTenantId: providerDirectoryId,
+    requestedBy: identity.subjectId,
+  });
+};
 
 test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaComputer identity", async () => {
   const gateway = new FakeConnectionGateway();
@@ -134,6 +163,176 @@ test("owned Microsoft 365 flow binds state and PKCE to the initiating LemmaCompu
   assert.equal(gateway.completed[0]!.identity, alpha);
   assert.equal(gateway.completed[0]!.serverName, "lemmacomputer_ms365");
   assert.notEqual(gateway.completed[0]!.codeVerifier, request.codeChallenge);
+});
+
+test("SharePoint site administration is tenant-scoped and confirmed grants become active", async () => {
+  const gateway = new FakeConnectionGateway();
+  const registry = new MemoryConnectorRegistryStore();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
+    registry,
+    microsoftSharePointSitePermissions: sharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await approveSharePointSiteAdministration(service, registry, alpha);
+  const otherTenant = { ...alpha, tenantId: "other" };
+  const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: " Finance policies ",
+    siteUrl: "https://CONTOSO.sharepoint.com/sites/Finance/",
+    accessLevel: "read",
+  });
+  assert.equal(created.displayName, "Finance policies");
+  assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/Finance");
+  assert.equal(created.microsoftAccessStatus, "granted");
+  assert.equal(created.microsoftPermissionId, "permission-finance");
+  assert.equal(created.status, "verified");
+  assert.equal(created.graphSiteId, "contoso.sharepoint.com,collection,finance");
+  assert.deepEqual(created.driveIds, ["drive-finance"]);
+  assert.equal((await service.listMicrosoft365SharePointSites(otherTenant)).sites.length, 0);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site-by-path", {
+    "site-id": "contoso.sharepoint.com",
+    path: "sites/Finance",
+  }), true);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "list-sharepoint-site-drives", {
+    "site-id": "contoso.sharepoint.com,collection,finance",
+  }), true);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site", {
+    "site-id": "contoso.sharepoint.com,collection,other",
+  }), false);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "upload-file-content", {
+    driveId: "drive-finance",
+    driveItemId: "root:/budget.docx:",
+  }), false, "a read-only selected-site grant must reject writes before Graph");
+  const writable = await service.grantMicrosoft365SharePointSite(alpha, created.id, "write");
+  assert.equal(writable.accessLevel, "write");
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "upload-file-content", {
+    driveId: "drive-finance",
+    driveItemId: "root:/budget.docx:",
+  }), true);
+  assert.deepEqual(await service.approvedMicrosoft365SharePointSites(alpha), [{
+    displayName: "Finance policies",
+    siteUrl: "https://contoso.sharepoint.com/sites/Finance",
+    hostname: "contoso.sharepoint.com",
+    sitePath: "sites/Finance",
+    accessLevel: "write",
+  }]);
+  assert.deepEqual(gateway.calledTools, []);
+});
+
+test("SharePoint grants target the tenant-owned connector application when configured", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const targetedClientIds: string[] = [];
+  const service = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+    microsoftSharePointSitePermissions: {
+      grant: async ({ connectorClientId }) => {
+        targetedClientIds.push(connectorClientId);
+        return { graphSiteId: "contoso.sharepoint.com,collection,finance", driveIds: ["finance-documents"], permissionId: "permission-finance" };
+      },
+      revoke: async () => ({ revoked: true }),
+    },
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await approveSharePointSiteAdministration(service, registry, alpha);
+  const tenantConnectorApplicationId = "44444444-4444-4444-8444-444444444444";
+  await registry.saveConnectorCredentials(alpha.tenantId, "microsoft-365", {
+    serverId: "tenant-ms365-server",
+    serverName: "tenant_ms365",
+    oauthClientId: tenantConnectorApplicationId,
+    updatedBy: alpha.subjectId,
+  });
+
+  await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: "Finance",
+    siteUrl: "https://contoso.sharepoint.com/sites/Finance",
+    accessLevel: "read",
+  });
+
+  assert.deepEqual(targetedClientIds, [tenantConnectorApplicationId]);
+});
+
+test("SharePoint site URLs preserve a canonical encoded URL and reject malformed encoding", async () => {
+  const registry = new MemoryConnectorRegistryStore();
+  const service = new McpConnectionService(new FakeConnectionGateway(), {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+    microsoftSharePointSitePermissions: sharePointSitePermissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await approveSharePointSiteAdministration(service, registry, alpha);
+  const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+    displayName: "People policies",
+    siteUrl: "https://CONTOSO.sharepoint.com/sites/People%20Policies/",
+    accessLevel: "read",
+  });
+  assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/People%20Policies");
+  assert.equal(created.sitePath, "sites/People Policies");
+  await assert.rejects(
+    service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+      displayName: "Broken",
+      siteUrl: "https://contoso.sharepoint.com/sites/Bad%ZZ",
+      accessLevel: "read",
+    }),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_URL_INVALID",
+  );
+});
+
+test("SharePoint provider failures remain visible and revocation fails closed", async () => {
+  let operation: "grant" | "revoke" | "ok" = "grant";
+  const gateway = new FakeConnectionGateway();
+  gateway.onCall = async (toolName) => toolName === "get-sharepoint-site-by-path"
+    ? { id: "contoso.sharepoint.com,collection,legal" }
+    : { value: [{ id: "legal-documents" }] };
+  const permissions: MicrosoftSharePointSitePermissionGateway = {
+    grant: async () => {
+      if (operation === "grant") throw new Error("Microsoft rejected the site grant");
+      return { graphSiteId: "contoso.sharepoint.com,collection,legal", driveIds: ["legal-documents"], permissionId: "permission-legal" };
+    },
+    revoke: async () => {
+      if (operation === "revoke") throw new Error("Microsoft rejected the site revocation");
+      return { revoked: true };
+    },
+  };
+  const registry = new MemoryConnectorRegistryStore();
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    registry,
+    microsoftSharePointSitePermissions: permissions,
+    microsoftSharePointConnectorClientId: connectorApplicationId,
+  });
+  await approveSharePointSiteAdministration(service, registry, alpha);
+  await assert.rejects(
+    service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
+      displayName: "Legal",
+      siteUrl: "https://contoso.sharepoint.com/sites/Legal",
+      accessLevel: "read",
+    }),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_GRANT_FAILED",
+  );
+  let [site] = (await service.listMicrosoft365SharePointSites(alpha)).sites;
+  assert.equal(site?.microsoftAccessStatus, "grant_failed");
+  assert.equal(site?.microsoftLastError, "Microsoft rejected the site grant");
+
+  operation = "ok";
+  site = await service.grantMicrosoft365SharePointSite(alpha, site!.id);
+  assert.equal(site.microsoftAccessStatus, "granted");
+  assert.equal(site.status, "verified");
+  assert.equal((await service.approvedMicrosoft365SharePointSites(alpha)).length, 1);
+
+  operation = "revoke";
+  await assert.rejects(
+    service.deleteMicrosoft365SharePointSite(alpha, site.id),
+    (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_REVOCATION_FAILED",
+  );
+  [site] = (await service.listMicrosoft365SharePointSites(alpha)).sites;
+  assert.equal(site?.microsoftAccessStatus, "revocation_failed");
+  assert.equal((await service.approvedMicrosoft365SharePointSites(alpha)).length, 0);
 });
 
 test("connection state is one-time and cannot be finished by another user", async () => {

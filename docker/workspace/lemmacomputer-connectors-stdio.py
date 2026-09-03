@@ -87,6 +87,9 @@ Use this first when a OneDrive request supplies a human-facing filename, link, o
 SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for items matching a human-facing filename.
 
 If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. OneDrive search is eventually consistent, so use list-folder-files on the known parent immediately after creating an item. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
+DOWNLOAD_DRIVE_ITEM_DESCRIPTION = """Download one file from OneDrive or an organization-approved SharePoint document library into this workspace.
+
+Use a driveId and driveItemId returned by the assigned drive and folder tools, then set target to exactly /drives/{driveId}/items/{driveItemId}/content. Set localFilePath to a new absolute path inside the workspace, normally /home/kasm-user/LemmaComputer/Outbox/<filename>. The bridge writes the bytes there without putting base64 file content into model text. After downloading a PPTX, DOCX, XLSX, PDF, or other binary document, use the corresponding document skill on localFilePath. Do not claim that an approved SharePoint file cannot be read before calling this tool. This bounded contract does not accept arbitrary Microsoft Graph paths."""
 UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through LemmaComputer governance.
 
 Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. For a file already in this workspace, pass its absolute path as localFilePath; LemmaComputer uses an approval-bound resumable upload and streams bounded chunks without putting file bytes into model text or imposing a product file-size limit. Otherwise pass a small base64-encoded body supported by the connector's inline endpoint. Supply exactly one of localFilePath or body. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; LemmaComputer obtains any required signed approval."""
@@ -136,6 +139,26 @@ SEARCH_ONEDRIVE_INPUT_SCHEMA = {
         "top": {"type": "integer", "minimum": 1, "maximum": 10},
     },
     "required": ["driveId", "q"],
+    "additionalProperties": False,
+}
+DOWNLOAD_DRIVE_ITEM_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1100,
+            "pattern": r"^/drives/[^/?#]{1,512}/items/[^/?#]{1,512}/content$",
+            "description": "Exact /drives/{driveId}/items/{driveItemId}/content path constructed from resolved opaque IDs.",
+        },
+        "localFilePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "New absolute destination path inside this workspace, normally /home/kasm-user/LemmaComputer/Outbox/<filename>. The file must not already exist.",
+        },
+    },
+    "required": ["target", "localFilePath"],
     "additionalProperties": False,
 }
 UPLOAD_ONEDRIVE_INPUT_SCHEMA = {
@@ -595,6 +618,20 @@ MS365_READ_INPUT_SCHEMAS = {
         "includeHeaders": {"type": "boolean", "const": True},
         "select": {"type": "string", "const": "id,name,eTag,parentReference"},
     }, ["driveId", "driveItemId", "includeHeaders", "select"]),
+    "download-bytes": DOWNLOAD_DRIVE_ITEM_INPUT_SCHEMA,
+    "list-approved-sharepoint-sites": NO_ARGUMENTS_INPUT_SCHEMA,
+    "get-sharepoint-site-by-path": strict_input({
+        "site-id": {
+            "type": "string", "minLength": 1, "maxLength": 253,
+            "description": "SharePoint hostname from the organization-approved site URL, for example contoso.sharepoint.com.",
+        },
+        "path": {
+            "type": "string", "minLength": 1, "maxLength": 512,
+            "description": "Approved server-relative site path without a leading slash, for example sites/Finance.",
+        },
+    }, ["site-id", "path"]),
+    "get-sharepoint-site": identified_input("site-id"),
+    "list-sharepoint-site-drives": identified_input("site-id"),
     "list-chats": strict_input(dict(BOUNDED_LIST_INPUT_PROPERTIES)),
     "list-chat-messages": identified_input("chatId", extra=dict(BOUNDED_LIST_INPUT_PROPERTIES)),
     "list-joined-teams": NO_ARGUMENTS_INPUT_SCHEMA,
@@ -620,9 +657,14 @@ MS365_READ_DESCRIPTIONS = {
     "get-calendar-event": "Read one Outlook event by eventId. timezone may request a qualified IANA response timezone.",
     "list-drives": LIST_DRIVES_DESCRIPTION,
     "get-drive-root-item": "Read the root item of one OneDrive or SharePoint drive using a driveId returned by list-drives.",
-    "list-folder-files": "List the direct children of one OneDrive folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
+    "list-folder-files": "List the direct children of one OneDrive or approved SharePoint folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
     "search-onedrive-files": SEARCH_ONEDRIVE_DESCRIPTION,
-    "get-drive-item": "Read bounded identity and version metadata for one OneDrive item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "get-drive-item": "Read bounded identity and version metadata for one OneDrive or approved SharePoint item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "download-bytes": DOWNLOAD_DRIVE_ITEM_DESCRIPTION,
+    "list-approved-sharepoint-sites": "List the friendly names and exact URLs of SharePoint sites verified by an organization administrator. Use this before resolving a site when the user names a site but does not provide its URL.",
+    "get-sharepoint-site-by-path": "Resolve one organization-approved SharePoint site by its exact hostname and site path. The site must be verified by an administrator in LemmaComputer.",
+    "get-sharepoint-site": "Read metadata for one organization-approved SharePoint site using the opaque site-id returned by get-sharepoint-site-by-path.",
+    "list-sharepoint-site-drives": "List document libraries for one organization-approved SharePoint site. Use a returned drive ID with the existing file search and folder tools.",
     "list-chats": "List recent Microsoft Teams chats. Use a returned chatId to read messages or send a protected reply.",
     "list-chat-messages": "Read recent messages from one Teams chat using a chatId returned by list-chats.",
     "list-joined-teams": LIST_JOINED_TEAMS_DESCRIPTION,
@@ -808,6 +850,73 @@ def prepare_upload_body(arguments: dict) -> bool:
         raise ValueError("localFilePath must not be empty")
     arguments["localFilePath"] = resolved
     return True
+
+
+def prepare_download_destination(arguments: dict) -> str:
+    local_path = arguments.pop("localFilePath", None)
+    if not isinstance(local_path, str) or not os.path.isabs(local_path):
+        raise ValueError("localFilePath must be an absolute workspace path")
+    parent = os.path.realpath(os.path.dirname(local_path))
+    try:
+        inside_workspace = os.path.commonpath([LOCAL_UPLOAD_ROOT, parent]) == LOCAL_UPLOAD_ROOT
+    except ValueError:
+        inside_workspace = False
+    if not inside_workspace or not os.path.isdir(parent):
+        raise ValueError("localFilePath must use an existing directory inside this workspace")
+    destination = os.path.join(parent, os.path.basename(local_path))
+    if destination == parent or os.path.lexists(destination):
+        raise ValueError("localFilePath must identify a new file that does not already exist")
+    return destination
+
+
+def persist_download_result(response: dict, destination: str) -> dict:
+    content = response.get("content")
+    text = content[0].get("text") if isinstance(content, list) and content and isinstance(content[0], dict) else None
+    try:
+        payload = json.loads(text) if isinstance(text, str) else None
+        encoded = payload.get("contentBytes") if isinstance(payload, dict) else None
+        if not isinstance(encoded, str) or payload.get("encoding") != "base64":
+            raise ValueError("invalid download payload")
+        decoded = base64.b64decode(encoded, validate=True)
+        expected_length = payload.get("contentLength")
+        if isinstance(expected_length, int) and expected_length != len(decoded):
+            raise ValueError("download length mismatch")
+    except (binascii.Error, json.JSONDecodeError, ValueError):
+        return error_result(
+            "Microsoft 365 returned an invalid file download.",
+            category="unknown_failure",
+            retryable=True,
+        )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(destination, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(decoded)
+    except FileExistsError:
+        return error_result(
+            "The download destination already exists. Choose a new localFilePath.",
+            category="invalid_argument",
+            field="localFilePath",
+            retryable=False,
+        )
+    except OSError:
+        return error_result(
+            "The downloaded file could not be written inside this workspace.",
+            category="unknown_failure",
+            field="localFilePath",
+            retryable=True,
+        )
+    return {
+        "content": [{"type": "text", "text": json.dumps({
+            "message": "File downloaded into the workspace.",
+            "localFilePath": destination,
+            "contentType": payload.get("contentType"),
+            "contentLength": len(decoded),
+        }, separators=(",", ":"))}],
+        "isError": False,
+    }
 
 
 def write_connector_recovery_state(state: str) -> None:
@@ -1136,6 +1245,33 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
     contract_error = validate_contract_arguments(selected or {}, contract_arguments)
     if contract_error:
         return contract_error
+    download_destination = None
+    if upstream_name == "download-bytes":
+        try:
+            download_destination = prepare_download_destination(arguments)
+        except ValueError as error:
+            return error_result(
+                f"The Microsoft 365 file was not downloaded: {error}.",
+                category="invalid_argument",
+                field="localFilePath",
+                retryable=False,
+            )
+    if upstream_name == "list-approved-sharepoint-sites":
+        try:
+            response = request_json("/lemmacomputer/sharepoint-sites", None, agent_instance_id)
+            sites = response.get("sites") if isinstance(response, dict) else None
+            if not isinstance(sites, list):
+                raise ValueError("invalid approved SharePoint site list")
+            return {
+                "content": [{"type": "text", "text": json.dumps({"sites": sites}, separators=(",", ":"))}],
+                "isError": False,
+            }
+        except (OSError, ValueError, urllib.error.URLError):
+            return error_result(
+                "The approved SharePoint site list is temporarily unavailable.",
+                category="unknown_failure",
+                retryable=True,
+            )
     if upstream_name == "upload-file-content":
         try:
             arguments["driveItemId"] = normalize_upload_drive_item_id(arguments.get("driveItemId"))
@@ -1249,6 +1385,8 @@ def call_tool(name: str, arguments: dict, agent_instance_id: str | None = None) 
                 category=failure["category"],
                 retryable=failure["retryable"],
             )
+        if upstream_name == "download-bytes" and download_destination is not None:
+            return persist_download_result(response, download_destination)
         return omit_nulls(response)
     except urllib.error.HTTPError as error:
         try:

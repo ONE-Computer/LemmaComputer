@@ -573,7 +573,13 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
     brand: "microsoft",
     canAdministerConnector: false,
     credentials: null,
-    adminConsent: { required: true, available: true, grantedAt: null, providerTenantId: null },
+    adminConsent: {
+      required: true,
+      available: true,
+      grantedAt: null,
+      providerTenantId: null,
+      sharePointSiteAdministration: { required: true, available: true, grantedAt: null, providerTenantId: null },
+    },
   };
   const consentUrl = "https://login.microsoftonline.com/organizations/v2.0/adminconsent"
     + "?client_id=11111111-2222-3333-4444-555555555555"
@@ -605,12 +611,173 @@ test("an employee who cannot approve Microsoft 365 gets a link to send to their 
   // The employee is told what is blocking them and why they cannot fix it
   // themselves, instead of being sent to a Microsoft page they cannot act on.
   const approval = page.getByRole("region", { name: "Administrator approval" });
-  await expect(approval).toContainText("no individual can approve for themselves");
-  // A single-tenant installation whose operator already consented in the Entra
-  // portal must not be told it is blocked, so the copy covers both directories.
-  await expect(approval).toContainText("already approved it there, you can connect now");
-  await approval.getByRole("button", { name: "Get approval link" }).click();
+  await expect(approval).toContainText("one approval link");
+  await expect(approval).toContainText("1. Microsoft 365 connector");
+  await expect(approval).toContainText("2. SharePoint site management");
+  await approval.getByRole("button", { name: "Get Microsoft approval link" }).click();
   await expect(approval.getByLabel("Approval link")).toHaveValue(consentUrl);
   // Clearing the record is an administrator action, and this person is not one.
   await expect(approval.getByRole("button", { name: "Clear approval record" })).toHaveCount(0);
+});
+
+test("Microsoft 365 administrators can activate a selected SharePoint site without coupling it to their account", async ({ page }) => {
+  const microsoft = {
+    ...exaConnector,
+    id: "microsoft-365",
+    serverName: "lemmacomputer_ms365",
+    name: "Microsoft 365",
+    shortDescription: "Mail, calendar, files, SharePoint, and Teams",
+    description: "Use approved Microsoft 365 tools through the LemmaComputer AI gateway.",
+    services: ["Outlook Mail", "Calendar", "OneDrive", "SharePoint", "Teams"],
+    policySupport: "governed",
+    brand: "microsoft",
+    state: "connected",
+    connectedAt: "2026-08-25T01:00:00.000Z",
+    account: { displayName: "Alex Morgan", email: "alex@acme.example", userPrincipalName: "alex@acme.example" },
+    canAdministerConnector: true,
+    canManageConnection: true,
+    adminConsent: {
+      required: true,
+      available: true,
+      grantedAt: "2026-08-24T01:00:00.000Z",
+      providerTenantId: "11111111-2222-3333-4444-555555555555",
+      sharePointSiteAdministration: {
+        required: true,
+        available: true,
+        grantedAt: "2026-08-24T01:01:00.000Z",
+        providerTenantId: "11111111-2222-3333-4444-555555555555",
+      },
+    },
+  };
+  let sites: Array<Record<string, unknown>> = [];
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [microsoft] }) });
+  });
+  await page.route("**/api/v1/connections/microsoft-365", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(microsoft) });
+  });
+  await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites", async (route) => {
+    if (route.request().method() === "POST") {
+      const input = JSON.parse(route.request().postData() ?? "{}") as { displayName: string; siteUrl: string; accessLevel: "read" | "write" };
+      sites = [{
+        id: "2b37cc2b-e2c3-4d48-a30e-1d4dfda64d88",
+        displayName: input.displayName,
+        siteUrl: input.siteUrl,
+        hostname: "contoso.sharepoint.com",
+        sitePath: "sites/Finance",
+        accessLevel: input.accessLevel,
+        status: "verified",
+        microsoftAccessStatus: "granted",
+        microsoftGrantedAt: "2026-08-25T02:00:00.000Z",
+        microsoftLastError: null,
+        lastVerifiedAt: "2026-08-25T02:00:00.000Z",
+        lastVerificationError: null,
+        createdAt: "2026-08-25T02:00:00.000Z",
+      }];
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ site: sites[0] }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ microsoftSiteAdministrationConfigured: true, microsoftSiteAdministrationAvailable: true, sites }) });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "SharePoint sites" }).click();
+
+  await expect(page.getByRole("heading", { name: "Approve SharePoint sites for your organization" })).toBeVisible();
+  await expect(page.getByText("Microsoft also checks each signed-in user's own SharePoint membership", { exact: false })).toBeVisible();
+  await page.getByLabel("Site name").fill("Finance policies");
+  await page.getByLabel("SharePoint site URL").fill("https://contoso.sharepoint.com/sites/Finance");
+  await page.getByRole("combobox", { name: "Agent access" }).click();
+  await page.getByRole("option", { name: "Read and write" }).click();
+  await page.getByRole("button", { name: "Add and grant" }).click();
+  await expect(page.getByRole("heading", { name: "Finance policies" })).toBeVisible();
+  await expect(page.getByText("Organization: Active")).toBeVisible();
+  await expect(page.getByText("Agents may read and change documents", { exact: false })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Agent access for Finance policies" })).toHaveText("Read and write");
+  await expect(page.getByRole("button", { name: "Verify agent access" })).toHaveCount(0);
+});
+
+test("Microsoft 365 administrators can allow SharePoint tools from the connector policy", async ({ page }) => {
+  const microsoft = {
+    ...exaConnector,
+    id: "microsoft-365",
+    serverName: "lemmacomputer_ms365",
+    name: "Microsoft 365",
+    shortDescription: "Mail, calendar, files, SharePoint, and Teams",
+    services: ["Outlook Mail", "Calendar", "OneDrive", "SharePoint", "Teams"],
+    policySupport: "governed",
+    brand: "microsoft",
+    state: "connected",
+    canAdministerConnector: true,
+  };
+  const sharePointTools = [
+    ["list-approved-sharepoint-sites", "List approved SharePoint sites"],
+    ["get-sharepoint-site-by-path", "Resolve approved SharePoint site"],
+    ["get-sharepoint-site", "Read SharePoint site"],
+    ["list-sharepoint-site-drives", "List SharePoint document libraries"],
+  ];
+  let savedTools: Record<string, string> | null = null;
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [microsoft] }) });
+  });
+  await page.route("**/api/v1/admin/mcp-policy", async (route) => {
+    if (route.request().method() === "PUT") {
+      savedTools = route.request().postDataJSON().tools;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+        id: "6e9aacfd-2a06-4ea8-9165-a1818a4cae74",
+        version: 4,
+        documentHash: "b".repeat(64),
+        workspaceGrants: { refreshed: 1, failed: 0 },
+      }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      serverName: "lemmacomputer_ms365",
+      version: 3,
+      documentHash: "a".repeat(64),
+      policyApplication: { state: "current" },
+      tools: [...sharePointTools.map(([name, displayName]) => ({
+        name,
+        displayName,
+        description: `${displayName} through the approved Microsoft 365 connection.`,
+        service: "sharepoint",
+        risk: "read",
+        decision: "deny",
+      })), {
+        name: "download-bytes",
+        displayName: "Read file contents",
+        description: "Read file contents from OneDrive or an approved SharePoint site.",
+        service: "onedrive",
+        risk: "read",
+        decision: "deny",
+      }],
+    }) });
+  });
+  await page.route("**/api/v1/admin/connectors/microsoft-365/effective-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: null }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "Policy" }).click();
+
+  const sharePointGroup = page.locator(".tool-policy-group").filter({ has: page.getByRole("heading", { name: "SharePoint sites" }) });
+  await expect(sharePointGroup).toBeVisible();
+  await expect(sharePointGroup.locator("label")).toHaveCount(4);
+  for (const [, displayName] of sharePointTools) {
+    await expect(sharePointGroup.getByText(displayName, { exact: true })).toBeVisible();
+  }
+  const filesGroup = page.locator(".tool-policy-group").filter({ has: page.getByRole("heading", { name: "Files (OneDrive & SharePoint)" }) });
+  await expect(filesGroup.getByText("Read file contents", { exact: true })).toBeVisible();
+  for (const [, displayName] of sharePointTools) {
+    await sharePointGroup.getByLabel(`${displayName} policy`).click();
+    await page.getByRole("option", { name: "Allow", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "Save tool permissions" }).click();
+  await expect.poll(() => savedTools).toEqual({
+    ...Object.fromEntries(sharePointTools.map(([name]) => [name, "allow"])),
+    "download-bytes": "deny",
+  });
 });

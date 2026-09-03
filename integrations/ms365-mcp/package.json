@@ -3,6 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@softeria/ms-365-mcp-server": "0.131.2"
+    "@softeria/ms-365-mcp-server": "0.146.1"
   }
 }

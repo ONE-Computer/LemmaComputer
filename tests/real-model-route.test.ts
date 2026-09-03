@@ -143,7 +143,8 @@ test("the connection account lookup bypass is purpose-bound and exact", async ()
   assert.match(callback, /\{\s*"\$select": "displayName,mail,userPrincipalName",?\s*\}/);
   assert.match(adapter, /const accountLookup = options\.accountLookup === true && serverName === "lemmacomputer_ms365"/);
   assert.match(adapter, /lemmacomputer_connection_account_lookup: accountLookup/);
-  assert.match(adapter, /mcp_tool_permissions: \{ \[serverName\]: accountLookup \? \["get-current-user"\] : \[\] \}/);
+  assert.match(adapter, /const allowedTools = accountLookup \? \["get-current-user"\] : verifiedTools/);
+  assert.match(adapter, /mcp_tool_permissions: \{ \[serverName\]: allowedTools \}/);
 });
 
 test("human-facing audit context is approval-bound but never forwarded to a connector", async () => {

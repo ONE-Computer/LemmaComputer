@@ -338,7 +338,7 @@ capability policy; a LiteLLM configuration entry alone is not sufficient.
 The connector is a pinned build of `@softeria/ms-365-mcp-server`. Compose starts
 it in organization mode with:
 
-- a fixed regex allowlist of Mail, Calendar, OneDrive, and Teams tools;
+- a fixed regex allowlist of Mail, Calendar, OneDrive, selected-site SharePoint, and Teams tools;
 - a fixed OAuth scope list;
 - dynamic client registration disabled;
 - bounded pagination and item counts;

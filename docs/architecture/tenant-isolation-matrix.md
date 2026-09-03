@@ -48,6 +48,19 @@ server authority; an object-store key is an opaque locator, never authorization.
 Hosted artifact ingestion additionally matches the workspace's persisted owning
 node and generation before Control promotes staged bytes to a durable revision.
 
+Microsoft 365 selected-site configuration is organization-scoped by
+`microsoft365_sharepoint_sites.tenant_id`. Control returns only verified sites
+from the same tenant to an active workspace agent, and the stored record holds
+only canonical URLs plus non-secret Graph site, drive, and permission
+identifiers. User OAuth tokens remain in the gateway credential boundary. The
+shared multi-tenant connector and site-administration registrations create
+separate service principals in each consenting customer directory. Control
+binds both signed consent callbacks to the LemmaComputer organization and
+requires their provider directory IDs to match before changing a site grant.
+The separate site-administration credential is projected only to Control and is
+used to obtain a short-lived application token for explicit grant/revoke
+operations; it is never projected to a workspace or the MCP connector.
+
 ## Revocation and replay rules
 
 - Membership suspension, removal, organization closure, product-session revocation, and operator elevation expiry take effect at the next protected operation.
