@@ -152,6 +152,46 @@ for invalid in ({**metadata, "lemmacomputer_access_generation": 6.5}, {**metadat
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("the LiteLLM policy callback adapts governed SharePoint site ids for Softeria", () => {
+  const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
+  const script = String.raw`
+import runpy
+import sys
+import types
+
+fastapi = types.ModuleType("fastapi")
+fastapi.HTTPException = Exception
+litellm = types.ModuleType("litellm")
+litellm.get_model_info = lambda model: {}
+integrations = types.ModuleType("litellm.integrations")
+custom_logger = types.ModuleType("litellm.integrations.custom_logger")
+custom_logger.CustomLogger = type("CustomLogger", (), {
+    "__init__": lambda self, *args, **kwargs: None,
+})
+sys.modules["fastapi"] = fastapi
+sys.modules["litellm"] = litellm
+sys.modules["litellm.integrations"] = integrations
+sys.modules["litellm.integrations.custom_logger"] = custom_logger
+
+module = runpy.run_path(sys.argv[1])
+adapt = module["_provider_mcp_arguments"]
+governed = {"site-id": "contoso.sharepoint.com", "path": "sites/Finance"}
+assert adapt("get-sharepoint-site-by-path", governed) == {
+    "siteId": "contoso.sharepoint.com",
+    "path": "sites/Finance",
+}
+assert governed == {"site-id": "contoso.sharepoint.com", "path": "sites/Finance"}
+for tool_name in ("get-sharepoint-site", "list-sharepoint-site-drives"):
+    assert adapt(tool_name, {"site-id": "opaque-site-id"}) == {"siteId": "opaque-site-id"}
+assert adapt("list-folder-files", {"driveId": "drive", "driveItemId": "item"}) == {
+    "driveId": "drive",
+    "driveItemId": "item",
+}
+`;
+  const result = spawnSync("python3", ["-c", script, callback], { encoding: "utf8", timeout: 10_000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test("the pinned LiteLLM callback normalizes provider units and preserves governed attempt lineage", () => {
   const callback = path.resolve(import.meta.dirname, "../integrations/litellm/lemmacomputer_policy_callback.py");
   const script = String.raw`
