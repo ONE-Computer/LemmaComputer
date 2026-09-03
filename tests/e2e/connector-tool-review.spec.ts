@@ -130,6 +130,12 @@ const policy = {
   ],
 };
 
+const disconnectedConnector = {
+  ...connector,
+  state: "disconnected",
+  connectedAt: null,
+};
+
 const source = (kind: "protected_baseline" | "organization_policy" | "connector_policy", version: number, decision?: "allow" | "approval_required" | "deny") => ({
   kind,
   sourceId: `${kind}-${version}`,
@@ -269,6 +275,71 @@ test("custom connector tools stay blocked until the administrator reviews and sa
   await page.getByRole("button", { name: "Save tool permissions" }).click();
   await expect.poll(() => saved).toBe(true);
   await expect(page.locator(".tool-policy-change-summary")).toHaveCount(0);
+});
+
+test("an administrator reviews an anonymously published tool catalogue before connecting", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [disconnectedConnector] }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: {
+      ...effectivePolicy,
+      tools: [],
+      runtimeProjection: { ...effectivePolicy.runtimeProjection, state: "connection_required", allowed: 0, approvalRequired: 0, denied: 0 },
+    } }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/tool-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      ...policy,
+      discovery: { state: "available", source: "anonymous" },
+    }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Policy" }).click();
+
+  await expect(page.getByText("Pre-connection catalogue:")).toBeVisible();
+  await expect(page.getByText("the employee's authenticated connection must expose the same definitions")).toBeVisible();
+  await expect(page.getByText("Export report", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save tool permissions" })).toBeEnabled();
+});
+
+test("an unconnected policy explains when the provider protects its tool catalogue", async ({ page }) => {
+  await page.route("**/api/v1/connections", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ connections: [disconnectedConnector] }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/effective-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ policy: {
+      ...effectivePolicy,
+      tools: [],
+      runtimeProjection: { ...effectivePolicy.runtimeProjection, state: "connection_required", allowed: 0, approvalRequired: 0, denied: 0 },
+    } }) });
+  });
+  await page.route("**/api/v1/admin/connectors/reports/tool-policy", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      connectorId: "reports",
+      connectorName: "Reports",
+      serverName: "lemmacomputer_reports",
+      accessPolicyVersion: 1,
+      documentHash: null,
+      discovery: { state: "authorization_required", source: "anonymous" },
+      changes: { added: [], changed: [], removed: [] },
+      tools: [],
+    }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connectors" }).click();
+  await page.getByRole("button", { name: "Manage" }).click();
+  await page.getByRole("button", { name: "Policy" }).click();
+
+  await expect(page.getByText("This provider reveals its tools only after sign-in")).toBeVisible();
+  await expect(page.getByText("Tool permissions remain blocked until the catalogue is verified through a connection.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save tool permissions" })).toBeDisabled();
+  await expect(page.getByRole("checkbox", { name: "Connector enabled" })).toBeVisible();
 });
 
 test("administrators can remove a customer-added connector from Connectors", async ({ page }) => {

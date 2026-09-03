@@ -45,8 +45,13 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
   removed: string[] = [];
   discoveries = 0;
   toolServers: string[] = [];
+  anonymousToolServers: string[] = [];
   onStatus?: (identity: IdentityContext, serverName: string) => OAuthConnectionStatus | Promise<OAuthConnectionStatus>;
   onTools?: (identity: IdentityContext, serverName: string) => FixtureTool[] | Promise<FixtureTool[]>;
+  onAnonymousTools?: (identity: IdentityContext, serverName: string) =>
+    | { state: "available"; tools: FixtureTool[] }
+    | { state: "authorization_required" | "unavailable"; tools: [] }
+    | Promise<{ state: "available"; tools: FixtureTool[] } | { state: "authorization_required" | "unavailable"; tools: [] }>;
   onDiscover?: () => { authorizationOrigin: string; dynamicClientRegistration: boolean } | Promise<{ authorizationOrigin: string; dynamicClientRegistration: boolean }>;
   onRegister?: (input: McpConnectorRegistrationInput) => void | Promise<void>;
   statusByServer = new Map<string, OAuthConnectionStatus>();
@@ -78,6 +83,15 @@ class FakeConnectionGateway implements OAuthConnectionGateway {
       ? await this.onTools(identity, serverName)
       : this.toolsByServer.get(serverName) ?? [];
     return tools.map(fixtureTool);
+  }
+  async anonymousOAuthConnectionTools(identity: IdentityContext, serverName: string) {
+    this.anonymousToolServers.push(serverName);
+    const result = this.onAnonymousTools
+      ? await this.onAnonymousTools(identity, serverName)
+      : { state: "available" as const, tools: this.toolsByServer.get(serverName) ?? [] };
+    return result.state === "available"
+      ? { state: "available" as const, tools: result.tools.map(fixtureTool) }
+      : result;
   }
   async callUserOAuthConnectionTool(identity: IdentityContext, serverName: string, toolName: string, argumentsValue: Record<string, OwnedJson>) {
     this.calledTools.push({ identity, serverName, toolName, argumentsValue });
@@ -528,22 +542,57 @@ test("every approved remote MCP card lazily starts its provider flow only after 
   ]);
 });
 
-test("unconnected connector policy inspection never probes provider grants or tools", async () => {
+test("unconnected connector policy inspection tries anonymous discovery without probing a user connection", async () => {
   const gateway = new FakeConnectionGateway();
+  gateway.toolsByServer.set("lemmacomputer_linear", ["create_issue", "list_issues"]);
   const service = new McpConnectionService(gateway, {
     publicWebUrl: "http://localhost:4174",
     authorizationOrigin: "http://localhost:3001",
     configuredStaticMcpClients: allCredentials,
   });
 
-  await assert.rejects(
-    () => service.connectorToolPolicy(alpha, "linear"),
-    { code: "MCP_CONNECTOR_NOT_CONNECTED" },
-  );
+  const policy = await service.connectorToolPolicy(alpha, "linear");
+  assert.deepEqual(policy.discovery, { state: "available", source: "anonymous" });
+  assert.deepEqual(policy.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
+    ["create_issue", "deny", true],
+    ["list_issues", "deny", true],
+  ]);
+  const saved = await service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", {
+    create_issue: "approval_required",
+    list_issues: "deny",
+  }, policy.documentHash!, policy.accessPolicyVersion, "anonymous-review");
+  assert.deepEqual(saved.discovery, { state: "available", source: "anonymous" });
+  assert.deepEqual(saved.tools.map((tool) => [tool.name, tool.decision, tool.reviewRequired]), [
+    ["create_issue", "approval_required", false],
+    ["list_issues", "deny", false],
+  ]);
 
   assert.equal(await service.hostedToolPolicy(alpha, "lemmacomputer_linear", "create_issue"), null);
   assert.deepEqual(gateway.statusServers, []);
   assert.deepEqual(gateway.toolServers, []);
+  assert.deepEqual(gateway.anonymousToolServers, ["lemmacomputer_linear", "lemmacomputer_linear", "lemmacomputer_linear"]);
+});
+
+test("unconnected connector policy reports when its tools require authorization", async () => {
+  const gateway = new FakeConnectionGateway();
+  gateway.onAnonymousTools = async () => ({ state: "authorization_required", tools: [] });
+  const service = new McpConnectionService(gateway, {
+    publicWebUrl: "http://localhost:4174",
+    authorizationOrigin: "http://localhost:3001",
+    configuredStaticMcpClients: allCredentials,
+  });
+
+  const policy = await service.connectorToolPolicy(alpha, "linear");
+  assert.deepEqual(policy.discovery, { state: "authorization_required", source: "anonymous" });
+  assert.equal(policy.documentHash, null);
+  assert.deepEqual(policy.tools, []);
+  await assert.rejects(
+    () => service.saveConnectorToolPolicy(alpha, alpha.subjectId, "linear", {}, "stale", policy.accessPolicyVersion, "anonymous-auth-required"),
+    { code: "MCP_TOOL_DISCOVERY_REQUIRED" },
+  );
+  assert.deepEqual(gateway.statusServers, []);
+  assert.deepEqual(gateway.toolServers, []);
+  assert.deepEqual(gateway.anonymousToolServers, ["lemmacomputer_linear", "lemmacomputer_linear"]);
 });
 
 test("catalog re-entry probes only durable markers and flags a changed connector projection", async () => {
