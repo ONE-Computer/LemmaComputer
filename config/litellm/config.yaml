@@ -56,6 +56,7 @@ mcp_servers:
       - list-folder-files
       - search-onedrive-files
       - get-drive-item
+      - download-bytes
       - get-sharepoint-site-by-path
       - get-sharepoint-site
       - list-sharepoint-site-drives

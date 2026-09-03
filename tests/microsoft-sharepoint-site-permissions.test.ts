@@ -22,6 +22,7 @@ test("the isolated SharePoint administration client grants read access with an a
     }
     if (request.method === "GET" && request.url.endsWith("/permissions")) return json({ value: [] });
     if (request.method === "POST" && request.url.endsWith("/permissions")) return json({ id: "permission-finance", roles: ["read"] }, 201);
+    if (request.method === "GET" && request.url.includes("/drives?")) return json({ value: [{ id: "finance-documents" }] });
     return json({ error: { message: "Unexpected request" } }, 500);
   };
   const client = new MicrosoftSharePointSitePermissionClient({
@@ -31,14 +32,16 @@ test("the isolated SharePoint administration client grants read access with an a
     fetch: fetchMock,
   });
 
-  assert.deepEqual(await client.grantRead({ hostname: "contoso.sharepoint.com", sitePath: "sites/Finance", connectorClientId }), {
+  assert.deepEqual(await client.grant({ hostname: "contoso.sharepoint.com", sitePath: "sites/Finance", connectorClientId, accessLevel: "read" }), {
     graphSiteId: "contoso.sharepoint.com,collection,finance",
+    driveIds: ["finance-documents"],
     permissionId: "permission-finance",
   });
   assert.equal(requests[0]?.url, `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`);
   assert.match(requests[0]?.body ?? "", /grant_type=client_credentials/);
   assert.equal(requests[1]?.headers.get("authorization"), "Bearer short-lived-admin-token");
-  const grantBody = JSON.parse(requests.at(-1)?.body ?? "{}") as {
+  const grantRequest = requests.find((request) => request.method === "POST" && request.url.endsWith("/permissions"));
+  const grantBody = JSON.parse(grantRequest?.body ?? "{}") as {
     roles?: string[];
     grantedToIdentities?: Array<{ application?: { id?: string } }>;
   };
@@ -65,6 +68,7 @@ test("an existing broader grant is reduced to read and revocation rechecks the s
       }] });
     }
     if (request.method === "PATCH") return json({ id: "permission-finance", roles: ["read"] });
+    if (request.method === "GET" && request.url.includes("/drives?")) return json({ value: [{ id: "finance-documents" }] });
     if (request.method === "DELETE") return new Response(null, { status: 204 });
     return json({ error: { message: "Unexpected request" } }, 500);
   };
@@ -75,7 +79,7 @@ test("an existing broader grant is reduced to read and revocation rechecks the s
     fetch: fetchMock,
   });
 
-  const grant = await client.grantRead({ hostname: "contoso.sharepoint.com", sitePath: "sites/Finance", connectorClientId });
+  const grant = await client.grant({ hostname: "contoso.sharepoint.com", sitePath: "sites/Finance", connectorClientId, accessLevel: "read" });
   assert.equal(grant.permissionId, "permission-finance");
   assert.ok(methods.includes("PATCH"));
   assert.deepEqual(JSON.parse(bodies[methods.indexOf("PATCH")] ?? "{}"), { roles: ["read"] });
@@ -88,4 +92,35 @@ test("an existing broader grant is reduced to read and revocation rechecks the s
     permissionId: grant.permissionId,
   }), { revoked: true });
   assert.equal(methods.at(-1), "DELETE");
+});
+
+test("a selected site can be granted read and write access", async () => {
+  const bodies: string[] = [];
+  const fetchMock: typeof fetch = async (input, init = {}) => {
+    const request = new Request(input, init);
+    bodies.push(await request.text());
+    if (request.url.includes("/oauth2/v2.0/token")) return json({ access_token: "admin-token" });
+    if (request.url.includes("/sites/contoso.sharepoint.com:/sites/Finance")) {
+      return json({ id: "contoso.sharepoint.com,collection,finance", webUrl: "https://contoso.sharepoint.com/sites/Finance" });
+    }
+    if (request.method === "GET" && request.url.endsWith("/permissions")) return json({ value: [] });
+    if (request.method === "POST" && request.url.endsWith("/permissions")) return json({ id: "permission-finance", roles: ["write"] }, 201);
+    if (request.method === "GET" && request.url.includes("/drives?")) return json({ value: [{ id: "finance-documents" }, { id: "finance-assets" }] });
+    return json({ error: { message: "Unexpected request" } }, 500);
+  };
+  const client = new MicrosoftSharePointSitePermissionClient({
+    fallbackProviderTenantId: tenantId,
+    administrationClientId,
+    administrationClientSecret: "admin-secret",
+    fetch: fetchMock,
+  });
+
+  const grant = await client.grant({
+    hostname: "contoso.sharepoint.com",
+    sitePath: "sites/Finance",
+    connectorClientId,
+    accessLevel: "write",
+  });
+  assert.deepEqual(grant.driveIds, ["finance-assets", "finance-documents"]);
+  assert.ok(bodies.some((body) => body.startsWith("{") && (JSON.parse(body) as { roles?: string[] }).roles?.[0] === "write"));
 });

@@ -1497,7 +1497,7 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
 function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, onPolicySave, effectivePolicy }) {
   const serviceLabels = mcpPolicy?.connectorId
     ? { tools: `${mcpPolicy.connectorName} tools` }
-    : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "OneDrive", sharepoint: "SharePoint", teams: "Teams" };
+    : { mail: "Outlook Mail", calendar: "Calendar", onedrive: "Files (OneDrive & SharePoint)", sharepoint: "SharePoint sites", teams: "Teams" };
   const connectorChanges = mcpPolicy?.connectorId ? mcpPolicy.changes : null;
   const changeSummary = connectorChanges
     ? [
@@ -4085,7 +4085,7 @@ function Microsoft365SharePointSites() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState({ displayName: "", siteUrl: "" });
+  const [draft, setDraft] = useState({ displayName: "", siteUrl: "", accessLevel: "read" });
   const [pendingRemoval, setPendingRemoval] = useState(null);
 
   const load = async () => {
@@ -4103,11 +4103,26 @@ function Microsoft365SharePointSites() {
     }
   };
 
-  const grant = async (siteId) => {
+  const grant = async (siteId, accessLevel) => {
     setBusy(`grant:${siteId}`);
     setError("");
     try {
-      await adminApi.grantMicrosoft365SharePointSite(siteId);
+      await adminApi.grantMicrosoft365SharePointSite(siteId, accessLevel);
+      await load();
+    } catch (requestError) {
+      await load();
+      setError(requestError.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const changeAccess = async (site, accessLevel) => {
+    if (accessLevel === site.accessLevel) return;
+    setBusy(`access:${site.id}`);
+    setError("");
+    try {
+      await adminApi.grantMicrosoft365SharePointSite(site.id, accessLevel);
       await load();
     } catch (requestError) {
       await load();
@@ -4125,7 +4140,7 @@ function Microsoft365SharePointSites() {
     setError("");
     try {
       await adminApi.addMicrosoft365SharePointSite(draft);
-      setDraft({ displayName: "", siteUrl: "" });
+      setDraft({ displayName: "", siteUrl: "", accessLevel: "read" });
       await load();
     } catch (requestError) {
       await load();
@@ -4155,7 +4170,7 @@ function Microsoft365SharePointSites() {
       <header>
         <p>Selected site access</p>
         <h2>Approve SharePoint sites for your organization</h2>
-        <span>Adding a site gives the Workplace Connector read access to that site and adds it to your organization's allowlist.</span>
+        <span>Choose each site and whether agents may only read documents or may also create, replace, move, and delete them.</span>
       </header>
       <section className="sharepoint-site-prerequisite" aria-label="SharePoint setup requirement">
         <strong>Two Microsoft controls apply</strong>
@@ -4168,6 +4183,7 @@ function Microsoft365SharePointSites() {
       <form className="sharepoint-site-form" onSubmit={addSite}>
         <label><span>Site name</span><input value={draft.displayName} maxLength={120} placeholder="Finance policies" onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} required /></label>
         <label><span>SharePoint site URL</span><input type="url" value={draft.siteUrl} maxLength={1000} placeholder="https://contoso.sharepoint.com/sites/Finance" onChange={(event) => setDraft({ ...draft, siteUrl: event.target.value })} required /></label>
+        <label><span>Agent access</span><SelectMenu value={draft.accessLevel} ariaLabel="Agent access" options={[{ value: "read", label: "Read only" }, { value: "write", label: "Read and write" }]} onValueChange={(accessLevel) => setDraft({ ...draft, accessLevel })} /></label>
         <button className="primary-button compact-button" type="submit" disabled={!siteAdministrationAvailable || busy === "add"}>{busy === "add" ? "Granting access" : "Add and grant"}</button>
       </form>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>SharePoint sites were not updated</strong>{error}</span></div>}
@@ -4181,11 +4197,12 @@ function Microsoft365SharePointSites() {
               </div>
               <a href={site.siteUrl} target="_blank" rel="noreferrer">{site.siteUrl}</a>
               {site.microsoftLastError && <p>{site.microsoftLastError}</p>}
-              {site.microsoftAccessStatus === "granted" && <p>Users still need membership in this SharePoint site.</p>}
+              {site.microsoftAccessStatus === "granted" && <small>{site.accessLevel === "write" ? "Agents may read and change documents" : "Agents may read documents only"}. Users still need membership in this SharePoint site.</small>}
               {site.microsoftGrantedAt && <small>Microsoft access granted {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(site.microsoftGrantedAt))}</small>}
             </div>
             <div className="sharepoint-site-actions">
               {site.microsoftAccessStatus !== "granted" && <button className="secondary-button" type="button" onClick={() => grant(site.id)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `grant:${site.id}` ? "Granting" : "Retry grant"}</button>}
+              {site.microsoftAccessStatus === "granted" && <label><span>Access</span><SelectMenu ariaLabel={`Agent access for ${site.displayName}`} value={site.accessLevel} disabled={!siteAdministrationAvailable || Boolean(busy)} options={[{ value: "read", label: "Read only" }, { value: "write", label: "Read and write" }]} onValueChange={(accessLevel) => void changeAccess(site, accessLevel)} /></label>}
               <button className="connection-quiet-button" type="button" onClick={() => setPendingRemoval(site)} disabled={!siteAdministrationAvailable || Boolean(busy)}>{busy === `delete:${site.id}` ? "Revoking" : "Revoke and remove"}</button>
             </div>
           </article>)}

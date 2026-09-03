@@ -3,13 +3,20 @@ type SharePointSiteTarget = {
   sitePath: string;
 };
 
+export type MicrosoftSharePointSiteAccessLevel = "read" | "write";
+
 export type MicrosoftSharePointSiteGrant = {
   graphSiteId: string;
+  driveIds: string[];
   permissionId: string;
 };
 
 export interface MicrosoftSharePointSitePermissionGateway {
-  grantRead(input: SharePointSiteTarget & { providerTenantId?: string | null; connectorClientId: string }): Promise<MicrosoftSharePointSiteGrant>;
+  grant(input: SharePointSiteTarget & {
+    providerTenantId?: string | null;
+    connectorClientId: string;
+    accessLevel: MicrosoftSharePointSiteAccessLevel;
+  }): Promise<MicrosoftSharePointSiteGrant>;
   revoke(input: SharePointSiteTarget & {
     providerTenantId?: string | null;
     connectorClientId: string;
@@ -72,10 +79,10 @@ const permissionTargetsApplication = (permission: Record<string, unknown>, clien
   return typeof application.id === "string" && application.id.toLowerCase() === clientId.toLowerCase();
 });
 
-const rolesAreReadOnly = (permission: Record<string, unknown>) => (
+const rolesMatch = (permission: Record<string, unknown>, accessLevel: MicrosoftSharePointSiteAccessLevel) => (
   Array.isArray(permission.roles)
   && permission.roles.length === 1
-  && permission.roles[0] === "read"
+  && permission.roles[0] === accessLevel
 );
 
 const providerMessage = (payload: unknown, fallback: string) => {
@@ -96,36 +103,43 @@ export class MicrosoftSharePointSitePermissionClient implements MicrosoftSharePo
     this.connectorDisplayName = options.connectorDisplayName ?? "LemmaComputer Workplace Connector";
   }
 
-  async grantRead(input: SharePointSiteTarget & { providerTenantId?: string | null; connectorClientId: string }) {
+  async grant(input: SharePointSiteTarget & {
+    providerTenantId?: string | null;
+    connectorClientId: string;
+    accessLevel: MicrosoftSharePointSiteAccessLevel;
+  }) {
     if (!applicationId(input.connectorClientId)) throw new Error("Microsoft 365 connector client ID must be an application GUID");
     const context = await this.context(input);
     const graphSite = await this.resolveSite(context, input);
     const existing = await this.applicationPermission(context, graphSite.id, input.connectorClientId);
+    let permissionId: string;
     if (existing) {
-      if (!rolesAreReadOnly(existing)) {
+      if (!rolesMatch(existing, input.accessLevel)) {
         const updated = await this.graphJson(context, `/v1.0/sites/${encodeURIComponent(graphSite.id)}/permissions/${encodeURIComponent(String(existing.id))}`, {
           method: "PATCH",
-          body: JSON.stringify({ roles: ["read"] }),
-        }, "Microsoft could not reduce the existing SharePoint grant to read-only access");
-        const permissionId = typeof objectValue(updated).id === "string" ? String(objectValue(updated).id) : String(existing.id);
-        return { graphSiteId: graphSite.id, permissionId };
+          body: JSON.stringify({ roles: [input.accessLevel] }),
+        }, `Microsoft could not change the existing SharePoint grant to ${input.accessLevel} access`);
+        permissionId = typeof objectValue(updated).id === "string" ? String(objectValue(updated).id) : String(existing.id);
+      } else {
+        permissionId = String(existing.id);
       }
-      return { graphSiteId: graphSite.id, permissionId: String(existing.id) };
+    } else {
+      const created = objectValue(await this.graphJson(context, `/v1.0/sites/${encodeURIComponent(graphSite.id)}/permissions`, {
+        method: "POST",
+        body: JSON.stringify({
+          roles: [input.accessLevel],
+          grantedToIdentities: [{
+            application: {
+              id: input.connectorClientId,
+              displayName: this.connectorDisplayName,
+            },
+          }],
+        }),
+      }, "Microsoft could not grant this application access to the SharePoint site"));
+      if (typeof created.id !== "string" || !created.id) throw new Error("Microsoft returned a SharePoint grant without a permission identifier");
+      permissionId = created.id;
     }
-    const created = objectValue(await this.graphJson(context, `/v1.0/sites/${encodeURIComponent(graphSite.id)}/permissions`, {
-      method: "POST",
-      body: JSON.stringify({
-        roles: ["read"],
-        grantedToIdentities: [{
-          application: {
-            id: input.connectorClientId,
-            displayName: this.connectorDisplayName,
-          },
-        }],
-      }),
-    }, "Microsoft could not grant this application access to the SharePoint site"));
-    if (typeof created.id !== "string" || !created.id) throw new Error("Microsoft returned a SharePoint grant without a permission identifier");
-    return { graphSiteId: graphSite.id, permissionId: created.id };
+    return { graphSiteId: graphSite.id, driveIds: await this.siteDriveIds(context, graphSite.id), permissionId };
   }
 
   async revoke(input: SharePointSiteTarget & {
@@ -216,6 +230,22 @@ export class MicrosoftSharePointSitePermissionClient implements MicrosoftSharePo
       path = nextLink ? `${nextLink.pathname}${nextLink.search}` : null;
     }
     return null;
+  }
+
+  private async siteDriveIds(context: { accessToken: string; cloud: MicrosoftCloud }, graphSiteId: string) {
+    const driveIds: string[] = [];
+    let path: string | null = `/v1.0/sites/${encodeURIComponent(graphSiteId)}/drives?$select=id`;
+    for (let page = 0; path && page < 10; page += 1) {
+      const payload = objectValue(await this.graphJson(context, path, { method: "GET" }, "Microsoft could not list the SharePoint document libraries"));
+      for (const drive of Array.isArray(payload.value) ? payload.value.map(objectValue) : []) {
+        if (typeof drive.id === "string" && drive.id) driveIds.push(drive.id);
+      }
+      const nextLink = typeof payload["@odata.nextLink"] === "string" ? new URL(payload["@odata.nextLink"] as string) : null;
+      if (nextLink && nextLink.origin !== context.cloud.graphOrigin) throw new Error("Microsoft returned an invalid SharePoint drive continuation URL");
+      path = nextLink ? `${nextLink.pathname}${nextLink.search}` : null;
+    }
+    if (!driveIds.length) throw new Error("Microsoft returned no document libraries for this SharePoint site");
+    return [...new Set(driveIds)].sort();
   }
 
   private async graphJson(

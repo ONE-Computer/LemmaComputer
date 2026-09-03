@@ -121,8 +121,9 @@ const saveCurrentConnectorToolPolicy = async (
 
 const publicConnectorResolver = async () => [{ address: "93.184.216.34", family: 4 as const }];
 const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
-  grantRead: async ({ hostname, sitePath }) => ({
+  grant: async ({ hostname, sitePath }) => ({
     graphSiteId: `${hostname},collection,${sitePath.split("/").at(-1)?.toLowerCase()}`,
+    driveIds: [`drive-${sitePath.split("/").at(-1)?.toLowerCase()}`],
     permissionId: `permission-${sitePath.split("/").at(-1)?.toLowerCase()}`,
   }),
   revoke: async () => ({ revoked: true }),
@@ -180,6 +181,7 @@ test("SharePoint site administration is tenant-scoped and confirmed grants becom
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: " Finance policies ",
     siteUrl: "https://CONTOSO.sharepoint.com/sites/Finance/",
+    accessLevel: "read",
   });
   assert.equal(created.displayName, "Finance policies");
   assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/Finance");
@@ -187,7 +189,7 @@ test("SharePoint site administration is tenant-scoped and confirmed grants becom
   assert.equal(created.microsoftPermissionId, "permission-finance");
   assert.equal(created.status, "verified");
   assert.equal(created.graphSiteId, "contoso.sharepoint.com,collection,finance");
-  assert.deepEqual(created.driveIds, []);
+  assert.deepEqual(created.driveIds, ["drive-finance"]);
   assert.equal((await service.listMicrosoft365SharePointSites(otherTenant)).sites.length, 0);
   assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site-by-path", {
     "site-id": "contoso.sharepoint.com",
@@ -199,11 +201,22 @@ test("SharePoint site administration is tenant-scoped and confirmed grants becom
   assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "get-sharepoint-site", {
     "site-id": "contoso.sharepoint.com,collection,other",
   }), false);
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "upload-file-content", {
+    driveId: "drive-finance",
+    driveItemId: "root:/budget.docx:",
+  }), false, "a read-only selected-site grant must reject writes before Graph");
+  const writable = await service.grantMicrosoft365SharePointSite(alpha, created.id, "write");
+  assert.equal(writable.accessLevel, "write");
+  assert.equal(await service.authorizeMicrosoft365SharePointTarget(alpha, "upload-file-content", {
+    driveId: "drive-finance",
+    driveItemId: "root:/budget.docx:",
+  }), true);
   assert.deepEqual(await service.approvedMicrosoft365SharePointSites(alpha), [{
     displayName: "Finance policies",
     siteUrl: "https://contoso.sharepoint.com/sites/Finance",
     hostname: "contoso.sharepoint.com",
     sitePath: "sites/Finance",
+    accessLevel: "write",
   }]);
   assert.deepEqual(gateway.calledTools, []);
 });
@@ -216,9 +229,9 @@ test("SharePoint grants target the tenant-owned connector application when confi
     authorizationOrigin: "http://localhost:3001",
     registry,
     microsoftSharePointSitePermissions: {
-      grantRead: async ({ connectorClientId }) => {
+      grant: async ({ connectorClientId }) => {
         targetedClientIds.push(connectorClientId);
-        return { graphSiteId: "contoso.sharepoint.com,collection,finance", permissionId: "permission-finance" };
+        return { graphSiteId: "contoso.sharepoint.com,collection,finance", driveIds: ["finance-documents"], permissionId: "permission-finance" };
       },
       revoke: async () => ({ revoked: true }),
     },
@@ -236,6 +249,7 @@ test("SharePoint grants target the tenant-owned connector application when confi
   await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: "Finance",
     siteUrl: "https://contoso.sharepoint.com/sites/Finance",
+    accessLevel: "read",
   });
 
   assert.deepEqual(targetedClientIds, [tenantConnectorApplicationId]);
@@ -254,6 +268,7 @@ test("SharePoint site URLs preserve a canonical encoded URL and reject malformed
   const created = await service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
     displayName: "People policies",
     siteUrl: "https://CONTOSO.sharepoint.com/sites/People%20Policies/",
+    accessLevel: "read",
   });
   assert.equal(created.siteUrl, "https://contoso.sharepoint.com/sites/People%20Policies");
   assert.equal(created.sitePath, "sites/People Policies");
@@ -261,6 +276,7 @@ test("SharePoint site URLs preserve a canonical encoded URL and reject malformed
     service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
       displayName: "Broken",
       siteUrl: "https://contoso.sharepoint.com/sites/Bad%ZZ",
+      accessLevel: "read",
     }),
     (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_URL_INVALID",
   );
@@ -273,9 +289,9 @@ test("SharePoint provider failures remain visible and revocation fails closed", 
     ? { id: "contoso.sharepoint.com,collection,legal" }
     : { value: [{ id: "legal-documents" }] };
   const permissions: MicrosoftSharePointSitePermissionGateway = {
-    grantRead: async () => {
+    grant: async () => {
       if (operation === "grant") throw new Error("Microsoft rejected the site grant");
-      return { graphSiteId: "contoso.sharepoint.com,collection,legal", permissionId: "permission-legal" };
+      return { graphSiteId: "contoso.sharepoint.com,collection,legal", driveIds: ["legal-documents"], permissionId: "permission-legal" };
     },
     revoke: async () => {
       if (operation === "revoke") throw new Error("Microsoft rejected the site revocation");
@@ -295,6 +311,7 @@ test("SharePoint provider failures remain visible and revocation fails closed", 
     service.createMicrosoft365SharePointSite(alpha, alpha.subjectId, {
       displayName: "Legal",
       siteUrl: "https://contoso.sharepoint.com/sites/Legal",
+      accessLevel: "read",
     }),
     (error: Error & { code?: string }) => error.code === "M365_SHAREPOINT_SITE_GRANT_FAILED",
   );

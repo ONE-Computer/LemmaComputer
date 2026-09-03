@@ -238,7 +238,7 @@ test("an administrator with no LemmaComputer account can complete the approval",
       microsoftAdminConsent: { clientId, consentSecret },
       microsoftSharePointSiteAdministrationConsent: { clientId: sharePointAdminClientId },
       microsoftSharePointSitePermissions: {
-        grantRead: async () => ({ graphSiteId: "site", permissionId: "permission" }),
+        grant: async () => ({ graphSiteId: "site", driveIds: ["documents"], permissionId: "permission" }),
         revoke: async () => ({ revoked: true }),
       },
     },
@@ -342,7 +342,7 @@ test("the approval landing route is the only connector route reachable without a
       microsoftAdminConsent: { clientId, consentSecret },
       microsoftSharePointSiteAdministrationConsent: { clientId: sharePointAdminClientId },
       microsoftSharePointSitePermissions: {
-        grantRead: async () => ({ graphSiteId: "site", permissionId: "permission" }),
+        grant: async () => ({ graphSiteId: "site", driveIds: ["documents"], permissionId: "permission" }),
         revoke: async () => ({ revoked: true }),
       },
     },

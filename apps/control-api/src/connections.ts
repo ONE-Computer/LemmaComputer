@@ -505,6 +505,7 @@ export class McpConnectionService {
       siteUrl: site.siteUrl,
       hostname: site.hostname,
       sitePath: site.sitePath,
+      accessLevel: site.accessLevel,
       status: site.status,
       microsoftAccessStatus: site.microsoftAccessStatus,
       microsoftGrantedAt: site.microsoftGrantedAt?.toISOString() ?? null,
@@ -519,7 +520,7 @@ export class McpConnectionService {
   async createMicrosoft365SharePointSite(
     identity: IdentityContext,
     createdBy: string,
-    input: { displayName: string; siteUrl: string },
+    input: { displayName: string; siteUrl: string; accessLevel: "read" | "write" },
   ) {
     if (!this.microsoftSharePointSitePermissions) {
       throw new LemmaComputerError(
@@ -540,6 +541,7 @@ export class McpConnectionService {
         tenantId: identity.tenantId,
         displayName,
         ...target,
+        accessLevel: input.accessLevel,
         createdBy,
       });
       return await this.grantMicrosoft365SharePointSite(identity, site.id);
@@ -551,7 +553,7 @@ export class McpConnectionService {
     }
   }
 
-  async grantMicrosoft365SharePointSite(identity: IdentityContext, siteId: string) {
+  async grantMicrosoft365SharePointSite(identity: IdentityContext, siteId: string, accessLevel?: "read" | "write") {
     const permissions = this.microsoftSharePointSitePermissions;
     if (!permissions) {
       throw new LemmaComputerError(
@@ -572,22 +574,28 @@ export class McpConnectionService {
     if (!connectorClientId) {
       throw new LemmaComputerError("M365_SHAREPOINT_SITE_ADMIN_NOT_CONFIGURED", "The Microsoft 365 connector application ID is unavailable", 503);
     }
+    const requestedAccessLevel = accessLevel ?? site.accessLevel;
     try {
-      const grant = await permissions.grantRead({
+      const grant = await permissions.grant({
         providerTenantId: connector.sharePointAdminConsentProviderTenantId,
         connectorClientId,
         hostname: site.hostname,
         sitePath: site.sitePath,
+        accessLevel: requestedAccessLevel,
       });
       const saved = await this.registry.recordMicrosoft365SharePointSiteGrant(identity.tenantId, site.id, {
         graphSiteId: grant.graphSiteId,
+        driveIds: grant.driveIds,
+        accessLevel: requestedAccessLevel,
         microsoftPermissionId: grant.permissionId,
       });
       if (!saved) throw new LemmaComputerError("M365_SHAREPOINT_SITE_NOT_FOUND", "SharePoint site not found", 404);
       return saved;
     } catch (error) {
       const message = boundedSiteAdministrationMessage(error, "grant");
-      await this.registry.recordMicrosoft365SharePointSiteGrantFailure(identity.tenantId, site.id, message);
+      if (site.microsoftAccessStatus !== "granted") {
+        await this.registry.recordMicrosoft365SharePointSiteGrantFailure(identity.tenantId, site.id, message);
+      }
       throw new LemmaComputerError("M365_SHAREPOINT_SITE_GRANT_FAILED", message, 502);
     }
   }
@@ -636,7 +644,7 @@ export class McpConnectionService {
     const sites = await this.registry.listMicrosoft365SharePointSites(identity.tenantId);
     return sites
       .filter((site) => site.microsoftAccessStatus === "granted" && site.status === "verified" && site.graphSiteId)
-      .map((site) => ({ displayName: site.displayName, siteUrl: site.siteUrl, hostname: site.hostname, sitePath: site.sitePath }));
+      .map((site) => ({ displayName: site.displayName, siteUrl: site.siteUrl, hostname: site.hostname, sitePath: site.sitePath, accessLevel: site.accessLevel }));
   }
 
   async authorizeMicrosoft365SharePointTarget(
@@ -656,6 +664,33 @@ export class McpConnectionService {
     if (["get-sharepoint-site", "list-sharepoint-site-drives"].includes(toolName)) {
       const graphSiteId = argumentsValue["site-id"];
       return typeof graphSiteId === "string" && sites.some((site) => site.graphSiteId === graphSiteId);
+    }
+    const driveIds = new Set<string>();
+    if (typeof argumentsValue.driveId === "string") driveIds.add(argumentsValue.driveId);
+    if (toolName === "download-bytes" && typeof argumentsValue.target === "string") {
+      const match = argumentsValue.target.match(/^\/drives\/([^/]+)\/items\/[^/]+\/content$/);
+      if (match?.[1]) driveIds.add(match[1]);
+    }
+    const body = argumentsValue.body;
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const parent = body.parentReference;
+      if (parent && typeof parent === "object" && !Array.isArray(parent) && typeof parent.driveId === "string") {
+        driveIds.add(parent.driveId);
+      }
+    }
+    if (driveIds.size) {
+      const writeTools = new Set([
+        "create-onedrive-folder",
+        "upload-file-content",
+        "create-upload-session",
+        "move-rename-onedrive-item",
+        "copy-drive-item",
+        "delete-onedrive-file",
+      ]);
+      for (const driveId of driveIds) {
+        const site = sites.find((candidate) => candidate.driveIds.includes(driveId));
+        if (site && writeTools.has(toolName) && site.accessLevel !== "write") return false;
+      }
     }
     return true;
   }

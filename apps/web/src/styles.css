@@ -4359,10 +4359,16 @@ a.chat-file-part:hover {
 .sharepoint-site-prerequisite strong { color: #1d2c40; font-size: 13px; }
 .sharepoint-site-prerequisite span { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .sharepoint-site-prerequisite code { font-size: 11px; }
-.sharepoint-site-form { display: grid; grid-template-columns: minmax(160px, .65fr) minmax(280px, 1.35fr) auto; gap: 12px; align-items: end; margin-top: 16px; padding: 16px; border: 1px solid #dce3eb; border-radius: 12px; background: white; }
+.sharepoint-site-form { display: grid; grid-template-columns: minmax(140px, .6fr) minmax(260px, 1.2fr) minmax(130px, .5fr) auto; gap: 12px; align-items: end; margin-top: 16px; padding: 16px; border: 1px solid #dce3eb; border-radius: 12px; background: white; }
 .sharepoint-site-form label { display: grid; gap: 6px; }
 .sharepoint-site-form label > span { color: #37465a; font-size: 12px; font-weight: 650; }
-.sharepoint-site-form input { min-width: 0; height: 38px; padding: 0 11px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+.sharepoint-site-form input { min-width: 0; height: 38px; padding: 0 11px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; font: inherit; }
+.sharepoint-site-form .select-menu,
+.sharepoint-site-form .select-menu-trigger,
+.sharepoint-site-actions .select-menu,
+.sharepoint-site-actions .select-menu-trigger { width: 100%; }
+.sharepoint-site-form .select-menu-trigger,
+.sharepoint-site-actions .select-menu-trigger { min-height: 38px; border-color: #cbd5e1; border-radius: 8px; }
 .sharepoint-site-list { display: grid; gap: 10px; margin-top: 16px; }
 .sharepoint-site-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 16px; border: 1px solid #dce3eb; border-radius: 12px; background: white; }
 .sharepoint-site-title { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -4377,6 +4383,7 @@ a.chat-file-part:hover {
 .sharepoint-site-status.grant_failed,
 .sharepoint-site-status.revocation_failed { background: #fce9e7; color: #8c332d; }
 .sharepoint-site-actions { display: flex; gap: 8px; align-items: center; }
+.sharepoint-site-actions label { display: grid; min-width: 138px; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .sharepoint-site-connection-note,
 .sharepoint-site-empty { margin: 16px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 

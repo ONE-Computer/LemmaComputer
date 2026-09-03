@@ -4367,6 +4367,7 @@ export function createControlServer(
     const input = z.strictObject({
       displayName: z.string().trim().min(1).max(120),
       siteUrl: z.string().trim().min(12).max(1000),
+      accessLevel: z.enum(["read", "write"]).default("read"),
     }).parse(request.body ?? {});
     const site = await requireConnections().createMicrosoft365SharePointSite(actor.identity, actor.userId, input);
     return reply.code(201).send({ site });
@@ -4374,7 +4375,8 @@ export function createControlServer(
   app.post<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId/grant", async (request) => {
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: "microsoft-365" });
     const siteId = z.uuid().parse(request.params.siteId);
-    const site = await requireConnections().grantMicrosoft365SharePointSite(actor.identity, siteId);
+    const input = z.strictObject({ accessLevel: z.enum(["read", "write"]).optional() }).parse(request.body ?? {});
+    const site = await requireConnections().grantMicrosoft365SharePointSite(actor.identity, siteId, input.accessLevel);
     return { site };
   });
   app.delete<{ Params: { siteId: string } }>("/v1/admin/connectors/microsoft-365/sharepoint-sites/:siteId", async (request) => {

@@ -45,7 +45,7 @@ const setup = async (
       agentProfile: "lemmacomputer-default-agent",
       modelAliases: ["lemmacomputer-assistant"],
       networkProfile: "controlled-egress-v1",
-      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "get-sharepoint-site", "list-sharepoint-site-drives", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
+      mcp: { servers: { lemmacomputer_ms365: { tools: ["list-mail-folders", "list-calendars", "get-calendar-view", "list-drives", "search-onedrive-files", "get-drive-item", "download-bytes", "list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "get-sharepoint-site", "list-sharepoint-site-drives", "delete-onedrive-file", "list-chats", "list-joined-teams", "send-chat-message"] } } },
       capabilities: ["m365-read", "onedrive-delete-protected"],
       protectedOperations: { "onedrive-delete-protected": "approval_required", defaultWrite: "deny" },
     },
@@ -194,10 +194,24 @@ test("MCP authorization uses the organization-composed grant policy for a non-de
 });
 
 test("the curated Microsoft 365 surface is complete and defaults every write to approval", () => {
-  assert.equal(Object.keys(m365ToolCatalog).length, 42);
+  assert.equal(Object.keys(m365ToolCatalog).length, 43);
   assert.deepEqual(Object.keys(m365CapabilityDefinitions).sort(), Object.keys(m365ToolCatalog).sort());
-  assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "read" && tool.decision === "allow").length, 21);
+  assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "read" && tool.decision === "allow").length, 22);
   assert.equal(Object.values(m365ToolCatalog).filter((tool) => tool.risk === "write" && tool.decision === "approval_required").length, 21);
+});
+
+test("download-bytes accepts only an exact resolved drive item content target", () => {
+  const download = m365CapabilityDefinitions["download-bytes"];
+  assert.deepEqual(download.parse({ target: "/drives/finance-documents/items/report-item/content" }), {
+    target: "/drives/finance-documents/items/report-item/content",
+  });
+  for (const target of [
+    "https://graph.microsoft.com/v1.0/drives/drive/items/item/content",
+    "/me/messages/message/attachments/attachment/$value",
+    "/drives/drive/root:/Finance/report.docx:/content",
+  ]) {
+    assert.throws(() => download.parse({ target }));
+  }
 });
 
 test("SharePoint tools require an exact verified site target", async () => {
@@ -207,6 +221,8 @@ test("SharePoint tools require an exact verified site target", async () => {
   const targetPolicy: Microsoft365TargetPolicy = async (_identity, toolName, argumentsValue) => (
     toolName === "get-sharepoint-site-by-path"
       ? argumentsValue["site-id"] === approvedHost && argumentsValue.path === approvedPath
+      : toolName === "download-bytes"
+        ? argumentsValue.target === "/drives/finance-documents/items/budget/content"
       : argumentsValue["site-id"] === approvedId
   );
   const { policy, base } = await setup(undefined, undefined, targetPolicy);
@@ -230,6 +246,16 @@ test("SharePoint tools require an exact verified site target", async () => {
     toolName: "get-sharepoint-site",
     arguments: { "site-id": "another-site" },
   }, "sharepoint-blocked-id")).code, "MCP_SHAREPOINT_SITE_NOT_APPROVED");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "download-bytes",
+    arguments: { target: "/drives/finance-documents/items/budget/content" },
+  }, "sharepoint-file-approved")).decision, "allow");
+  assert.equal((await policy.authorize({
+    ...base,
+    toolName: "download-bytes",
+    arguments: { target: "/drives/unapproved/items/budget/content" },
+  }, "sharepoint-file-blocked")).code, "MCP_SHAREPOINT_SITE_NOT_APPROVED");
 });
 
 test("upload-file-content rejects Graph endpoint wrappers before approval", () => {

@@ -658,13 +658,14 @@ test("Microsoft 365 administrators can activate a selected SharePoint site witho
   });
   await page.route("**/api/v1/admin/connectors/microsoft-365/sharepoint-sites", async (route) => {
     if (route.request().method() === "POST") {
-      const input = JSON.parse(route.request().postData() ?? "{}") as { displayName: string; siteUrl: string };
+      const input = JSON.parse(route.request().postData() ?? "{}") as { displayName: string; siteUrl: string; accessLevel: "read" | "write" };
       sites = [{
         id: "2b37cc2b-e2c3-4d48-a30e-1d4dfda64d88",
         displayName: input.displayName,
         siteUrl: input.siteUrl,
         hostname: "contoso.sharepoint.com",
         sitePath: "sites/Finance",
+        accessLevel: input.accessLevel,
         status: "verified",
         microsoftAccessStatus: "granted",
         microsoftGrantedAt: "2026-08-25T02:00:00.000Z",
@@ -687,10 +688,13 @@ test("Microsoft 365 administrators can activate a selected SharePoint site witho
   await expect(page.getByText("Microsoft also checks each signed-in user's own SharePoint membership", { exact: false })).toBeVisible();
   await page.getByLabel("Site name").fill("Finance policies");
   await page.getByLabel("SharePoint site URL").fill("https://contoso.sharepoint.com/sites/Finance");
+  await page.getByRole("combobox", { name: "Agent access" }).click();
+  await page.getByRole("option", { name: "Read and write" }).click();
   await page.getByRole("button", { name: "Add and grant" }).click();
   await expect(page.getByRole("heading", { name: "Finance policies" })).toBeVisible();
   await expect(page.getByText("Organization: Active")).toBeVisible();
-  await expect(page.getByText("Users still need membership in this SharePoint site.")).toBeVisible();
+  await expect(page.getByText("Agents may read and change documents", { exact: false })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Agent access for Finance policies" })).toHaveText("Read and write");
   await expect(page.getByRole("button", { name: "Verify agent access" })).toHaveCount(0);
 });
 
@@ -733,14 +737,21 @@ test("Microsoft 365 administrators can allow SharePoint tools from the connector
       version: 3,
       documentHash: "a".repeat(64),
       policyApplication: { state: "current" },
-      tools: sharePointTools.map(([name, displayName]) => ({
+      tools: [...sharePointTools.map(([name, displayName]) => ({
         name,
         displayName,
         description: `${displayName} through the approved Microsoft 365 connection.`,
         service: "sharepoint",
         risk: "read",
         decision: "deny",
-      })),
+      })), {
+        name: "download-bytes",
+        displayName: "Read file contents",
+        description: "Read file contents from OneDrive or an approved SharePoint site.",
+        service: "onedrive",
+        risk: "read",
+        decision: "deny",
+      }],
     }) });
   });
   await page.route("**/api/v1/admin/connectors/microsoft-365/effective-policy", async (route) => {
@@ -752,16 +763,21 @@ test("Microsoft 365 administrators can allow SharePoint tools from the connector
   await page.getByRole("button", { name: "Manage" }).click();
   await page.getByRole("button", { name: "Policy" }).click();
 
-  const sharePointGroup = page.locator(".tool-policy-group").filter({ has: page.getByRole("heading", { name: "SharePoint" }) });
+  const sharePointGroup = page.locator(".tool-policy-group").filter({ has: page.getByRole("heading", { name: "SharePoint sites" }) });
   await expect(sharePointGroup).toBeVisible();
   await expect(sharePointGroup.locator("label")).toHaveCount(4);
   for (const [, displayName] of sharePointTools) {
     await expect(sharePointGroup.getByText(displayName, { exact: true })).toBeVisible();
   }
+  const filesGroup = page.locator(".tool-policy-group").filter({ has: page.getByRole("heading", { name: "Files (OneDrive & SharePoint)" }) });
+  await expect(filesGroup.getByText("Read file contents", { exact: true })).toBeVisible();
   for (const [, displayName] of sharePointTools) {
     await sharePointGroup.getByLabel(`${displayName} policy`).click();
     await page.getByRole("option", { name: "Allow", exact: true }).click();
   }
   await page.getByRole("button", { name: "Save tool permissions" }).click();
-  await expect.poll(() => savedTools).toEqual(Object.fromEntries(sharePointTools.map(([name]) => [name, "allow"])));
+  await expect.poll(() => savedTools).toEqual({
+    ...Object.fromEntries(sharePointTools.map(([name]) => [name, "allow"])),
+    "download-bytes": "deny",
+  });
 });

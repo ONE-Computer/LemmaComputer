@@ -87,6 +87,9 @@ Use this first when a OneDrive request supplies a human-facing filename, link, o
 SEARCH_ONEDRIVE_DESCRIPTION = """Search one OneDrive or SharePoint drive for items matching a human-facing filename.
 
 If driveId is unknown, call list-drives first. Search using the filename or other value the user supplied, including a filename visible in an attached screenshot. Use top no greater than 10 and the exact select value id,name,eTag,parentReference. Do not request all pages. OneDrive search is eventually consistent, so use list-folder-files on the known parent immediately after creating an item. Treat multiple matches as ambiguous and ask the user to choose before a mutation."""
+DOWNLOAD_DRIVE_ITEM_DESCRIPTION = """Read the bytes of one file from OneDrive or an organization-approved SharePoint document library.
+
+Use a driveId and driveItemId returned by the assigned drive and folder tools, then set target to exactly /drives/{driveId}/items/{driveItemId}/content. The result contains base64-encoded file bytes. Decode those bytes into the workspace before inspecting or editing a binary Office document. This bounded contract does not accept arbitrary Microsoft Graph paths."""
 UPLOAD_ONEDRIVE_DESCRIPTION = """Create or replace one file in Microsoft OneDrive or SharePoint through LemmaComputer governance.
 
 Pass driveId from list-drives. Pass only the value that belongs between `/items/` and `/content` as driveItemId: use an opaque item ID to replace an existing file, `root:/file.txt:` for a new file in the drive root, or `root:/folder/file.txt:` for a new file below the root. Never include `/items/`, `/content`, `/drives/`, or a complete Microsoft Graph URL in driveItemId. For a file already in this workspace, pass its absolute path as localFilePath; LemmaComputer uses an approval-bound resumable upload and streams bounded chunks without putting file bytes into model text or imposing a product file-size limit. Otherwise pass a small base64-encoded body supported by the connector's inline endpoint. Supply exactly one of localFilePath or body. To verify a just-created file, call list-folder-files on its parent because OneDrive search indexing can lag. Call this tool directly; LemmaComputer obtains any required signed approval."""
@@ -136,6 +139,20 @@ SEARCH_ONEDRIVE_INPUT_SCHEMA = {
         "top": {"type": "integer", "minimum": 1, "maximum": 10},
     },
     "required": ["driveId", "q"],
+    "additionalProperties": False,
+}
+DOWNLOAD_DRIVE_ITEM_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1100,
+            "pattern": r"^/drives/[^/?#]{1,512}/items/[^/?#]{1,512}/content$",
+            "description": "Exact /drives/{driveId}/items/{driveItemId}/content path constructed from resolved opaque IDs.",
+        },
+    },
+    "required": ["target"],
     "additionalProperties": False,
 }
 UPLOAD_ONEDRIVE_INPUT_SCHEMA = {
@@ -595,6 +612,7 @@ MS365_READ_INPUT_SCHEMAS = {
         "includeHeaders": {"type": "boolean", "const": True},
         "select": {"type": "string", "const": "id,name,eTag,parentReference"},
     }, ["driveId", "driveItemId", "includeHeaders", "select"]),
+    "download-bytes": DOWNLOAD_DRIVE_ITEM_INPUT_SCHEMA,
     "list-approved-sharepoint-sites": NO_ARGUMENTS_INPUT_SCHEMA,
     "get-sharepoint-site-by-path": strict_input({
         "site-id": {
@@ -636,6 +654,7 @@ MS365_READ_DESCRIPTIONS = {
     "list-folder-files": "List the direct children of one OneDrive or approved SharePoint folder using resolved driveId and driveItemId values. top is the only qualified paging control.",
     "search-onedrive-files": SEARCH_ONEDRIVE_DESCRIPTION,
     "get-drive-item": "Read bounded identity and version metadata for one OneDrive or approved SharePoint item. Use the exact constant select and includeHeaders=true before a protected mutation.",
+    "download-bytes": DOWNLOAD_DRIVE_ITEM_DESCRIPTION,
     "list-approved-sharepoint-sites": "List the friendly names and exact URLs of SharePoint sites verified by an organization administrator. Use this before resolving a site when the user names a site but does not provide its URL.",
     "get-sharepoint-site-by-path": "Resolve one organization-approved SharePoint site by its exact hostname and site path. The site must be verified by an administrator in LemmaComputer.",
     "get-sharepoint-site": "Read metadata for one organization-approved SharePoint site using the opaque site-id returned by get-sharepoint-site-by-path.",

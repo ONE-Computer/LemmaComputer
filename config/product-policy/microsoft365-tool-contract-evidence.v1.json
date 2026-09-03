@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "contractVersion": 1,
-  "toolCount": 42,
-  "evaluationFixtureHash": "db94d46e19d7252361ce2d9fe5389f95fad0eb1e1bbbe834ab333654b8c65297",
+  "toolCount": 43,
+  "evaluationFixtureHash": "41c6cc6c76424c20785a4520cc493b0d64708674e78578ad22250e035f086bd4",
   "upstream": {
     "package": "@softeria/ms-365-mcp-server",
     "version": "0.146.1",
     "integrity": "sha512-Zr+NIjKRbh4gp5ZTZPxoOL7SUsHwt9y6AccpJDePYoGSccJBexyuX2ekzrOkOCfU7MwAE/X8xo9LoAG+5EcFWw==",
-    "definitionsHash": "dc73f91825330cdb1f295d90115c32fbd7da4205d5f32bfcfb46d9b0bfde2692",
+    "definitionsHash": "428a869e4b21caa2dee0e59b1eca63b2184331801266e30d001cabb945393fda",
     "toolDefinitionHashes": {
       "copy-drive-item": "8dafafa8bc71cc2703f28f36b1c673eb7f570972a579acf6478cf210183c96f4",
       "create-calendar-event": "d6d13916236b075e758731002cb0cc4e05ca33859a942528c6b92679125ac4f0",
@@ -16,6 +16,7 @@
       "delete-calendar-event": "311ed4e1661cb0505d4294eeb6718ad2ad68e7b99b5868fbddad0cf035d3ee93",
       "delete-mail-message": "ad8a500e43c38a1505cede592541e22f4c337e8358091ec60ceb2bccf4e34cbf",
       "delete-onedrive-file": "edbba03b6e512578ddd3e49c7036af5cdfced01a46a70b788d25724c042f46ba",
+      "download-bytes": "ae269119a1d3431cf1ed28bc844687d11db515a92207634d26318d3724505cc6",
       "forward-mail-message": "36cd00048e989ed9373966c0c8ffa4a0d4c10bfe902ff34209ffa6823a090f73",
       "get-calendar-event": "b58a37a1f434a5ce524b4a5c58441855b63a9952bcaf845af4a07082dbd4141e",
       "get-calendar-view": "eb1caabe70e1dda27d472dcdff2c34259be26d887ce2978dec6f5a25d9d7d98c",
@@ -54,8 +55,8 @@
     }
   },
   "effective": {
-    "bridgeHash": "0b477ba95062d09e2e68eb24b402532a13c9737828693c33c55b43f034c72380",
-    "controlHash": "77554e2b8433e98995cf0bd6a443354fde704ccaea41fab425eedc480b8b1c00",
-    "combinedHash": "15170aca5c10fcf57c03ae4eda5cf00370bf07c0c4bd45e7955f4e31ad90aa8b"
+    "bridgeHash": "98d559e6ffbbf362a9a46f2f68cc9f1d618cb18295fb051c7f733de1e8e0822b",
+    "controlHash": "ebb39078f8676eb2789af484baeabe94a66827b0b4092302c41f93d32071ff70",
+    "combinedHash": "16a3ed2535abdc21072e08273931bb739b0de5b6143ec20218f0b208c46c68ff"
   }
 }

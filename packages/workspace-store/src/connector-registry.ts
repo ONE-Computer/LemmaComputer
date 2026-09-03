@@ -23,6 +23,7 @@ export type SaveConnectorConnectionStateRecord = Omit<ConnectorConnectionStateRe
 
 export type Microsoft365SharePointSiteStatus = "pending" | "verified" | "verification_failed";
 export type Microsoft365SharePointMicrosoftAccessStatus = "pending" | "granted" | "grant_failed" | "revocation_failed";
+export type Microsoft365SharePointSiteAccessLevel = "read" | "write";
 
 export type Microsoft365SharePointSiteRecord = {
   tenantId: string;
@@ -32,6 +33,7 @@ export type Microsoft365SharePointSiteRecord = {
   siteUrl: string;
   hostname: string;
   sitePath: string;
+  accessLevel: Microsoft365SharePointSiteAccessLevel;
   graphSiteId: string | null;
   driveIds: string[];
   status: Microsoft365SharePointSiteStatus;
@@ -48,7 +50,7 @@ export type Microsoft365SharePointSiteRecord = {
 
 export type CreateMicrosoft365SharePointSiteInput = Pick<
   Microsoft365SharePointSiteRecord,
-  "tenantId" | "displayName" | "siteUrl" | "hostname" | "sitePath" | "createdBy"
+  "tenantId" | "displayName" | "siteUrl" | "hostname" | "sitePath" | "accessLevel" | "createdBy"
 >;
 
 export type ConnectorRegistryRecord = {
@@ -246,6 +248,8 @@ export interface ConnectorRegistryStore extends ConnectorEgressPermitStore {
   recordMicrosoft365SharePointSiteVerificationFailure(tenantId: string, siteId: string, error: string): Promise<Microsoft365SharePointSiteRecord | null>;
   recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
     graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
     microsoftPermissionId: string;
     grantedAt?: Date;
   }): Promise<Microsoft365SharePointSiteRecord | null>;
@@ -459,6 +463,7 @@ const mapMicrosoft365SharePointSiteRow = (row: Record<string, unknown>): Microso
   siteUrl: String(row.site_url),
   hostname: String(row.hostname),
   sitePath: String(row.site_path),
+  accessLevel: row.access_level === "write" ? "write" : "read",
   graphSiteId: typeof row.graph_site_id === "string" ? row.graph_site_id : null,
   driveIds: Array.isArray(row.drive_ids) ? row.drive_ids.map(String) : [],
   status: row.status as Microsoft365SharePointSiteStatus,
@@ -671,10 +676,10 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
   async createMicrosoft365SharePointSite(input: CreateMicrosoft365SharePointSiteInput) {
     const result = await this.pool.query(
       `INSERT INTO microsoft365_sharepoint_sites (
-         tenant_id,id,display_name,site_url,hostname,site_path,created_by
-       ) VALUES ($1,$2::uuid,$3,$4,$5,$6,$7)
+         tenant_id,id,display_name,site_url,hostname,site_path,access_level,created_by
+       ) VALUES ($1,$2::uuid,$3,$4,$5,$6,$7,$8)
        RETURNING *`,
-      [input.tenantId, randomUUID(), input.displayName, input.siteUrl, input.hostname, input.sitePath, input.createdBy],
+      [input.tenantId, randomUUID(), input.displayName, input.siteUrl, input.hostname, input.sitePath, input.accessLevel, input.createdBy],
     );
     return mapMicrosoft365SharePointSiteRow(result.rows[0]);
   }
@@ -717,24 +722,35 @@ export class PostgresConnectorRegistryStore implements ConnectorRegistryStore {
 
   async recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
     graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
     microsoftPermissionId: string;
     grantedAt?: Date;
   }) {
     const result = await this.pool.query(
       `UPDATE microsoft365_sharepoint_sites SET
          graph_site_id=$3,
-         drive_ids='[]'::jsonb,
+         drive_ids=$4::jsonb,
+         access_level=$5,
          status='verified',
-         last_verified_at=$5,
+         last_verified_at=$7,
          last_verification_error=NULL,
          microsoft_access_status='granted',
-         microsoft_permission_id=$4,
-         microsoft_granted_at=$5,
+         microsoft_permission_id=$6,
+         microsoft_granted_at=$7,
          microsoft_last_error=NULL,
          updated_at=now()
        WHERE tenant_id=$1 AND id=$2::uuid
        RETURNING *`,
-      [tenantId, siteId, input.graphSiteId, input.microsoftPermissionId, input.grantedAt ?? new Date()],
+      [
+        tenantId,
+        siteId,
+        input.graphSiteId,
+        JSON.stringify([...new Set(input.driveIds)].sort()),
+        input.accessLevel,
+        input.microsoftPermissionId,
+        input.grantedAt ?? new Date(),
+      ],
     );
     return result.rowCount ? mapMicrosoft365SharePointSiteRow(result.rows[0]) : null;
   }
@@ -1406,6 +1422,8 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
 
   async recordMicrosoft365SharePointSiteGrant(tenantId: string, siteId: string, input: {
     graphSiteId: string;
+    driveIds: string[];
+    accessLevel: Microsoft365SharePointSiteAccessLevel;
     microsoftPermissionId: string;
     grantedAt?: Date;
   }) {
@@ -1416,7 +1434,8 @@ export class MemoryConnectorRegistryStore implements ConnectorRegistryStore {
     const saved: Microsoft365SharePointSiteRecord = {
       ...current,
       graphSiteId: input.graphSiteId,
-      driveIds: [],
+      driveIds: [...new Set(input.driveIds)].sort(),
+      accessLevel: input.accessLevel,
       status: "verified",
       lastVerifiedAt: grantedAt,
       lastVerificationError: null,

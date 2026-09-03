@@ -26,7 +26,7 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
   const disconnects: IdentityContext[] = [];
   const revokedSitePermissions: string[] = [];
   const sharePointSitePermissions: MicrosoftSharePointSitePermissionGateway = {
-    grantRead: async () => ({ graphSiteId: "contoso.sharepoint.com,collection,finance", permissionId: "permission-finance" }),
+    grant: async () => ({ graphSiteId: "contoso.sharepoint.com,collection,finance", driveIds: ["finance-documents"], permissionId: "permission-finance" }),
     revoke: async (input) => {
       if (input.permissionId) revokedSitePermissions.push(input.permissionId);
       return { revoked: true };
@@ -188,12 +188,13 @@ test("Control exposes an owned Microsoft 365 redirect, callback, status, and dis
       method: "POST",
       url: "/v1/admin/connectors/microsoft-365/sharepoint-sites",
       headers: headersFor(alpha),
-      payload: { displayName: "Finance", siteUrl: "https://contoso.sharepoint.com/sites/Finance" },
+      payload: { displayName: "Finance", siteUrl: "https://contoso.sharepoint.com/sites/Finance", accessLevel: "write" },
     });
     assert.equal(addedSite.statusCode, 201);
     const siteId = addedSite.json().site.id as string;
     assert.equal(addedSite.json().site.microsoftAccessStatus, "granted");
     assert.equal(addedSite.json().site.status, "verified");
+    assert.equal(addedSite.json().site.accessLevel, "write");
     const sites = await app.inject({
       method: "GET",
       url: "/v1/admin/connectors/microsoft-365/sharepoint-sites",

@@ -183,9 +183,10 @@ copied from an earlier setup, remove them unless another application sharing
 the registration still needs them.
 
 `Sites.Selected` starts with access to no SharePoint sites. LemmaComputer's
-site-administration screen creates and revokes the provider-side read grant as
-well as the tenant-scoped product allowlist. Configure its separate privileged
-application before using that screen.
+site-administration screen creates and revokes a provider-side `read` or
+`write` grant, selected per site, as well as the tenant-scoped product
+allowlist. Configure its separate privileged application before using that
+screen.
 
 ### Configure the SharePoint site-administration application
 
@@ -227,9 +228,10 @@ After both platform applications are configured:
    administrator.
 4. Add a friendly name and exact site URL, such as
    `https://contoso.sharepoint.com/sites/Finance`.
-5. Select **Add and grant**. Control obtains a short-lived application token,
-   grants the connector `read` on that site, and stores only the non-secret
-   Graph site and permission identifiers.
+5. Choose **Read only** or **Read and write**, then select **Add and grant**.
+   Control obtains a short-lived application token, grants only that role on
+   that site, and stores the non-secret Graph site, document-library, and
+   permission identifiers.
 6. Once Microsoft confirms the site-specific grant, the site is active for the
    organization. Each person still connects their own Microsoft 365 account;
    Microsoft checks that signed-in person's SharePoint membership whenever an

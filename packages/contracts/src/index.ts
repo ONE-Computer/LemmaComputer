@@ -2315,6 +2315,7 @@ export const m365ToolCatalog = {
   "list-folder-files": { service: "onedrive", risk: "read", decision: "allow" },
   "search-onedrive-files": { service: "onedrive", risk: "read", decision: "allow" },
   "get-drive-item": { service: "onedrive", risk: "read", decision: "allow" },
+  "download-bytes": { service: "onedrive", risk: "read", decision: "allow" },
   "list-approved-sharepoint-sites": { service: "sharepoint", risk: "read", decision: "allow" },
   "get-sharepoint-site-by-path": { service: "sharepoint", risk: "read", decision: "allow" },
   "get-sharepoint-site": { service: "sharepoint", risk: "read", decision: "allow" },

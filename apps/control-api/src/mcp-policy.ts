@@ -185,6 +185,13 @@ const driveItemMetadataArguments = z.strictObject({
   select: z.literal("id,name,eTag,parentReference"),
 });
 
+const downloadDriveItemArguments = z.strictObject({
+  target: z.string().trim().max(1_100).regex(
+    /^\/drives\/[^/?#]{1,512}\/items\/[^/?#]{1,512}\/content$/,
+    "target must be an exact drive item content path",
+  ),
+});
+
 const deleteRequestArguments = z.strictObject({
   driveId: z.string().trim().min(1).max(512),
   driveItemId: z.string().trim().min(1).max(512),
@@ -292,6 +299,7 @@ const toolSchemas: Record<keyof typeof m365ToolCatalog, z.ZodType<Record<string,
   "list-folder-files": boundedListArguments.extend({ driveId: id, driveItemId: id }),
   "search-onedrive-files": boundedDriveSearchArguments,
   "get-drive-item": driveItemMetadataArguments,
+  "download-bytes": downloadDriveItemArguments,
   "list-approved-sharepoint-sites": noArguments,
   "get-sharepoint-site-by-path": z.strictObject({
     "site-id": z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.sharepoint\.(?:com|us|de|cn)$/).max(253),
@@ -348,11 +356,11 @@ const displayNames: Record<keyof typeof m365ToolCatalog, string> = {
   "reply-mail-message": "Reply to email", "reply-all-mail-message": "Reply all", "forward-mail-message": "Forward email",
   "list-calendars": "List calendars", "list-calendar-events": "List calendar event series", "get-calendar-view": "Get upcoming calendar view", "get-calendar-event": "Read calendar event",
   "create-calendar-event": "Create calendar event", "update-calendar-event": "Update calendar event", "delete-calendar-event": "Delete calendar event",
-  "list-drives": "List OneDrive drives", "get-drive-root-item": "Read drive root", "list-folder-files": "List folder files",
-  "search-onedrive-files": "Search OneDrive", "get-drive-item": "Read OneDrive metadata", "create-onedrive-folder": "Create OneDrive folder",
+  "list-drives": "List available drives", "get-drive-root-item": "Read drive root", "list-folder-files": "List folder files",
+  "search-onedrive-files": "Search drive files", "get-drive-item": "Read file metadata", "download-bytes": "Read file contents", "create-onedrive-folder": "Create drive folder",
   "list-approved-sharepoint-sites": "List approved SharePoint sites",
   "get-sharepoint-site-by-path": "Resolve approved SharePoint site", "get-sharepoint-site": "Read SharePoint site", "list-sharepoint-site-drives": "List SharePoint document libraries",
-  "upload-file-content": "Upload file content", "move-rename-onedrive-item": "Move or rename OneDrive item", "copy-drive-item": "Copy OneDrive item", "delete-onedrive-file": "Delete OneDrive file",
+  "upload-file-content": "Upload file content", "move-rename-onedrive-item": "Move or rename file", "copy-drive-item": "Copy file", "delete-onedrive-file": "Delete file",
   "list-chats": "List Teams chats", "list-chat-messages": "Read Teams chat messages", "list-joined-teams": "List joined teams",
   "list-team-channels": "List team channels", "list-channel-messages": "Read channel messages", "send-chat-message": "Send Teams chat message",
   "reply-to-chat-message": "Reply in Teams chat", "send-channel-message": "Send channel message", "reply-to-channel-message": "Reply in Teams channel",
@@ -515,14 +523,16 @@ export class McpPolicyService {
       return invalidArguments(error, capability);
     }
 
-    if (
-      capability.service === "sharepoint"
-      && (!this.microsoft365TargetPolicy || !await this.microsoft365TargetPolicy(identity, request.toolName, canonicalArguments))
-    ) {
+    const selectedSiteTargetDenied = capability.service === "sharepoint"
+      ? !this.microsoft365TargetPolicy || !await this.microsoft365TargetPolicy(identity, request.toolName, canonicalArguments)
+      : capability.service === "onedrive"
+        && this.microsoft365TargetPolicy
+        && !await this.microsoft365TargetPolicy(identity, request.toolName, canonicalArguments);
+    if (selectedSiteTargetDenied) {
       return denied("MCP_SHAREPOINT_SITE_NOT_APPROVED", capability, {
         category: "policy_denial",
-        field: "site-id",
-        message: "This SharePoint site is not verified in the Microsoft 365 connector policy.",
+        field: null,
+        message: "This Microsoft 365 file target is not approved for the requested SharePoint access level.",
         retryable: false,
       });
     }

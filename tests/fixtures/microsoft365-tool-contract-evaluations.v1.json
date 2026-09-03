@@ -24,6 +24,20 @@
       "forbiddenArguments": ["filter", "orderby", "path", "headers", "fetchAllPages"]
     },
     {
+      "id": "sharepoint-resolve-and-read-document",
+      "prompt": "Read the approved budget.docx from the Finance SharePoint site.",
+      "expectedSequence": ["list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "list-sharepoint-site-drives", "get-drive-root-item", "list-folder-files", "download-bytes"],
+      "requiredArguments": ["site-id", "path", "driveId", "driveItemId", "target"],
+      "forbiddenArguments": ["filter", "search", "orderby", "headers", "fetchAllPages"]
+    },
+    {
+      "id": "sharepoint-upload-document",
+      "prompt": "Upload the approved report.docx to the Finance SharePoint document library.",
+      "expectedSequence": ["list-approved-sharepoint-sites", "get-sharepoint-site-by-path", "list-sharepoint-site-drives", "get-drive-root-item", "upload-file-content"],
+      "requiredArguments": ["site-id", "path", "driveId", "driveItemId", "lemmacomputerAudit"],
+      "forbiddenArguments": ["filter", "search", "orderby", "headers", "fetchAllPages"]
+    },
+    {
       "id": "teams-resolve-then-post",
       "prompt": "Post the approved update to the selected project channel.",
       "expectedSequence": ["list-joined-teams", "list-team-channels", "send-channel-message"],
