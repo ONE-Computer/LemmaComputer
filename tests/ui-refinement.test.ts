@@ -286,7 +286,7 @@ test("custom connectors use their own initial and support bounded icon uploads",
   assert.match(app, /accept="image\/png,image\/jpeg,image\/webp"/);
   assert.match(app, /Connector icons must be 256 KB or smaller/);
   assert.match(app, /<ConnectorIconEditor connector=\{connector\}/);
-  assert.match(app, /connector\.source === "custom" && !connected/);
+  assert.match(app, /connector\.canAdministerConnector && !connected/);
   assert.match(api, /saveConnectorIcon:/);
   assert.match(styles, /\.connector-mark\.uploaded img/);
 });

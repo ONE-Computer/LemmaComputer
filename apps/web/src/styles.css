@@ -7015,6 +7015,11 @@ a.chat-file-part:hover {
 .tool-policy-heading h2 { margin: 0; color: #0d1a2b; font-size: 24px; }
 .tool-policy-heading > span { color: #68727d; font-size: 13px; }
 .tool-policy-intro { max-width: 780px; margin: 14px 0 24px; color: #5d6670; line-height: 1.55; }
+.tool-policy-discovery-status { display: flex; align-items: flex-start; gap: 12px; margin: -6px 0 24px; padding: 16px; border: 1px solid #d8e2ec; border-radius: 8px; background: #f4f8fc; color: #33485d; }
+.tool-policy-discovery-status svg { flex: 0 0 auto; color: #0b4a8f; }
+.tool-policy-discovery-status div { display: grid; gap: 4px; }
+.tool-policy-discovery-status span { color: #5d6670; font-size: 13px; line-height: 1.5; }
+.tool-policy-catalogue-source { margin: -8px 0 20px; color: #39536e; font-size: 13px; line-height: 1.5; }
 .tool-policy-change-summary { margin: -10px 0 20px; color: #5d4a13; font-size: 13px; line-height: 1.5; }
 .tool-policy-groups { display: grid; gap: 24px; }
 .tool-policy-group { overflow: hidden; border: 1px solid #e2e2df; border-radius: 10px; }

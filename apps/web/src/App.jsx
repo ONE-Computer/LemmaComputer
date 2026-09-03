@@ -1510,16 +1510,30 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
     .map(([service, label]) => ({ service, label, tools: mcpPolicy?.tools.filter((tool) => tool.service === service) ?? [] }))
     .filter((group) => group.tools.length);
   const effectiveTools = new Map((effectivePolicy?.tools ?? []).map((tool) => [tool.name, tool]));
+  const connectorDiscovery = mcpPolicy?.connectorId ? mcpPolicy.discovery : null;
+  const discoveryAvailable = !connectorDiscovery || connectorDiscovery.state === "available";
+  const anonymousCatalogue = connectorDiscovery?.state === "available" && connectorDiscovery.source === "anonymous";
   if (loading && !mcpPolicy) return <div className="tool-policy-loading">Loading connector tools…</div>;
   return (
       <section className="tool-policy-card connector-tool-policy" aria-labelledby="tool-policy-heading">
         <div className="tool-policy-heading">
           <div><p>Organization policy</p><h2 id="tool-policy-heading">Tool permissions</h2></div>
-          {mcpPolicy && <span>{mcpPolicy.version ? `Version ${mcpPolicy.version} · ` : ""}{mcpPolicy.documentHash.slice(0, 12)}…</span>}
+          {mcpPolicy?.documentHash && <span>{mcpPolicy.version ? `Version ${mcpPolicy.version} · ` : ""}{mcpPolicy.documentHash.slice(0, 12)}…</span>}
         </div>
         <p className="tool-policy-intro">{mcpPolicy?.connectorId
-          ? "Review the provider-supplied definition before choosing what workspace agents may run. New or changed tools stay blocked until this exact definition is saved; a later provider change requires another review."
+          ? anonymousCatalogue
+            ? "These tools were published before sign-in. Review the provider definitions now; they become usable only when an employee connects and the authenticated definitions match these exact versions."
+            : "Review the provider-supplied definition before choosing what workspace agents may run. New or changed tools stay blocked until this exact definition is saved; a later provider change requires another review."
           : "Choose what workspace agents can run, what needs an administrator's approval, and what is blocked. These permissions are managed here in Connectors."}</p>
+        {connectorDiscovery?.state === "authorization_required" && <div className="tool-policy-discovery-status" role="status">
+          <Info24Regular aria-hidden="true" />
+          <div><strong>This provider reveals its tools only after sign-in</strong><span>Connector access can still be managed now. Tool permissions remain blocked until the catalogue is verified through a connection.</span></div>
+        </div>}
+        {connectorDiscovery?.state === "unavailable" && <div className="tool-policy-discovery-status" role="status">
+          <Info24Regular aria-hidden="true" />
+          <div><strong>The tool catalogue could not be checked</strong><span>Retry this page later. No unverified tools have been enabled.</span></div>
+        </div>}
+        {anonymousCatalogue && <p className="tool-policy-catalogue-source"><strong>Pre-connection catalogue:</strong> the employee's authenticated connection must expose the same definitions before these decisions take effect.</p>}
         {changeSummary && <p className="tool-policy-change-summary"><strong>Review required:</strong> {changeSummary}. Open each provider definition before allowing it.</p>}
         <div className="tool-policy-groups">
           {groupedTools.map((group) => <section key={group.service} className="tool-policy-group">
@@ -1560,7 +1574,7 @@ function ToolPolicyEditor({ mcpPolicy, loading, policySaving, onPolicyChange, on
         </div>
         <div className="tool-policy-actions">
           <span><ShieldCheckmark24Regular aria-hidden="true" />Approval rules are enforced in Control, not trusted to the desktop client.</span>
-          <button className="primary-button compact-button" type="button" onClick={onPolicySave} disabled={!mcpPolicy || policySaving}>{policySaving ? "Saving tool permissions" : "Save tool permissions"}</button>
+          <button className="primary-button compact-button" type="button" onClick={onPolicySave} disabled={!mcpPolicy || !discoveryAvailable || policySaving}>{policySaving ? "Saving tool permissions" : "Save tool permissions"}</button>
         </div>
       </section>
   );
@@ -4482,11 +4496,11 @@ function HostedConnectorDetail({ connector, loading, busy, error, onConnect, onD
 
       <nav className="connector-tabs" aria-label={`${connector.name} settings`}>
         <button className={activeTab === "overview" ? "active" : ""} type="button" onClick={() => onTabChange("overview")}>Overview</button>
-        {canManageConnector && connected && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Policy</button>}
+        {canManageConnector && <button className={activeTab === "tools" ? "active" : ""} type="button" onClick={() => onTabChange("tools")}>Policy</button>}
       </nav>
       {error && <div className="connection-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>The connector was not updated</strong>{error}</span></div>}
 
-      {activeTab === "tools" && canManageConnector && connected ? (
+      {activeTab === "tools" && canManageConnector ? (
         <ConnectorPolicyAdministration connector={connector} busy={busy} onAccessPolicySave={onAccessPolicySave} mcpPolicy={mcpPolicy} policyLoading={policyLoading} policySaving={policySaving} onPolicyChange={onPolicyChange} onPolicySave={onPolicySave} effectivePolicy={effectivePolicy} effectivePolicyLoading={effectivePolicyLoading} effectivePolicyError={effectivePolicyError} deliveryBusy={deliveryBusy} onRetryDelivery={onRetryDelivery} onReviewWorkspacePolicies={onReviewWorkspacePolicies} />
       ) : <div className="connector-overview">
         <section className="connector-overview-card">
@@ -4862,7 +4876,7 @@ function ConnectionsScreen({ connections, loading, busyConnectorId, error, onCon
                       <small>{connector.policySupport === "governed" ? "Approved tools ready" : "Added to workspace agents after connection"}</small>
                     </div>
                     <div className="connector-catalog-action">
-                      {connector.canAdministerConnector && connector.source === "custom" && !connected && <button className="connector-manage-link" type="button" onClick={() => onViewChange(`connector-${connector.id}`)}>Manage</button>}
+                      {connector.canAdministerConnector && !connected && !(connector.adminConsent?.required && !connector.adminConsent.grantedAt) && <button className="connector-manage-link" type="button" onClick={() => onViewChange(connector.id === "microsoft-365" ? "microsoft365-overview" : `connector-${connector.id}`)}>Manage</button>}
                       {/* Connect still works wherever a directory administrator
                           already approved the application out of band, so this
                           adds a way to reach the approval rather than replacing

@@ -238,6 +238,65 @@ test("concurrent connection reads use independent temporary grants and revoke ea
   }
 });
 
+test("anonymous OAuth tool discovery skips user credential status and reports authorization challenges", async () => {
+  const requests: Array<{ url: string; authorization: string }> = [];
+  const grantSubjects: string[] = [];
+  let authorizationRequired = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    requests.push({ url: request.url ?? "", authorization: String(request.headers.authorization ?? "") });
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/mcp/server") {
+      response.end(JSON.stringify([{ server_id: "connector-server-id", server_name: "lemmacomputer_connector" }]));
+      return;
+    }
+    if (request.url === "/key/generate") {
+      grantSubjects.push(String(body.metadata?.lemmacomputer_subject_id ?? ""));
+    }
+    if (request.url?.startsWith("/mcp-rest/tools/list?")) {
+      if (authorizationRequired) {
+        response.statusCode = 401;
+        response.end(JSON.stringify({ error: "authorization_required" }));
+        return;
+      }
+      response.end(JSON.stringify({
+        tools: [{
+          name: "search_records",
+          description: "Search records",
+          inputSchema: { type: "object", properties: { query: { type: "string" } } },
+          mcp_info: { server_id: "connector-server-id" },
+        }],
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const available = await liveAdapter.anonymousOAuthConnectionTools(identity, "lemmacomputer_connector");
+    assert.equal(available.state, "available");
+    assert.deepEqual(available.tools.map((tool) => tool.name), ["search_records"]);
+    assert.deepEqual(grantSubjects, ["connector-catalog:lemmacomputer_connector"]);
+    assert.equal(requests.some(({ url }) => url.includes("oauth-user-credential/status")), false);
+    assert.ok(requests.filter(({ url }) => url.startsWith("/mcp-rest/tools/list?")).every(({ authorization }) => authorization !== "Bearer sk-master-test-not-used-00001"));
+
+    authorizationRequired = true;
+    const protectedResult = await liveAdapter.anonymousOAuthConnectionTools(identity, "lemmacomputer_connector");
+    assert.deepEqual(protectedResult, { state: "authorization_required", tools: [] });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("expired Microsoft 365 connection discovery re-reads status without a tool call", async () => {
   const marker = "oauth-token-must-not-escape";
   const requests: Array<{ url: string; authorization: string }> = [];

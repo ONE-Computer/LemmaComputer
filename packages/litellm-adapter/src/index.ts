@@ -89,6 +89,10 @@ export type OAuthConnectionTool = {
   definitionPreview?: string;
 };
 
+export type AnonymousOAuthConnectionToolDiscovery =
+  | { state: "available"; tools: OAuthConnectionTool[] }
+  | { state: "authorization_required" | "unavailable"; tools: [] };
+
 export interface OAuthConnectionGateway {
   beginUserOAuthConnection(input: {
     identity: IdentityContext;
@@ -108,6 +112,7 @@ export interface OAuthConnectionGateway {
   userOAuthConnectionStatus(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   disconnectUserOAuthConnection(identity: IdentityContext, serverName: string): Promise<OAuthConnectionStatus>;
   userOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<OAuthConnectionTool[]>;
+  anonymousOAuthConnectionTools?(identity: IdentityContext, serverName: string): Promise<AnonymousOAuthConnectionToolDiscovery>;
   callUserOAuthConnectionTool?(
     identity: IdentityContext,
     serverName: string,
@@ -299,6 +304,48 @@ const oauthConnectionToolDescriptor = (tool: JsonObject): OAuthConnectionTool | 
     ...(typeof tool.description === "string" ? { description: tool.description } : {}),
     definitionPreview: toolDefinitionPreview(definition),
   };
+};
+
+const oauthConnectionToolsFromPayload = (payload: unknown, serverId: string) => {
+  const tools = Array.isArray(asObject(payload).tools) ? asObject(payload).tools as unknown[] : [];
+  const descriptors = new Map<string, OAuthConnectionTool>();
+  for (const tool of tools.map(asObject)) {
+    const info = asObject(tool.mcp_info);
+    // `/mcp-rest/tools/list` can contain entries for more than one server. A
+    // tool without an exact server identity is not attributable to the
+    // connector and must never become reviewable or projectable.
+    if (typeof info.server_id !== "string") {
+      throw new LemmaComputerError(
+        "MCP_TOOL_DISCOVERY_INVALID",
+        "The connector returned a tool without its server identity. Reconnect and try again.",
+        502,
+        true,
+      );
+    }
+    if (info.server_id !== serverId) continue;
+    const descriptor = oauthConnectionToolDescriptor(tool);
+    if (!descriptor) continue;
+    const existing = descriptors.get(descriptor.name);
+    if (existing && existing.definitionHash !== descriptor.definitionHash) {
+      throw new LemmaComputerError(
+        "MCP_TOOL_DISCOVERY_CONFLICT",
+        "The connector returned conflicting definitions for a tool. Reconnect and try again.",
+        502,
+        true,
+      );
+    }
+    descriptors.set(descriptor.name, descriptor);
+  }
+  return [...descriptors.values()].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+};
+
+const discoveryNeedsAuthorization = (status: number, payload: unknown) => {
+  if (status === 401 || status === 403) return true;
+  const record = asObject(payload);
+  const text = [record.error, record.message, asObject(record.detail).error, asObject(record.detail).message]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+  return /(?:oauth|authori[sz]|credential|sign.?in|forbidden|unauthenticated)/i.test(text);
 };
 const sameStrings = (left: string[], right: string[]) => {
   const sortedLeft = [...left].sort();
@@ -591,36 +638,44 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
       // Fail closed if LiteLLM could not silently renew the connection. Callers
       // must not project stale tools into a new workspace grant.
       if (refreshedStatus.state !== "connected") return [];
-      const tools = Array.isArray(asObject(result.payload).tools) ? asObject(result.payload).tools as unknown[] : [];
-      const descriptors = new Map<string, OAuthConnectionTool>();
-      for (const tool of tools.map(asObject)) {
-        const info = asObject(tool.mcp_info);
-        // `/mcp-rest/tools/list` can contain entries for more than one server.
-        // A tool without an exact server identity is not attributable to this
-        // connector and must never become reviewable or projectable.
-        if (typeof info.server_id !== "string") {
-          throw new LemmaComputerError(
-            "MCP_TOOL_DISCOVERY_INVALID",
-            "The connector returned a tool without its server identity. Reconnect and try again.",
-            502,
-            true,
-          );
-        }
-        if (info.server_id !== grant.serverId) continue;
-        const descriptor = oauthConnectionToolDescriptor(tool);
-        if (!descriptor) continue;
-        const existing = descriptors.get(descriptor.name);
-        if (existing && existing.definitionHash !== descriptor.definitionHash) {
-          throw new LemmaComputerError(
-            "MCP_TOOL_DISCOVERY_CONFLICT",
-            "The connector returned conflicting definitions for a tool. Reconnect and try again.",
-            502,
-            true,
-          );
-        }
-        descriptors.set(descriptor.name, descriptor);
+      return oauthConnectionToolsFromPayload(result.payload, grant.serverId);
+    } finally {
+      await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
+    }
+  }
+
+  async anonymousOAuthConnectionTools(identity: IdentityContext, serverName: string): Promise<AnonymousOAuthConnectionToolDiscovery> {
+    // Never let a stale gateway credential for the requesting administrator
+    // turn this into an authenticated request. The synthetic subject cannot
+    // complete OAuth and exists only for this short-lived catalogue grant.
+    const discoveryIdentity: IdentityContext = {
+      ...identity,
+      subjectId: `connector-catalog:${serverName}`,
+    };
+    const grant = await this.ensureConnectionGrant(discoveryIdentity, serverName);
+    try {
+      // This deliberately skips the per-user OAuth credential lookup. Some MCP
+      // servers publish tools/list before sign-in; others protect the entire
+      // endpoint. Both are valid, and an authorization challenge is an honest
+      // discovery outcome rather than a connection failure.
+      const result = await this.dataCall(
+        `/mcp-rest/tools/list?mcp_server_name=${encodeURIComponent(serverName)}`,
+        grant.credential,
+      );
+      if (!result.ok) {
+        return {
+          state: discoveryNeedsAuthorization(result.status, result.payload) ? "authorization_required" : "unavailable",
+          tools: [],
+        };
       }
-      return [...descriptors.values()].sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+      const payload = asObject(result.payload);
+      if (typeof payload.error === "string" && payload.error) {
+        return {
+          state: discoveryNeedsAuthorization(result.status, payload) ? "authorization_required" : "unavailable",
+          tools: [],
+        };
+      }
+      return { state: "available", tools: oauthConnectionToolsFromPayload(payload, grant.serverId) };
     } finally {
       await this.deleteConnectionGrant(grant.keyAlias).catch(() => undefined);
     }

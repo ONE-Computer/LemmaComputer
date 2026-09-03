@@ -1280,12 +1280,36 @@ export class McpConnectionService {
       throw new LemmaComputerError("MCP_CONNECTOR_POLICY_MANAGED", "Use the Microsoft 365 tool policy", 409);
     }
     const stored = await this.registry.getConnectionState(identity.tenantId, identity.subjectId, connector.id);
-    if (!stored) throw new LemmaComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
-    const status = await this.connectionStatus(identity, connector);
-    if (status.state !== "connected") {
-      throw new LemmaComputerError("MCP_CONNECTOR_NOT_CONNECTED", `Connect ${connector.name} before reviewing its tools`, 409);
+    let discoverySource: "connected" | "anonymous" = "anonymous";
+    let discoveryState: "available" | "authorization_required" | "unavailable" = "unavailable";
+    let discoveredTools: OAuthConnectionTool[] = [];
+    if (stored) {
+      try {
+        const status = await this.connectionStatus(identity, connector);
+        if (status.state === "connected") {
+          discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+          discoverySource = "connected";
+          discoveryState = "available";
+        }
+      } catch {
+        // A broken personal connection must not prevent the safe anonymous
+        // catalogue attempt below. Runtime projection still requires a valid
+        // user connection and an exact reviewed definition hash.
+      }
     }
-    const discoveredTools = await this.gateway.userOAuthConnectionTools(identity, connector.serverName);
+    if (discoveryState !== "available") {
+      try {
+        await this.ensureManagedConnectorServers([connector]);
+        const anonymous = await this.gateway.anonymousOAuthConnectionTools?.(identity, connector.serverName);
+        if (anonymous) {
+          discoveryState = anonymous.state;
+          discoveredTools = anonymous.tools;
+        }
+      } catch {
+        discoveryState = "unavailable";
+        discoveredTools = [];
+      }
+    }
     const discoveredToolNames = new Set(discoveredTools.map((tool) => tool.name));
     const addedTools: string[] = [];
     const changedTools: string[] = [];
@@ -1319,7 +1343,11 @@ export class McpConnectionService {
       connectorName: connector.name,
       serverName: connector.serverName,
       accessPolicyVersion: connector.accessPolicyVersion,
-      documentHash: toolsetDocumentHash(discoveredTools),
+      documentHash: discoveryState === "available" ? toolsetDocumentHash(discoveredTools) : null,
+      discovery: {
+        state: discoveryState,
+        source: discoverySource,
+      },
       changes: {
         added: addedTools.sort(),
         changed: changedTools.sort(),
@@ -1339,6 +1367,15 @@ export class McpConnectionService {
     correlationId: string,
   ) {
     const current = await this.connectorToolPolicy(identity, connectorId);
+    if (current.discovery.state !== "available" || !current.documentHash) {
+      throw new LemmaComputerError(
+        "MCP_TOOL_DISCOVERY_REQUIRED",
+        current.discovery.state === "authorization_required"
+          ? `Connect ${current.connectorName} before reviewing its tools because this provider does not publish them anonymously`
+          : `The ${current.connectorName} tool catalogue could not be checked. Retry before saving tool permissions`,
+        409,
+      );
+    }
     if (current.documentHash !== expectedDocumentHash) {
       await this.registry.recordToolPolicyConflict(identity.tenantId, connectorId, {
         actorUserId: updatedBy,
