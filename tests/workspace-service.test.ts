@@ -44,6 +44,7 @@ class FakeGateway implements GatewayClient {
   workspaceRevocations = 0;
   lastPolicy: RuntimePolicy | undefined;
   lastAccessGeneration: number | undefined;
+  lastReadinessOptions: { includeTools?: boolean } | undefined;
   async ensureGrant(input: Parameters<GatewayClient["ensureGrant"]>[0]): Promise<GatewayGrant> {
     this.grants += 1;
     this.lastPolicy = input.policy;
@@ -51,7 +52,20 @@ class FakeGateway implements GatewayClient {
     return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "lemmacomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
   }
   async modelCapabilities() { return { vision: true }; }
-  async readiness() { return { models: "ready" as const, tools: "ready" as const, modelRoute: fakeModelRoute }; }
+  async readiness(
+    _workspaceId?: string,
+    _agentId?: string,
+    _policy?: RuntimePolicy,
+    _accessGeneration?: number,
+    options?: { includeTools?: boolean },
+  ) {
+    this.lastReadinessOptions = options;
+    return {
+      models: "ready" as const,
+      tools: options?.includeTools === false ? "unavailable" as const : "ready" as const,
+      modelRoute: fakeModelRoute,
+    };
+  }
   async test() {
     return {
       model: "lemmacomputer-assistant",
@@ -488,7 +502,8 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller, gateway);
   const workspace = await service.create(alex, policy, "personal", "gateway-key-0001", "correlation-002");
   assert.equal(workspace.readiness.models, "ready");
-  assert.equal(workspace.readiness.tools, "ready");
+  assert.equal(workspace.readiness.tools, "unavailable");
+  assert.deepEqual(gateway.lastReadinessOptions, { includeTools: false });
   assert.equal(workspace.modelRoute?.limits.requestsPerMinute, 30);
   assert.equal(controller.lastGateway?.modelAlias, "lemmacomputer-assistant");
   assert.equal(gateway.grants, 1);

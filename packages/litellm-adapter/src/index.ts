@@ -26,7 +26,7 @@ export type GatewayGrant = {
 
 export type GatewayReadiness = {
   models: "ready" | "failed";
-  tools: "ready" | "failed";
+  tools: "ready" | "failed" | "unavailable";
   modelRoute?: GatewayModelRoute;
 };
 
@@ -58,7 +58,13 @@ export type GatewayTestResult = {
 export interface GatewayClient {
   ensureGrant(input: { workspaceId: string; accessGeneration: number; identity: IdentityContext; agentId?: string; policy?: RuntimePolicy }): Promise<GatewayGrant>;
   modelCapabilities(modelAlias: string): Promise<GatewayModelCapabilities>;
-  readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayReadiness>;
+  readiness(
+    workspaceId: string,
+    agentId?: string,
+    policy?: RuntimePolicy,
+    accessGeneration?: number,
+    options?: { includeTools?: boolean },
+  ): Promise<GatewayReadiness>;
   test(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayTestResult>;
   revoke(workspaceId: string, agentId?: string): Promise<void>;
   revokeWorkspace(workspaceId: string, accessGeneration?: number): Promise<void>;
@@ -1209,7 +1215,13 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     return { baseUrl: this.workspaceUrl, credential, modelAlias: clientModelAlias, transportModelAlias, expiresAt: expiresAt.toISOString() };
   }
 
-  async readiness(workspaceId: string, agentId?: string, policy?: RuntimePolicy, accessGeneration?: number): Promise<GatewayReadiness> {
+  async readiness(
+    workspaceId: string,
+    agentId?: string,
+    policy?: RuntimePolicy,
+    accessGeneration?: number,
+    options: { includeTools?: boolean } = {},
+  ): Promise<GatewayReadiness> {
     const effectiveAgentId = policy?.agentId ?? agentId;
     const modelAlias = policy?.modelAlias ?? this.modelAlias;
     const activeMcpServers = policy?.activeMcpServers ?? policy?.mcpServers ?? [policy?.mcpServer ?? this.mcpServer];
@@ -1221,9 +1233,12 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     )))];
     const credential = this.credentialFor(workspaceId, effectiveAgentId, accessGeneration);
     const gatewayModelAlias = this.workspaceGrantStates.get(credential)?.transportModelAlias ?? (modelAlias === "lemmacomputer-auto" ? "lemmacomputer-auto" : desktopModelAlias(modelAlias, policy));
+    const includeTools = options.includeTools ?? true;
     const [models, discovery, modelRoute] = await Promise.all([
       this.dataCall("/v1/models", credential),
-      this.discoverToolsForServers(credential, activeMcpServers),
+      includeTools
+        ? this.discoverToolsForServers(credential, activeMcpServers)
+        : Promise.resolve({ tools: [], failedServers: [] }),
       this.modelRoute(credential, workspaceId, effectiveAgentId, modelAlias, accessGeneration ?? this.workspaceGrantStates.get(credential)?.accessGeneration),
     ]);
     if (!models.ok) this.workspaceGrantStates.delete(credential);
@@ -1233,7 +1248,9 @@ export class LiteLLMGatewayAdapter implements GatewayClient, GovernedToolExecuto
     const toolNames = discovery.tools.map((item) => String(asObject(item).name ?? ""));
     return {
       models: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",
-      tools: discovery.failedServers.length === 0 && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed",
+      tools: includeTools
+        ? discovery.failedServers.length === 0 && allowedTools.every((tool) => toolNames.includes(tool)) ? "ready" : "failed"
+        : "unavailable",
       modelRoute: {
         ...modelRoute,
         status: models.ok && modelIds.includes(gatewayModelAlias) ? "ready" : "failed",

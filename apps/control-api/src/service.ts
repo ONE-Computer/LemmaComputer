@@ -426,7 +426,15 @@ export class WorkspaceService {
         ? { state: "applies_on_next_start" as const, reasonCode: null }
         : { state: "current" as const, reasonCode: null };
     if (!hasAiAgents(policy) || !this.gateway || !["ready", "open"].includes(record.state)) return toView(record, undefined, policy, integrity, compatibility);
-    const gateway = await this.gateway.readiness(record.id, policy.agentId, policy, record.accessGeneration).catch(() => undefined);
+    // Workspace and agent lifecycle views must not wait for optional connector
+    // discovery. Connector health is queried on its own product surface.
+    const gateway = await this.gateway.readiness(
+      record.id,
+      policy.agentId,
+      policy,
+      record.accessGeneration,
+      { includeTools: false },
+    ).catch(() => undefined);
     return toView(record, gateway, policy, integrity, compatibility);
   }
 

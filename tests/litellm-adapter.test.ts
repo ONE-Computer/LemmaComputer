@@ -89,6 +89,67 @@ test("Auto model readiness stays healthy when an optional connector is unavailab
   }
 });
 
+test("model-only readiness never contacts optional connector discovery", async () => {
+  let liveAdapter: LiteLLMGatewayAdapter;
+  let toolRequests = 0;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain request bodies so the local HTTP connection can be reused.
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/v1/models") {
+      response.end(JSON.stringify({ data: [{ id: "lemmacomputer-auto" }] }));
+      return;
+    }
+    if (request.url?.startsWith("/mcp-rest/tools/list")) {
+      toolRequests += 1;
+      response.statusCode = 503;
+      response.end(JSON.stringify({ error: "connector unavailable" }));
+      return;
+    }
+    if (request.url?.startsWith("/key/list?")) {
+      const credential = liveAdapter.credentialFor("workspace-model-only", "claude-cli");
+      response.end(JSON.stringify({
+        keys: [{
+          token: createHash("sha256").update(credential).digest("hex"),
+          rpm_limit: 30,
+          max_parallel_requests: 30,
+        }],
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  liveAdapter = new LiteLLMGatewayAdapter({
+    adminUrl: `http://127.0.0.1:${address.port}`,
+    workspaceUrl: `http://127.0.0.1:${address.port}`,
+    masterKey: "sk-master-test-not-used-00001",
+    credentialSecret: "credential-secret-for-tests-00000001",
+  });
+  try {
+    const readiness = await liveAdapter.readiness(
+      "workspace-model-only",
+      "claude-cli",
+      {
+        modelAlias: "lemmacomputer-auto",
+        agentId: "claude-cli",
+        allowedTools: ["optional_tool"],
+        activeMcpServers: ["lemmacomputer_optional"],
+      } as never,
+      undefined,
+      { includeTools: false },
+    );
+    assert.equal(readiness.models, "ready");
+    assert.equal(readiness.tools, "unavailable");
+    assert.equal(toolRequests, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("per-server discovery preserves Exa tools when Microsoft 365 fails", async () => {
   let liveAdapter: LiteLLMGatewayAdapter;
   const toolRequests: string[] = [];
