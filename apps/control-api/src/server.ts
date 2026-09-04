@@ -1223,12 +1223,11 @@ export function createControlServer(
         subjectId: actor.subjectId,
         audience: "lemmacomputer-control",
       } as const;
-      // Connector discovery is part of workspace bootstrap: Hermes resolves
-      // its MCP tool catalogue before the controller can mark the sandbox
-      // ready. Keep every mutating/operational bridge scope ready-only, while
-      // allowing this read-only, generation-bound projection during the two
-      // states that actively create a replacement runtime.
-      const activeStates: WorkspaceState[] = agentBridgeScope === "agent:mcp-discovery"
+      // Discovery and process registration can occur while the selected agent
+      // runtimes are booting. Both grants remain workspace-generation-bound;
+      // every other mutating or operational scope stays ready-only.
+      const bootstrapScopes = new Set(["agent:mcp-discovery", "agent:instances"]);
+      const activeStates: WorkspaceState[] = bootstrapScopes.has(agentBridgeScope)
         ? ["provisioning", "restarting", "ready", "open"]
         : ["ready", "open"];
       if (!await store.authorizeWorkspaceAccess({

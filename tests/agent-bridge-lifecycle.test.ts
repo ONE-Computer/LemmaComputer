@@ -160,3 +160,37 @@ test("agent bridge server rejects endpoint scopes and refuses shared signing sec
     /AGENT_BRIDGE_SECRET is required/,
   );
 });
+
+test("generation-bound agent process registration is authorized during workspace bootstrap", async () => {
+  const store = new MemoryWorkspaceStore();
+  const workspace = await store.createOrGet(identity, "personal", "agent-bootstrap-registration");
+  const authority = new AgentBridgeAuthority(bridgeSecret);
+  const token = authority.issue(identity, workspace.id, policy, {
+    workspaceGeneration: workspace.accessGeneration,
+    scopes: ["agent:instances"],
+  });
+  const app = createControlServer(store, {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    testIdentityMode: true,
+    mcpPolicyToken,
+    agentBridgeSecret: bridgeSecret,
+  });
+  const register = () => app.inject({
+    method: "POST",
+    url: "/internal/v1/agent/instances",
+    headers: { authorization: `Bearer ${token}` },
+    payload: { launchNonce: randomUUID() },
+  });
+
+  try {
+    for (const state of ["provisioning", "restarting"] as const) {
+      await store.update(workspace.id, { state });
+      const response = await register();
+      assert.equal(response.json().error.code, "AGENT_INSTANCE_POLICY_MISMATCH", `${state} must pass bridge lifecycle authorization`);
+    }
+    await store.update(workspace.id, { state: "stopped" });
+    const stopped = await register();
+    assert.equal(stopped.json().error.code, "AGENT_BRIDGE_GRANT_REVOKED");
+  } finally {
+    await app.close();
+  }
+});
