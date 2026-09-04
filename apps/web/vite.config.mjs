@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { rewriteTelegramTokenIntakePath } from "./telegram-intake-path.mjs";
 
 export default defineConfig({
   cacheDir: process.env.LEMMACOMPUTER_VITE_CACHE_DIR,
@@ -16,7 +17,7 @@ export default defineConfig({
       "/api/channel-intake": {
         target: process.env.LEMMACOMPUTER_CHANNEL_BROKER_INTAKE_URL ?? "http://127.0.0.1:4102",
         changeOrigin: false,
-        rewrite: (path) => path.replace(/^\/api\/channel-intake/, ""),
+        rewrite: rewriteTelegramTokenIntakePath,
       },
       "/api": {
         target: process.env.LEMMACOMPUTER_CONTROL_URL ?? "http://127.0.0.1:4100",

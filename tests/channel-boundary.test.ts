@@ -6,7 +6,7 @@ import { projectServiceEnvironment } from "../scripts/deployment-config.mjs";
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Telegram credential authority exists only in the trusted channel broker", async () => {
-  const [compose, hostedCompose, entrypoint, kasm, controller, contracts, web] = await Promise.all([
+  const [compose, hostedCompose, entrypoint, kasm, controller, contracts, web, vite, intakePaths, brokerServer] = await Promise.all([
     source("compose.yaml"),
     source("compose.hosted.yaml"),
     source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
@@ -14,6 +14,9 @@ test("Telegram credential authority exists only in the trusted channel broker", 
     source("apps/workspace-controller/src/server.ts"),
     source("packages/contracts/src/index.ts"),
     source("apps/web/server.mjs"),
+    source("apps/web/vite.config.mjs"),
+    source("apps/web/telegram-intake-path.mjs"),
+    source("apps/channel-broker/src/server.ts"),
   ]);
   const broker = compose.slice(compose.indexOf("  channel-broker:"), compose.indexOf("  scheduler-worker:"));
   const control = compose.slice(compose.indexOf("  control-api:"), compose.indexOf("  channel-broker:"));
@@ -36,6 +39,10 @@ test("Telegram credential authority exists only in the trusted channel broker", 
   assert.doesNotMatch(workspaceController, /CHANNEL_CREDENTIAL_SECRET|CHANNEL_BROKER_INTERNAL_TOKEN/);
   assert.doesNotMatch(`${entrypoint}\n${kasm}\n${controller}`, /TELEGRAM_BOT_TOKEN|CHANNEL_CREDENTIAL_SECRET|credentialCiphertext/);
   assert.doesNotMatch(contracts, /controllerCreateSchema[\s\S]{0,2500}botToken/);
-  assert.match(web, /\/api\/channel-intake\/v1\/telegram/);
+  assert.match(intakePaths, /telegramTokenIntakePath = "\/api\/channel-intake\/v1\/telegram"/);
+  assert.match(web, /rewriteTelegramTokenIntakePath/);
+  assert.match(vite, /rewriteTelegramTokenIntakePath/);
+  assert.match(intakePaths, /channelBrokerTelegramIntakePath = "\/public\/v1\/telegram\/intake"/);
+  assert.match(brokerServer, /app\.post\("\/public\/v1\/telegram\/intake"/);
   assert.doesNotMatch(web, /proxyTelegramIntake[\s\S]{0,1200}\{ \.\.\.request\.headers/);
 });

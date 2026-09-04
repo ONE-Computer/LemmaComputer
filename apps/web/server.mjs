@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { controlRequestTimeout } from "./proxy-timeout.mjs";
 import { platformOperatorEntryRedirect } from "./platform-operator-entry.mjs";
+import { rewriteTelegramTokenIntakePath, telegramTokenIntakePath } from "./telegram-intake-path.mjs";
 
 const host = process.env.WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.WEB_PORT ?? 4173);
@@ -141,7 +142,10 @@ const proxyTelegramIntake = (request, response, requestUrl) => {
     }));
     return;
   }
-  const upstreamUrl = new URL(`${requestUrl.pathname.slice("/api/channel-intake".length)}${requestUrl.search}`, channelBrokerIntakeUrl);
+  const upstreamUrl = new URL(
+    rewriteTelegramTokenIntakePath(`${requestUrl.pathname}${requestUrl.search}`),
+    channelBrokerIntakeUrl,
+  );
   const transport = upstreamUrl.protocol === "https:" ? https : http;
   // This endpoint carries an envelope that is self-authorized by the signed
   // grant. Do not relay browser cookies, bearer tokens, or Control's proxy
@@ -159,7 +163,7 @@ const proxyTelegramIntake = (request, response, requestUrl) => {
     response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
     upstreamResponse.pipe(response);
   });
-  upstream.setTimeout(controlRequestTimeout(request.method, "/v1/credentials/telegram/intake"), () => {
+  upstream.setTimeout(controlRequestTimeout(request.method, upstreamUrl.pathname), () => {
     upstream.destroy(new Error("Telegram broker intake timeout"));
   });
   upstream.on("error", () => {
@@ -199,7 +203,7 @@ const server = http.createServer(async (request, response) => {
     response.end();
     return;
   }
-  if (requestUrl.pathname === "/api/channel-intake/v1/telegram") {
+  if (requestUrl.pathname === telegramTokenIntakePath) {
     if (request.method !== "POST") {
       response.writeHead(405, { allow: "POST" });
       response.end();
