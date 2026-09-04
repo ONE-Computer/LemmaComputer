@@ -3,7 +3,7 @@ import test from "node:test";
 import { LemmaComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@lemmacomputer/contracts";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@lemmacomputer/litellm-adapter";
-import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
+import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, toView, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
 import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@lemmacomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -497,6 +497,54 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   assert.deepEqual((await service.testGateway(alex, policy, workspace.id)).tools.map((tool) => tool.name), ["search_files"]);
   await service.stop(alex, policy, workspace.id);
   assert.equal(gateway.revocations, 1);
+});
+
+test("connector failure stays capability-scoped for every selected agent", () => {
+  const agentPolicies = [
+    ["claude-desktop", "claude-desktop-managed-v1"],
+    ["claude-cli", "claude-cli-managed-v1"],
+    ["codex-cli", "codex-cli-managed-v1"],
+    ["hermes-desktop", "hermes-desktop-managed-v1"],
+    ["hermes-claw", "hermes-claw-managed-v1"],
+  ].map(([catalogId, agentProfile]) => ({
+    catalogId,
+    agentId: `${catalogId}-agent`,
+    agentProfile,
+    displayName: catalogId,
+    clientVersion: "test",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_optional",
+    allowedTools: ["optional_tool"],
+    toolPolicies: {},
+  })) as NonNullable<RuntimePolicy["agents"]>;
+  const view = toView({
+    id: "00000000-0000-4000-8000-000000000001",
+    tenantId: alex.tenantId,
+    subjectId: alex.subjectId,
+    grantId: "personal",
+    state: "ready",
+    providerId: "sandbox-ready",
+    failureCode: null,
+    operationToken: null,
+    accessGeneration: 1,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+  }, {
+    models: "ready",
+    tools: "failed",
+    modelRoute: fakeModelRoute,
+  }, { ...policy, agents: agentPolicies });
+
+  assert.equal(view.state, "ready");
+  assert.equal(view.readiness.models, "ready");
+  assert.equal(view.readiness.tools, "failed");
+  assert.deepEqual(view.agents?.map((agent) => [agent.id, agent.state]), [
+    ["claude-desktop", "ready"],
+    ["claude-cli", "ready"],
+    ["codex-cli", "ready"],
+    ["hermes-desktop", "ready"],
+    ["hermes-claw", "ready"],
+  ]);
 });
 
 test("Control signs and self-verifies policy before issuing grants or calling the controller", async () => {

@@ -51,9 +51,6 @@ EXECUTION_MODE = os.environ.get("LEMMACOMPUTER_EXECUTION_MODE", "managed")
 CONFIGURED_TIME_ZONE = os.environ.get("LEMMACOMPUTER_TIME_ZONE", "").strip()
 HERMES_URL = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_URL", "")
 HERMES_KEY = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_KEY", "")
-CONNECTOR_RECOVERY_STATE_FILE = Path(
-    os.environ.get("LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE", "")
-)
 HOME = Path("/home/kasm-user")
 STATE_DIR = HOME / ".lemmacomputer-chat" / AGENT
 ATTACHMENT_ROOT = STATE_DIR / "attachments"
@@ -1311,15 +1308,7 @@ def vendor_events(
 async def health(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    connector_state = "not_applicable"
     if AGENT == "hermes-claw":
-        connector_state = "ready"
-        try:
-            recovery_state = json.loads(CONNECTOR_RECOVERY_STATE_FILE.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            recovery_state = {}
-        if isinstance(recovery_state, dict) and recovery_state.get("state") == "exhausted":
-            connector_state = "degraded"
         if http is None:
             return JSONResponse(
                 {"status": "unavailable", "code": "hermes_runtime_unavailable"},
@@ -1346,7 +1335,6 @@ async def health(request: Request) -> Response:
         "status": "ready",
         "agent": AGENT,
         "protocol": "lemmacomputer-chat-events/v1",
-        "connectors": connector_state,
     })
 
 

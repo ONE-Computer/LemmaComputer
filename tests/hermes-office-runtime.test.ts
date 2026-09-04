@@ -181,7 +181,7 @@ print(json.dumps({
   });
 });
 
-test("Hermes core readiness remains independent from optional connector health", async () => {
+test("selected agent runtime readiness never depends on optional connector health", async () => {
   const [patch, entrypoint, chatAdapter, workspaceDockerfile] = await Promise.all([
     source("docker/workspace/hermes-agent-lemmacomputer.patch"),
     source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
@@ -195,13 +195,12 @@ test("Hermes core readiness remains independent from optional connector health",
     .join("\n");
 
   assert.doesNotMatch(entrypoint, /LEMMACOMPUTER_REQUIRED_MCP_SERVER/);
+  assert.doesNotMatch(entrypoint, /LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE/);
   assert.doesNotMatch(additions, /_required_mcp_server|Required MCP|required_mcp_unavailable/);
 
   assert.match(chatAdapter, /f"\{HERMES_URL\}\/health\/detailed"/);
-  assert.match(chatAdapter, /connector_state = "degraded"/);
   assert.match(chatAdapter, /"hermes_runtime_unavailable"/);
-  assert.match(chatAdapter, /"connectors": connector_state/);
-  assert.doesNotMatch(chatAdapter, /"hermes_connectors_recovery_exhausted"|"hermes_connectors_unavailable"|required_mcp/);
+  assert.doesNotMatch(chatAdapter, /connector_state|CONNECTOR_RECOVERY_STATE_FILE|"connectors"|"hermes_connectors_recovery_exhausted"|"hermes_connectors_unavailable"|required_mcp/);
   assert.match(
     workspaceDockerfile,
     /hermes-gateway\.pid[\s\S]+127\.0\.0\.1:8652\/health[\s\S]+hermes-claw-chat\.pid[\s\S]+\/dev\/tcp\/127\.0\.0\.1\/8642/,
@@ -304,10 +303,9 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(entrypoint, /sync_hermes_skills \/home\/kasm-user\/\.hermes-desktop \\\n+  && install_agent_skill \/home\/kasm-user\/\.hermes-desktop/);
   assert.match(entrypoint, /HERMES_BUNDLED_SKILLS=\/opt\/lemmacomputer\/hermes-agent\/skills/);
   assert.match(entrypoint, /lemmacomputer-hermes-config/);
-  assert.match(entrypoint, /LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE="\/home\/kasm-user\/\.hermes\/\.lemmacomputer-connectors-recovery\.json"/);
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
   assert.match(profileConfig, /LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS/);
-  assert.match(chatAdapter, /recovery_state\.get\("state"\) == "exhausted"[\s\S]+connector_state = "degraded"/);
+  assert.doesNotMatch(chatAdapter, /CONNECTOR_RECOVERY_STATE_FILE|connector_state/);
   assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
     assert.match(profileConfig, new RegExp(`"${skill}"`));

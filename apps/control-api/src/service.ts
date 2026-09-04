@@ -279,7 +279,9 @@ export const toView = (
         : ["provisioning", "restarting"].includes(record.state)
           ? "starting" as const
           : ["ready", "open"].includes(record.state)
-            ? gateway?.models === "failed" || gateway?.tools === "failed" ? "degraded" as const : "ready" as const
+            // Connector health is reported independently by readiness.tools.
+            // It cannot downgrade the selected agent's core lifecycle state.
+            ? gateway?.models === "failed" ? "degraded" as const : "ready" as const
             : "selected" as const,
     })),
   } : {}),

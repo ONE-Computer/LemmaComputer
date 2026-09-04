@@ -764,9 +764,8 @@ if agent_enabled hermes-claw; then
       /opt/lemmacomputer/hermes-venv/bin/hermes gateway run \
       >>/run/lemmacomputer/hermes-gateway-bootstrap.log 2>&1 &
   printf '%s\n' "$!" > /run/lemmacomputer/hermes-gateway.pid
-  # Connector discovery is isolated per server and bounded to five seconds.
-  # Leave enough room for Hermes' own required-MCP retries without allowing a
-  # disconnected connector to terminate the workspace bootstrap.
+  # This probe covers only the Hermes runtime. Connector discovery is an
+  # optional capability and must never participate in workspace bootstrap.
   for _ in $(seq 1 600); do
     if curl -fsS "http://127.0.0.1:8652/health" >/dev/null 2>&1; then break; fi
     sleep 0.1
@@ -803,7 +802,6 @@ start_sdk_chat_adapter() {
       LEMMACOMPUTER_CHAT_PORT="$port" \
       LEMMACOMPUTER_HERMES_CHAT_URL="$hermes_url" \
       LEMMACOMPUTER_HERMES_CHAT_KEY="$hermes_key" \
-      LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE="/home/kasm-user/.hermes/.lemmacomputer-connectors-recovery.json" \
       /opt/lemmacomputer/agent-chat-venv/bin/python \
       /usr/local/libexec/lemmacomputer-agent-chat \
       >>"/run/lemmacomputer/${agent}-chat.log" 2>&1 &
