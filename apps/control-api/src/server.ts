@@ -1800,15 +1800,15 @@ export function createControlServer(
     const workspace = await store.getOwned(channelIdentity, workspaceId);
     if (!workspace) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
     let actor: SessionPrincipal;
-    let effective: EffectivePolicy | null;
+    let assigned: EffectivePolicy | null;
     if (security.identityPolicyStore) {
       const resolved = await security.identityPolicyStore.getPrincipal(channelIdentity.subjectId);
       if (!resolved || resolved.tenantId !== channelIdentity.tenantId) {
         throw new LemmaComputerError("CHANNEL_IDENTITY_NOT_FOUND", "The channel owner is unavailable", 403);
       }
       actor = resolved;
-      effective = await security.identityPolicyStore.getEffectivePolicy(resolved.userId);
-      if (!effective) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
+      assigned = await security.identityPolicyStore.getEffectivePolicy(resolved.userId);
+      if (!assigned) throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
     } else if (security.testIdentityMode) {
       actor = {
         userId: channelIdentity.subjectId,
@@ -1820,10 +1820,11 @@ export function createControlServer(
         roles: ["employee"],
         identity: channelIdentity,
       };
-      effective = null;
+      assigned = null;
     } else {
       throw new LemmaComputerError("POLICY_STORE_NOT_CONFIGURED", "Policy storage is unavailable", 503, true);
     }
+    const { effective } = await effectivePolicyFor(actor, assigned);
     return { ...await policyForGrant(actor, effective, workspace.grantId), workspace };
   };
   const requireAgentInstance = async (request: { headers: Record<string, unknown> }, actor: AgentBridgeIdentity) => {
