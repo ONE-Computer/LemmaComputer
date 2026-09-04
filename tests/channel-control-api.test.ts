@@ -14,12 +14,14 @@ import {
   MemoryWorkspaceStore,
   type EffectivePolicy,
   type IdentityPolicyStore,
+  type OrganizationWorkspacePolicyVersionRecord,
   type RoutingStore,
   type SessionPrincipal,
 } from "@lemmacomputer/workspace-store";
 import { MemoryArtifactStore } from "@lemmacomputer/artifact-store";
 import type { AgentChatClient } from "../apps/control-api/src/agent-chat.js";
 import type { ChannelBrokerManagementClient } from "../apps/control-api/src/channel-broker.js";
+import type { ProtectedWorkspacePolicyAdministrationBoundary } from "../apps/control-api/src/protected-workspace-policy.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
 
@@ -86,6 +88,18 @@ const policyStore = (policy: EffectivePolicy) => ({
   getPrincipal: async (userId: string) => userId === principal.userId ? principal : null,
   getEffectivePolicy: async (userId: string) => userId === principal.userId ? policy : null,
 }) as unknown as IdentityPolicyStore;
+
+const organizationPolicy: OrganizationWorkspacePolicyVersionRecord = {
+  tenantId: alpha.tenantId,
+  policyVersionId: "11111111-1111-4111-8111-111111111111",
+  version: 2,
+  previousPolicyVersionId: null,
+  documentHash: "b".repeat(64),
+  constraints: { agents: { allow: ["hermes-claw"], deny: [] } },
+  revisionNote: "Hermes only",
+  createdBy: "administrator",
+  createdAt: new Date("2026-09-04T00:00:00.000Z"),
+};
 
 class FakeBroker implements ChannelBrokerManagementClient {
   savedCredentialId = "";
@@ -279,6 +293,7 @@ test("credential APIs keep Telegram tokens write-only across create, rotate, lis
 class FakeAgentChat implements AgentChatClient {
   turns: ChannelTurnRequest[] = [];
   messages: Array<{ parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }> = [];
+  accesses: Array<{ policyVersionId: string; policyHash: string }> = [];
   approvalSummary: string | undefined;
   async health() {}
   async cancelTurn() {}
@@ -286,7 +301,8 @@ class FakeAgentChat implements AgentChatClient {
     if (artifactId !== generatedArtifact.artifactId) throw new Error("missing artifact");
     return generatedDeck;
   }
-  async *streamTurn(access: { catalogId: string }, sessionId: string, message: { parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }): AsyncIterable<AgentChatEvent> {
+  async *streamTurn(access: { catalogId: string; policyVersionId: string; policyHash: string }, sessionId: string, message: { parts: Array<{ type: string; text?: string; filename?: string; mediaType?: string; url?: string }> }): AsyncIterable<AgentChatEvent> {
+    this.accesses.push({ policyVersionId: access.policyVersionId, policyHash: access.policyHash });
     this.messages.push(message);
     this.turns.push({
       connectionId: "92b8576c-83f1-4c7b-bbcb-6d4d50fbab24",
@@ -570,6 +586,9 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     chatStore,
     artifactStore: new MemoryArtifactStore(),
     channelBrokerInternalToken: channelToken,
+    protectedWorkspacePolicy: {
+      currentOrganizationPolicy: async (tenantId) => tenantId === alpha.tenantId ? organizationPolicy : null,
+    } as unknown as ProtectedWorkspacePolicyAdministrationBoundary,
   });
   const payload = {
     connectionId,
@@ -604,6 +623,10 @@ test("internal channel turns re-check connection, sender, workspace, route, and 
     });
     assert.equal(accepted.statusCode, 200);
     assert.match(accepted.headers["content-type"] ?? "", /^application\/x-ndjson/);
+    assert.deepEqual(chat.accesses[0], {
+      policyVersionId: organizationPolicy.policyVersionId,
+      policyHash: organizationPolicy.documentHash,
+    });
     assert.deepEqual(chat.messages[0]?.parts, [
       { type: "text", text: "hello" },
       {
