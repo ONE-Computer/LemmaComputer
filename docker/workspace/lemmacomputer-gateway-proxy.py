@@ -48,7 +48,11 @@ AGENT_INSTANCE_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89a
 MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 LOCAL_CONNECTOR_TOOLS = {"list-approved-sharepoint-sites"}
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
-MCP_DISCOVERY_TIMEOUT_SECONDS = 5
+# Hosted MCP providers can need several seconds to resolve a user-scoped OAuth
+# credential before returning their tool list. Keep this timeout bounded so one
+# connector cannot hold discovery open indefinitely, while allowing the normal
+# GitHub connector path to complete.
+MCP_DISCOVERY_TIMEOUT_SECONDS = int(os.environ.get("LEMMACOMPUTER_MCP_DISCOVERY_TIMEOUT_SECONDS", "10"))
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 MAX_MCP_TOOL_BODY_BYTES = 6 * 1024 * 1024
 MAX_MCP_TOOL_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -84,7 +88,8 @@ if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CRE
         or not ALLOWED_SERVICE_CLASSES
         or any(value not in {"lite", "balanced", "pro"} for value in ALLOWED_SERVICE_CLASSES)
         or DEFAULT_SERVICE_CLASS not in ALLOWED_SERVICE_CLASSES
-        or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
+        or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}
+        or MCP_DISCOVERY_TIMEOUT_SECONDS < 1 or MCP_DISCOVERY_TIMEOUT_SECONDS > 30):
     raise SystemExit("invalid gateway broker configuration")
 
 

@@ -493,7 +493,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
         return;
       }
       if (serverName === "lemmacomputer_slow") {
-        await new Promise((resolve) => setTimeout(resolve, 5_500));
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
         response.end(JSON.stringify({ tools: [] }));
         return;
       }
@@ -528,6 +528,7 @@ test("the workspace broker isolates failed and slow connector discovery and repr
       LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: bridgeGrant(Math.floor(Date.now() / 1_000) + 900),
       LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
+      LEMMACOMPUTER_MCP_DISCOVERY_TIMEOUT_SECONDS: "1",
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
