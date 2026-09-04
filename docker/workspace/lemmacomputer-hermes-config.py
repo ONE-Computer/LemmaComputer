@@ -160,7 +160,11 @@ def main() -> None:
             "lemmacomputer_connectors": {
                 "command": "/usr/local/libexec/lemmacomputer-connectors-stdio",
                 "args": [],
-                "connect_timeout": 5,
+                # The stdio process starts immediately, but its first tool-list
+                # response can include an OAuth-backed provider discovery. Keep
+                # Hermes' MCP budget above the broker's bounded 10-second
+                # provider timeout so a healthy, slower connector is retained.
+                "connect_timeout": 15,
                 "env": {
                     "LEMMACOMPUTER_CONNECTORS_BROKER": f"http://127.0.0.1:{broker_port}",
                     "LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE": str(
