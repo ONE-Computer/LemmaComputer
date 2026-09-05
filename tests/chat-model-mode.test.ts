@@ -474,6 +474,19 @@ test("organization routing keeps Team as cost attribution only", async () => {
     "execution stays bound to the tenant-scoped LiteLLM access group",
   );
   assert.equal(recordedTeamId, "cost-team-1", "the Team remains on the cost decision record");
+  const nearFull = await service.decide({
+    schemaVersion: 1, tenantId: "acme", subjectId: "alex", workspaceId: "workspace-1", agentId: "hermes-cli", taskBinding,
+    requestId: "request-near-context-limit", requestedServiceClass: "lite", boundedSignals: [],
+    estimatedInputTokens: 250000, requiredCapabilities: { contextTokens: 250000, outputTokens: 16000 },
+    expectedUsage: [{ unit: "input_uncached_token", quantity: "250000" }, { unit: "output_token", quantity: "16000" }],
+  });
+  assert.equal(nearFull.executedOutputTokenLimit, 6000, "reserve output inside the context window");
+  await assert.rejects(service.decide({
+    schemaVersion: 1, tenantId: "acme", subjectId: "alex", workspaceId: "workspace-1", agentId: "hermes-cli", taskBinding,
+    requestId: "request-full-context", requestedServiceClass: "lite", boundedSignals: [],
+    estimatedInputTokens: 256000, requiredCapabilities: { contextTokens: 256000, outputTokens: 16000 },
+    expectedUsage: [{ unit: "input_uncached_token", quantity: "256000" }, { unit: "output_token", quantity: "16000" }],
+  }));
 });
 
 test("chat tier options expose only policy-allowed and route-ready explicit tiers", async () => {

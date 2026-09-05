@@ -9,6 +9,20 @@ import {
   saveRoutingReviewSchema,
 } from "../apps/control-api/src/routing.js";
 import type { RoutingStore } from "@lemmacomputer/workspace-store";
+import { MemoryProviderSettingsStore } from "@lemmacomputer/workspace-store";
+
+test("deployment limits override stale route drafts within the authenticated tenant", async () => {
+  const providers = new MemoryProviderSettingsStore();
+  await providers.saveProviderSetting({ tenantId: "tenant-a", provider: "openai", modelIds: ["model"], configuration: { modelLimits: { concrete: { contextTokens: 1000000, outputTokens: 32768 } } }, state: "active", credentialFingerprint: null, lastTestedAt: null, lastErrorCode: null, updatedBy: "admin" });
+  let captured: Parameters<RoutingStore["createMappingVersion"]>[0] | undefined;
+  const store = { createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => { captured = input; return { deployments: [] }; } } as unknown as RoutingStore;
+  const service = new RoutingAdministrationService(store, undefined, providers);
+  const input = { revisionNote: "Publish model capacity", deployments: [{ serviceClass: "balanced" as const, provider: "openai" as const, providerModel: "model", providerDeployment: "concrete", capabilities: { contextTokens: 32000, outputTokens: 8000, tools: true, vision: false, streaming: true, residency: [] }, approved: true, evaluationPassed: true }] };
+  await service.createMapping({ tenantId: "tenant-a", userId: "admin" }, input);
+  assert.equal(captured?.deployments[0]?.capabilities.contextTokens, 1000000);
+  await service.createMapping({ tenantId: "tenant-b", userId: "admin" }, input);
+  assert.equal(captured?.deployments[0]?.capabilities.contextTokens, 32000);
+});
 const uuid = {
   team: "11111111-1111-4111-8111-111111111111",
   mapping: "22222222-2222-4222-8222-222222222222",

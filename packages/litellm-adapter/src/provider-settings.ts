@@ -39,6 +39,7 @@ export type ManagedProviderModelCapabilities = {
   streaming: boolean;
 };
 export type ManagedProviderDeploymentDescriptor = {
+  modelLimits?: { contextTokens: number; outputTokens: number };
   id: string;
   provider: ManagedProviderName;
   providerAccountId: string;
@@ -311,6 +312,7 @@ export const managedProviderDeploymentDescriptors = (
       aliases: [...new Set([template.alias, ...compatibilityAliases])],
       providerModel: template.model.model,
       providerDeployment: accessGroup,
+      ...(configuration.modelLimits?.[accessGroup] ? { modelLimits: configuration.modelLimits[accessGroup] } : {}),
       region: template.model.bedrock?.region ?? null,
       providerServiceTier: "standard",
       accessGroup,

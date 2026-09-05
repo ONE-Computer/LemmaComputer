@@ -45,7 +45,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
     "disposable-open",
     bundle,
   ], {
-    env: { ...process.env, PYTHONPATH: modules },
+    env: { ...process.env, PYTHONPATH: modules, LEMMACOMPUTER_MODEL_LIMITS: JSON.stringify({ balanced: { contextTokens: 1000000, outputTokens: 32768 }, pro: { contextTokens: 2000000, outputTokens: 65536 } }) },
   });
 
   await configure();
@@ -53,6 +53,12 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   assert.equal(first.model.default, "lemmacomputer-balanced");
   assert.equal(first.model.provider, "custom");
   assert.equal(first.mcp_servers.lemmacomputer_connectors.connect_timeout, 15);
+  assert.equal(first.model.context_length, undefined, "do not pin all aliases to the default tier");
+  assert.equal(first.model.max_tokens, 32768);
+  assert.equal(first.custom_providers[0].models["lemmacomputer-balanced"].context_length, 1000000);
+  assert.equal(first.custom_providers[0].models["lemmacomputer-pro"].context_length, 2000000);
+  assert.deepEqual(first.compression, { enabled: true });
+  assert.deepEqual(first.auxiliary.compression, { provider: "main" });
   assert.deepEqual(first.mcp_servers.lemmacomputer_connectors.env, {
     LEMMACOMPUTER_CONNECTORS_BROKER: "http://127.0.0.1:4314",
     LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS: "60",

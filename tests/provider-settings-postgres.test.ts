@@ -66,7 +66,7 @@ test("PostgreSQL provider settings persist only approved emissions regions", {
       tenantId,
       provider: "openai",
       modelIds: ["deployment-openai"],
-      configuration: { modelIds: ["gpt-5.6-terra"], emissionsRegion: "sg" },
+      configuration: { modelIds: ["gpt-5.6-terra"], emissionsRegion: "sg", modelLimits: { "deployment-openai": { contextTokens: 1000000, outputTokens: 32768 } } },
       state: "active",
       credentialFingerprint: "fp_providerregiontest",
       lastTestedAt: new Date(),
@@ -76,9 +76,12 @@ test("PostgreSQL provider settings persist only approved emissions regions", {
     assert.deepEqual(saved.configuration, {
       modelIds: ["gpt-5.6-terra"],
       emissionsRegion: "sg",
+      modelLimits: { "deployment-openai": { contextTokens: 1000000, outputTokens: 32768 } },
     });
     assert.deepEqual((await store.getProviderSetting(tenantId, "openai"))?.configuration,
       saved.configuration);
+    await assert.rejects(pool.query("UPDATE provider_settings SET configuration=jsonb_set(configuration,'{modelLimits}', $2::jsonb) WHERE tenant_id=$1", [tenantId, JSON.stringify({ bad: { contextTokens: 2048, outputTokens: 4096 } })]), /provider_settings_model_limits_check/);
+    await assert.rejects(pool.query("UPDATE provider_settings SET configuration=jsonb_set(configuration,'{modelLimits}', $2::jsonb) WHERE tenant_id=$1", [tenantId, JSON.stringify({ bad: { contextTokens: 4096, outputTokens: 2048, apiKey: "not-allowed" } })]), /provider_settings_model_limits_check/);
 
     await assert.rejects(
       pool.query(

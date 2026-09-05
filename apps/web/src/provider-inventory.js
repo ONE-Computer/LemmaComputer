@@ -57,6 +57,7 @@ export const configuredProviderDeployments = (providers = []) => providers
         region,
         providerServiceTier,
         displayName,
+        ...(deployment.modelLimits ? { modelLimits: deployment.modelLimits } : {}),
         ...(declaredCapabilities ? { modelCapabilities: declaredCapabilities } : {}),
       };
       return normalized.provider && normalized.providerAccountId && normalized.providerModel && normalized.providerDeployment ? normalized : null;

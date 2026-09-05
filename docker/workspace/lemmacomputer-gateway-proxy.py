@@ -35,6 +35,15 @@ ALLOWED_SERVICE_CLASSES = tuple(dict.fromkeys(
     ).split(",") if value
 ))
 CONTROL = urlsplit(os.environ["LEMMACOMPUTER_CONTROL_UPSTREAM"])
+
+
+def model_limit_metadata(service_class):
+    limits = json.loads(os.environ.get("LEMMACOMPUTER_MODEL_LIMITS") or "{}").get(service_class)
+    if not limits:
+        return {}
+    return {"context_length": limits["contextTokens"], "max_output_tokens": limits["outputTokens"]}
+
+
 AGENT_BRIDGE_TOKEN = os.environ["LEMMACOMPUTER_AGENT_BRIDGE_TOKEN"]
 LISTEN_PORT = int(os.environ.get("LEMMACOMPUTER_GATEWAY_LISTEN_PORT", "4312"))
 INFER_SINGLE_ACTIVE_AGENT_INSTANCE = os.environ.get("LEMMACOMPUTER_INFER_SINGLE_ACTIVE_AGENT_INSTANCE", "0") == "1"
@@ -852,7 +861,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(200, {
                 "object": "list",
                 "data": [
-                    {"id": model, "object": "model", "owned_by": "organization"}
+                    {"id": model, "object": "model", "owned_by": "organization", **model_limit_metadata(service_class)}
                     for model, service_class in NATIVE_MODEL_MODES.items()
                     if service_class in ALLOWED_SERVICE_CLASSES
                 ],
@@ -865,7 +874,7 @@ class Handler(BaseHTTPRequestHandler):
             if service_class not in ALLOWED_SERVICE_CLASSES:
                 self.send_json(404, {"error": "model mode is not assigned to this workspace"})
                 return
-            self.send_json(200, {"id": model, "object": "model", "owned_by": "organization"})
+            self.send_json(200, {"id": model, "object": "model", "owned_by": "organization", **model_limit_metadata(service_class)})
             return
         is_tool_call = path == "/mcp-rest/tools/call"
         operation_prefix = "/lemmacomputer/operations/"

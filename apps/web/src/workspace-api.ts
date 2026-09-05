@@ -398,6 +398,7 @@ export const adminApi = {
   routingDecision: (decisionId: string) => request(`/api/v1/admin/routing/decisions/${encodeURIComponent(decisionId)}`, { cache: "no-store" }),
   latestRoutingMapping: () => request("/api/v1/admin/routing/mappings/latest", { cache: "no-store" }),
   createRoutingMapping: (input: unknown) => request("/api/v1/admin/routing/mappings", mutation("POST", input)),
+  saveModelLimits: (provider: string, input: unknown) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/model-limits`, mutation("PUT", input)),
   rateCards: () => request("/api/v1/admin/ai-usage/rate-cards", { cache: "no-store" }),
   createRateCard: (input: unknown) => request("/api/v1/admin/ai-usage/rate-cards", mutation("POST", input)),
   saveTeamBudget: (teamId: string, input: unknown) => request(`/api/v1/admin/teams/${encodeURIComponent(teamId)}/budget`, mutation("PUT", input)),

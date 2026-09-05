@@ -706,7 +706,7 @@ const satisfies = (
   (!request.requiredCapabilities.tools || deployment.capabilities.tools) &&
   (!request.requiredCapabilities.streaming ||
     deployment.capabilities.streaming) &&
-  (request.requiredCapabilities.contextTokens ?? 0) <=
+  Math.max(request.estimatedInputTokens, request.requiredCapabilities.contextTokens ?? 0) + Math.max(1, request.requiredCapabilities.outputTokens ?? 0) <=
     deployment.capabilities.contextTokens &&
   (request.requiredCapabilities.outputTokens ?? 0) <=
     deployment.capabilities.outputTokens &&

@@ -12,6 +12,7 @@ import {
 } from "@lemmacomputer/model-router";
 import type {
   RoutingStore,
+  ProviderSettingsStore,
   TeamBudgetStore,
   TeamStore,
   UsageAmount,
@@ -258,6 +259,7 @@ export class RoutingAdministrationService {
     // Kept as an optional compatibility argument while callers roll forward;
     // Teams no longer participate in organization route activation.
     _teams?: Pick<TeamStore, "listTeams">,
+    private readonly providers?: Pick<ProviderSettingsStore, "listProviderSettings">,
   ) {}
   latestMapping(actor: Actor) {
     return this.store.latestMappingVersion(actor.tenantId);
@@ -266,6 +268,10 @@ export class RoutingAdministrationService {
     actor: Actor,
     input: z.input<typeof createRoutingMappingSchema>,
   ) {
+    const settings = await this.providers?.listProviderSettings(actor.tenantId) ?? [];
+    const limitsFor = (deployment: (typeof input.deployments)[number]) => settings
+      .find((setting) => setting.provider === deployment.provider && setting.state === "active")
+      ?.configuration.modelLimits?.[deployment.providerDeployment];
     const mapping = await this.store.createMappingVersion({
       tenantId: actor.tenantId,
       revisionNote: input.revisionNote,
@@ -274,6 +280,7 @@ export class RoutingAdministrationService {
         ...deployment,
         capabilities: {
           ...deployment.capabilities,
+          ...limitsFor(deployment),
           reasoning: qualifiedReasoningRouteCapabilities({
             provider: deployment.provider,
             providerModel: deployment.providerModel,
@@ -504,6 +511,7 @@ const outputTokenLimit = (
   requestedServiceClass: z.infer<
     typeof internalRoutingDecisionSchema
   >["requestedServiceClass"],
+  inputTokens: number,
 ) => {
   const identityClasses = new Set(policy.identity.allowedServiceClasses);
   const identityDeployments = new Set(policy.identity.allowedDeploymentIds);
@@ -513,6 +521,7 @@ const outputTokenLimit = (
   const limits = policy.deployments
     .filter((deployment) =>
       (!fixedOnly || deployment.id === policy.fixedDeploymentId)
+      && (requestedServiceClass === "auto" || deployment.serviceClass === requestedServiceClass)
       && identityClasses.has(deployment.serviceClass)
       && teamClasses.has(deployment.serviceClass)
       && identityDeployments.has(deployment.id)
@@ -525,7 +534,7 @@ const outputTokenLimit = (
       && deployment.rateCardId !== null
       && deployment.expectedCost !== null
     )
-    .map((deployment) => deployment.capabilities.outputTokens);
+    .map((deployment) => Math.max(1, Math.min(deployment.capabilities.outputTokens, deployment.capabilities.contextTokens - inputTokens)));
   return limits.length ? Math.max(...limits) : null;
 };
 
@@ -533,7 +542,7 @@ const constrainOutputToPolicy = (
   input: z.infer<typeof internalRoutingDecisionSchema>,
   policy: ModelRoutingPolicy,
 ) => {
-  const limit = outputTokenLimit(policy, input.requestedServiceClass);
+  const limit = outputTokenLimit(policy, input.requestedServiceClass, Math.max(input.estimatedInputTokens, input.requiredCapabilities.contextTokens ?? 0));
   const requested = input.requiredCapabilities.outputTokens;
   if (limit === null || requested === undefined || requested <= limit)
     return { input, outputTokenLimit: limit };
@@ -696,6 +705,7 @@ export class RoutingExecutionService {
     status: "created" | "duplicate",
     requestedReasoningEffort?: ProductReasoningEffort,
     resolvedReasoningEffort?: ResolvedReasoningEffort,
+    inputTokens = 0,
   ) {
     const decisionId = String(prior.id);
     const tenantId = String(prior.tenant_id);
@@ -703,6 +713,7 @@ export class RoutingExecutionService {
     const deploymentId = String(prior.executed_deployment_id);
     const capabilities = prior.executed_capabilities as {
       outputTokens?: unknown;
+      contextTokens?: unknown;
       reasoning?: { effortLevels?: unknown } | null;
     } | null;
     if (
@@ -726,9 +737,7 @@ export class RoutingExecutionService {
       executedDeploymentId: deploymentId,
       executedProviderDeployment: String(prior.executed_provider_deployment),
       executedModelGroup: String(prior.executed_provider_deployment),
-      executedOutputTokenLimit: Number(
-        capabilities?.outputTokens,
-      ),
+      executedOutputTokenLimit: Math.min(Number(capabilities?.outputTokens), Number(capabilities?.contextTokens ?? Infinity) - inputTokens),
       binding: this.bindings.issue({
         tenantId,
         requestId,
@@ -769,6 +778,7 @@ export class RoutingExecutionService {
       "duplicate",
       task.requestedReasoningEffort,
       resolvedReasoningEffort,
+      Math.max(input.estimatedInputTokens, input.requiredCapabilities.contextTokens ?? 0),
     );
     const reasoningConstrainedInput = resolvedReasoningEffort
       ? {
@@ -852,8 +862,10 @@ export class RoutingExecutionService {
         "duplicate",
         task.requestedReasoningEffort,
         resolvedReasoningEffort,
+        Math.max(input.estimatedInputTokens, input.requiredCapabilities.contextTokens ?? 0),
       );
     }
+    const executedCapabilities = resolved.policy.deployments.find((deployment) => deployment.id === decision.executedDeployment.id)!.capabilities;
     return {
       schemaVersion: 1,
       status: "created",
@@ -866,9 +878,10 @@ export class RoutingExecutionService {
       executedDeploymentId: decision.executedDeployment.id,
       executedProviderDeployment: decision.executedDeployment.deployment,
       executedModelGroup: decision.executedDeployment.deployment,
-      executedOutputTokenLimit: resolved.policy.deployments.find(
-        (deployment) => deployment.id === decision.executedDeployment.id,
-      )?.capabilities.outputTokens,
+      executedOutputTokenLimit: Math.min(
+        executedCapabilities.outputTokens,
+        executedCapabilities.contextTokens - Math.max(input.estimatedInputTokens, input.requiredCapabilities.contextTokens ?? 0),
+      ),
       binding: this.bindings.issue({
         tenantId: input.tenantId,
         requestId: input.requestId,

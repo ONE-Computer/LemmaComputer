@@ -135,6 +135,52 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
   }
 }
 
+test("model limits are tenant scoped, validated, key-free, and survive credential rotation", async () => {
+  const store = new MemoryProviderSettingsStore();
+  const gateway = new FakeProviderAdministration();
+  const service = new ProviderSettingsService(store, gateway);
+  await service.configure(administrator, { provider: "openai", apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-terra", "gpt-5.6-sol"] });
+  const original = (await service.list(administrator)).providers.find((item) => item.provider === "openai")!;
+  const deployment = original.deployments[0]!;
+  const limits = { contextTokens: 1_000_000, outputTokens: 32_768 };
+  const updated = await service.saveModelLimits(administrator, "openai", deployment.id, limits);
+  assert.deepEqual(updated.deployments[0]?.modelLimits, limits);
+  assert.equal(updated.deployments[1]?.modelLimits, undefined);
+  assert.equal(gateway.configured.length, 1, "limit edits do not touch provider credentials");
+  let published: Parameters<RoutingStore["createMappingVersion"]>[0] | undefined;
+  const routingStore = {
+    latestMappingVersion: async () => ({ id: "11111111-1111-4111-8111-111111111111", deployments: [{ ...deployment, serviceClass: "balanced", capabilities: { contextTokens: 32000, outputTokens: 8000, tools: true, vision: true, streaming: true, residency: [] }, approved: true, evaluationPassed: true }] }),
+    resolveEffectivePolicy: async () => ({ policy: { billingCurrency: "SGD" } }),
+    createMappingVersion: async (input: Parameters<RoutingStore["createMappingVersion"]>[0]) => { published = input; return { id: "22222222-2222-4222-8222-222222222222", deployments: [] }; },
+  } as unknown as RoutingStore;
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    customerProductAuthentication: authentication(administrator),
+    agentBridgeSecret: "model-limits-test-agent-bridge-secret-at-least-32-characters",
+    providerSettingsStore: store,
+    providerAdministration: gateway,
+    routingStore,
+  });
+  try {
+    const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=admin" };
+    const response = await app.inject({ method: "PUT", url: "/v1/admin/provider-settings/openai/model-limits", headers, payload: { deploymentId: deployment.id, limits } });
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().provider.deployments[0].modelLimits, limits);
+    assert.equal(published?.deployments[0]?.capabilities.contextTokens, 1000000);
+    assert.equal(response.json().activationError, undefined);
+    assert.equal(response.body.includes(rawOpenAiKey), false);
+    const invalid = await app.inject({ method: "PUT", url: "/v1/admin/provider-settings/openai/model-limits", headers, payload: { deploymentId: deployment.id, limits: { contextTokens: 2048, outputTokens: 4096 } } });
+    assert.equal(invalid.statusCode, 400);
+    const missing = await app.inject({ method: "PUT", url: "/v1/admin/provider-settings/openai/model-limits", headers, payload: { deploymentId: "another-tenant-model", limits } });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    await app.close();
+  }
+  await assert.rejects(service.saveModelLimits(administrator, "openai", deployment.id, { contextTokens: 1000, outputTokens: 2000 }));
+  await assert.rejects(service.saveModelLimits({ ...administrator, tenantId: "other" }, "openai", deployment.id, limits));
+  await service.configure(administrator, { provider: "openai", apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-terra", "gpt-5.6-sol"] });
+  assert.deepEqual((await service.list(administrator)).providers.find((item) => item.provider === "openai")?.deployments[0]?.modelLimits, limits);
+});
+
 type Deferred = {
   promise: Promise<void>;
   resolve: () => void;
@@ -861,6 +907,8 @@ test("provider settings do not expose an administrator endpoint to an employee s
     assert.equal(response.statusCode, 403);
 
     assert.equal(response.json().error.code, "FORBIDDEN");
+    const denied = await app.inject({ method: "PUT", url: "/v1/admin/provider-settings/openai/model-limits", headers: { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=employee" }, payload: { deploymentId: "any", limits: { contextTokens: 1000000, outputTokens: 32768 } } });
+    assert.equal(denied.statusCode, 403);
   } finally {
     await app.close();
   }

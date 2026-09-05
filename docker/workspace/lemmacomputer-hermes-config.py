@@ -177,6 +177,23 @@ def main() -> None:
         "skills": skills_config,
         "stt": {"enabled": False},
     }
+    limits = json.loads(os.environ.get("LEMMACOMPUTER_MODEL_LIMITS", "{}"))
+    if limits:
+        # Per-alias metadata prevents a Pro context window leaking into a
+        # Balanced Web Chat turn. Do not set a global model.context_length.
+        document["custom_providers"] = [{
+            "name": "lemmacomputer",
+            "base_url": document["model"]["base_url"],
+            "models": {
+                f"lemmacomputer-{tier}": {"context_length": value["contextTokens"]}
+                for tier, value in limits.items()
+            },
+        }]
+        document["compression"] = {"enabled": True}
+        document["auxiliary"] = {"compression": {"provider": "main"}}
+        # Hermes' output setting is global: use the safe shared ceiling;
+        # routing remains authoritative for the selected deployment.
+        document["model"]["max_tokens"] = min(value["outputTokens"] for value in limits.values())
     if execution_mode == "managed":
         managed_office_tools: set[str] = set()
         for toolset in managed_office_toolsets:
