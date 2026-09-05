@@ -48,7 +48,7 @@ test("real Sites gateway serves opaque-sandbox modules, CSS and JSON and revokes
     const zip = createDeterministicSiteZip(new Map([
       ["index.html", Buffer.from('<!doctype html><html><head><link rel="stylesheet" crossorigin href="./assets/app.css"><script type="module" crossorigin src="./assets/app.js"></script></head><body><h1>Loading dashboard</h1><button>Filter</button><p id="result"></p></body></html>')],
       ["assets/app.css", Buffer.from("h1{color:rgb(12, 34, 56)}")],
-      ["assets/app.js", Buffer.from('import { title } from "./title.js"; const data=await fetch("./data/snapshot.json").then(r=>r.json()); document.querySelector("h1").textContent=title; document.querySelector("button").onclick=()=>document.querySelector("#result").textContent=data.label;')],
+      ["assets/app.js", Buffer.from('import { title } from "./title.js"; const data=await fetch("./data/snapshot.json").then(r=>r.json()); await fetch("./data/snapshot.json",{credentials:"include"}).then(r=>r.json()); document.querySelector("h1").textContent=title; document.querySelector("button").onclick=()=>document.querySelector("#result").textContent=data.label;')],
       ["assets/title.js", Buffer.from('export const title="Interactive dashboard";')],
       ["data/snapshot.json", Buffer.from('{"label":"C&P snapshot loaded"}')],
     ]));
@@ -74,7 +74,7 @@ test("real Sites gateway serves opaque-sandbox modules, CSS and JSON and revokes
       try { await fetch(`${url}/api/v1/sites`); return "allowed"; } catch { return "blocked"; }
     }, origin)).toBe("blocked");
     const assetRequests = requests.filter((value) => /\.(css|js|json)$/.test(value.path));
-    expect(assetRequests).toHaveLength(4);
+    expect(assetRequests).toHaveLength(5);
     expect(assetRequests.every((value) => value.status === 200 && !value.cookie)).toBe(true);
     const entryUrl = await page.locator("iframe").getAttribute("src");
     const resource = entryUrl!.replace(/index.html$/, "data/snapshot.json");

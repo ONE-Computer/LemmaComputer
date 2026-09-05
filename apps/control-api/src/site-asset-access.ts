@@ -58,4 +58,8 @@ export const siteAssetHeaders = (resourceBase: string) => ({
   "x-content-type-options": "nosniff",
   // The sandbox is opaque. Access is the version-scoped grant, not cookies.
   "access-control-allow-origin": "null",
+  // Some existing bundles explicitly use credentials:include. CORS may allow
+  // that request mode, but the handler ignores cookies and still requires the
+  // signed, scoped grant plus a live session/ACL check.
+  "access-control-allow-credentials": "true",
 });

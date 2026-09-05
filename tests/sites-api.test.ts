@@ -61,7 +61,7 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
     assert.match(asset.headers["content-security-policy"] ?? "", /navigate-to 'none'/);
     assert.match(asset.body, /Hello world/);
     assert.equal(asset.headers["access-control-allow-origin"], "null");
-    assert.equal(asset.headers["access-control-allow-credentials"], undefined);
+    assert.equal(asset.headers["access-control-allow-credentials"], "true");
     assert.equal((await app.inject({ method: "GET", url: assetUrl })).statusCode, 401, "proxy trust is still required");
     assert.equal((await app.inject({ method: "POST", url: assetUrl, headers: browserHeaders })).statusCode, 404);
     assert.equal((await app.inject({ method: "GET", url: assetUrl.replace("/versions/1/", "/versions/2/"), headers: browserHeaders })).statusCode, 404);

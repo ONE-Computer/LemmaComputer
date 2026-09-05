@@ -24,7 +24,9 @@ required. Shared Control replicas use the existing Web proxy secret with a
 domain-separated signature.
 
 The document CSP permits resources only from this exact bundle URL subtree.
-Opaque-origin CORS does not enable cookie credentials. Responses are private,
+Opaque-origin CORS accepts ordinary fetches and explicit `credentials:include`
+requests from existing bundles, but cookies provide no authority on this route.
+Responses are private,
 `no-store`, `nosniff` and `no-referrer`; the frame cannot read the parent or call
 general Control APIs. The stable URL remains the only link intended for sharing.
 

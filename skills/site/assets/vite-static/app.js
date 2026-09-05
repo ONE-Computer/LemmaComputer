@@ -1,5 +1,5 @@
 async function renderDashboard() {
-  const response = await fetch("./data/snapshot.json", { credentials: "include" });
+  const response = await fetch("./data/snapshot.json");
   const snapshot = await response.json();
   document.querySelector("#metrics").replaceChildren(...snapshot.metrics.map((metric) => {
     const card = document.createElement("article");

@@ -24,7 +24,7 @@ test("sandbox CSP restricts network resources to one bundle without cookies or s
   const base = "https://lemma.example/api/v1/sites/viewer/site/versions/1/access/grant/assets/";
   const headers = siteAssetHeaders(base);
   assert.equal(headers["access-control-allow-origin"], "null");
-  assert.ok(!("access-control-allow-credentials" in headers));
+  assert.equal(headers["access-control-allow-credentials"], "true");
   assert.ok(headers["content-security-policy"].includes(`connect-src ${base};`));
   assert.ok(!headers["content-security-policy"].includes("allow-same-origin"));
   assert.equal(headers["cache-control"], "private, no-store");
