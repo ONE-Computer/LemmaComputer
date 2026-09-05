@@ -94,6 +94,12 @@ test("Sites shares view-only access with owner controls and one scroll container
     await expect(dialog).toContainText("Only you, the owner");
     await expect(dialog.getByRole("combobox")).toHaveCount(1);
     await expect(dialog).not.toContainText(/\bAdmin\b|\bMember\b|Can edit/);
+    const inviteInput = dialog.getByPlaceholder("person@example.com");
+    const inviteButton = dialog.getByRole("button", { name: "Create invite link", exact: true });
+    const inviteInputBounds = await inviteInput.boundingBox();
+    const inviteButtonBounds = await inviteButton.boundingBox();
+    if (viewport.width > 720) expect(inviteButtonBounds!.y).toBe(inviteInputBounds!.y);
+    else expect(inviteButtonBounds!.y).toBeGreaterThan(inviteInputBounds!.y);
     expect(await dialog.evaluate((element) => [element, ...element.querySelectorAll("*")].filter((node) => {
       const style = getComputedStyle(node);
       return /auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight;
