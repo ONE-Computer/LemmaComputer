@@ -174,15 +174,16 @@ test("managed provider configuration isolates tenants, validates candidates, and
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "anthropic/claude-opus-4-8").length, 2);
     assert.equal(stableModels.filter((document) => document.litellm_params.model === "zai/glm-5.2").length, 2);
     for (const document of stableModels) {
-      assert.ok(["lemmacomputer-assistant", "lemmacomputer-openai", "claude-opus-4-6", "lemmacomputer-claude", "claude-sonnet-4-6", "lemmacomputer-glm", "claude-sonnet-4-5"].includes(document.model_name));
+      assert.match(document.model_name, /^ocp-[A-Za-z0-9_-]+-/);
       assert.equal("api_key" in document.litellm_params, false);
       assert.match(String(document.litellm_params.litellm_credential_name), /^lemmacomputer-provider-/);
       const groups = document.model_info.access_groups as unknown[];
       assert.equal(groups.length, 1);
       assert.match(String(groups[0]), /^ocp-[A-Za-z0-9_-]+-/);
+      assert.equal(document.model_name, groups[0]);
       assert.equal(document.model_info.lemmacomputer_deployment_id, groups[0]);
     }
-    const assistantRoutes = stableModels.filter((document) => document.model_name === "lemmacomputer-assistant");
+    const assistantRoutes = stableModels.filter((document) => String(document.model_name).endsWith("-lemmacomputer-assistant"));
     assert.equal(assistantRoutes.length, 2);
     assert.notEqual(assistantRoutes[0]!.model_info.id, assistantRoutes[1]!.model_info.id);
     assert.notEqual(
@@ -212,9 +213,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
         (grant.body.models as unknown[])[0],
       );
     }
-    const stableProbes = requests.filter((request) => (
-      ["lemmacomputer-assistant", "lemmacomputer-claude", "lemmacomputer-glm"].includes(String(request.body.model))
-    ));
+    const stableProbes = requests.filter((request) => /^ocp-[A-Za-z0-9_-]+-lemmacomputer-(?:assistant|claude|glm)$/.test(String(request.body.model)));
     assert.equal(stableProbes.length, 4);
     for (const probe of stableProbes) assert.match(probe.authorization, /^Bearer sk-ocp-/);
     const openAiProbes = requests.filter((request) => request.url === "/responses");
@@ -466,7 +465,7 @@ test("Bedrock managed provider routes are tenant-scoped, write-only, and reject 
     const stableModel = requests
       .filter((request) => request.url === "/model/new")
       .map(modelDocument)
-      .find((document) => document.model_name === "lemmacomputer-bedrock" && (document.model_info.access_groups as unknown[]).length > 0);
+      .find((document) => String(document.model_name).endsWith("-lemmacomputer-bedrock") && (document.model_info.access_groups as unknown[]).length > 0);
     assert.ok(stableModel);
     assert.equal(stableModel.litellm_params.model, "bedrock/converse/global.anthropic.claude-sonnet-4-5-20250929-v1:0");
     assert.equal(stableModel.litellm_params.aws_region_name, selection.region);

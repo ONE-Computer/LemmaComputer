@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createChatSessionSchema, sendChatTurnSchema } from "@lemmacomputer/contracts";
+import { tenantManagedModelAccessGroup } from "@lemmacomputer/litellm-adapter";
 import {
   qualifiedAgentReasoningAdapter,
   RoutingDecisionBindingAuthority,
@@ -342,11 +343,15 @@ test("organization routing keeps Team as cost attribution only", async () => {
     taskId: "task-1",
     requestedServiceClass: "lite",
   });
+  const providerDeployment = tenantManagedModelAccessGroup(
+    "acme",
+    "lemmacomputer-openai-gpt-5-6-luna",
+  );
   const deployment = {
     id: "deployment-lite",
     provider: "openai" as const,
     model: "openai/gpt-5.6-luna",
-    deployment: "openai/gpt-5.6-luna",
+    deployment: providerDeployment,
     serviceClass: "lite" as const,
     mappingVersionId: "mapping-1",
     rateCardId: "rate-lite",
@@ -463,6 +468,11 @@ test("organization routing keeps Team as cost attribution only", async () => {
 
   assert.equal(result.status, "created");
   assert.equal(result.executedDeploymentId, deployment.id);
+  assert.equal(
+    result.executedModelGroup,
+    providerDeployment,
+    "execution stays bound to the tenant-scoped LiteLLM access group",
+  );
   assert.equal(recordedTeamId, "cost-team-1", "the Team remains on the cost decision record");
 });
 
