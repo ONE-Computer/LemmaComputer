@@ -5478,99 +5478,101 @@ function ChatConversation({
         />
         {companionComposer ? (
           <div className="companion-chat-composer-row">
-            <div ref={chatActionsRef} className="companion-chat-composer-control actions-control">
-              <button
-                className="chat-attach-button"
-                type="button"
-                aria-label="Chat actions"
-                aria-expanded={chatActionsOpen}
-                aria-controls="companion-chat-actions"
-                disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
-                onClick={() => {
-                  setChatActionsOpen((open) => !open);
-                  setContextOpen(false);
-                }}
-              >
-                <Add24Regular aria-hidden="true" />
-              </button>
-              {chatActionsOpen && (
-                <div id="companion-chat-actions" className="companion-chat-composer-menu" role="menu" aria-label="Chat actions">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setChatActionsOpen(false);
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    <Attach24Regular aria-hidden="true" />Attach files
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setChatActionsOpen(false);
-                      onNewThread?.();
-                    }}
-                  >
-                    <Add24Regular aria-hidden="true" />New thread
-                  </button>
-                  {skills.length > 0 && <div className="companion-chat-skill-list" role="group" aria-label="Skills">
-                    <span>Skills</span>
-                    {skills.map((skill) => <button type="button" role="menuitem" key={skill.id} onClick={() => {
-                      setInput(skill.defaultPrompt);
-                      setChatActionsOpen(false);
-                    }}>
-                      <WindowApps24Regular aria-hidden="true" /><span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
-                    </button>)}
-                  </div>}
-                  {sessionOptions.length > 1 && <div className="companion-chat-recent-sessions" role="group" aria-label="Recent conversations">
-                    <span>Recent conversations</span>
-                    {sessionOptions.filter((session) => session.value).map((session) => (
-                      <button
-                        className={session.value === sessionId ? "active" : ""}
-                        type="button"
-                        key={session.value}
-                        onClick={() => {
-                          setChatActionsOpen(false);
-                          onOpenThread?.(session.value);
-                        }}
-                      >
-                        {session.label}
-                      </button>
-                    ))}
-                  </div>}
-                  {historyHasMore && <button type="button" className="companion-chat-load-older" disabled={historyLoadingMore} onClick={onLoadOlder}>
-                    {historyLoadingMore ? "Loading conversations…" : "Load older conversations"}
-                  </button>}
-                </div>
+            {messageField}
+            <div className="companion-chat-composer-toolbar">
+              <div ref={chatActionsRef} className="companion-chat-composer-control actions-control">
+                <button
+                  className="chat-attach-button"
+                  type="button"
+                  aria-label="Chat actions"
+                  aria-expanded={chatActionsOpen}
+                  aria-controls="companion-chat-actions"
+                  disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
+                  onClick={() => {
+                    setChatActionsOpen((open) => !open);
+                    setContextOpen(false);
+                  }}
+                >
+                  <Add24Regular aria-hidden="true" />
+                </button>
+                {chatActionsOpen && (
+                  <div id="companion-chat-actions" className="companion-chat-composer-menu" role="menu" aria-label="Chat actions">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatActionsOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <Attach24Regular aria-hidden="true" />Attach files
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatActionsOpen(false);
+                        onNewThread?.();
+                      }}
+                    >
+                      <Add24Regular aria-hidden="true" />New thread
+                    </button>
+                    {skills.length > 0 && <div className="companion-chat-skill-list" role="group" aria-label="Skills">
+                      <span>Skills</span>
+                      {skills.map((skill) => <button type="button" role="menuitem" key={skill.id} onClick={() => {
+                        setInput(skill.defaultPrompt);
+                        setChatActionsOpen(false);
+                      }}>
+                        <WindowApps24Regular aria-hidden="true" /><span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
+                      </button>)}
+                    </div>}
+                    {sessionOptions.length > 1 && <div className="companion-chat-recent-sessions" role="group" aria-label="Recent conversations">
+                      <span>Recent conversations</span>
+                      {sessionOptions.filter((session) => session.value).map((session) => (
+                        <button
+                          className={session.value === sessionId ? "active" : ""}
+                          type="button"
+                          key={session.value}
+                          onClick={() => {
+                            setChatActionsOpen(false);
+                            onOpenThread?.(session.value);
+                          }}
+                        >
+                          {session.label}
+                        </button>
+                      ))}
+                    </div>}
+                    {historyHasMore && <button type="button" className="companion-chat-load-older" disabled={historyLoadingMore} onClick={onLoadOlder}>
+                      {historyLoadingMore ? "Loading conversations…" : "Load older conversations"}
+                    </button>}
+                  </div>
+                )}
+              </div>
+              <div ref={contextRef} className="companion-chat-composer-control context-control">
+                {composerContext ? (
+                  <>
+                    <button
+                      className="companion-chat-context-button"
+                      type="button"
+                      aria-expanded={contextOpen}
+                      aria-controls="companion-chat-context"
+                      onClick={() => {
+                        setContextOpen((open) => !open);
+                        setChatActionsOpen(false);
+                      }}
+                    >
+                      <span>{contextSummary}</span><ChevronDown16Regular aria-hidden="true" />
+                    </button>
+                    {contextOpen && <div id="companion-chat-context" className="companion-chat-composer-menu companion-chat-context-menu" role="dialog" aria-label="Chat context">{composerContext}</div>}
+                  </>
+                ) : <span className="companion-chat-context-static">{contextSummary}</span>}
+              </div>
+              {turnBusy ? (
+                <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
+              ) : (
+                <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
               )}
             </div>
-            {messageField}
-            <div ref={contextRef} className="companion-chat-composer-control context-control">
-              {composerContext ? (
-                <>
-                  <button
-                    className="companion-chat-context-button"
-                    type="button"
-                    aria-expanded={contextOpen}
-                    aria-controls="companion-chat-context"
-                    onClick={() => {
-                      setContextOpen((open) => !open);
-                      setChatActionsOpen(false);
-                    }}
-                  >
-                    <span>{contextSummary}</span><ChevronDown16Regular aria-hidden="true" />
-                  </button>
-                  {contextOpen && <div id="companion-chat-context" className="companion-chat-composer-menu companion-chat-context-menu" role="dialog" aria-label="Chat context">{composerContext}</div>}
-                </>
-              ) : <span className="companion-chat-context-static">{contextSummary}</span>}
-            </div>
-            {turnBusy ? (
-              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
-            ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
-            )}
           </div>
         ) : (
           <>

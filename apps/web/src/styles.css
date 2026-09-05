@@ -3313,9 +3313,8 @@ a.chat-file-part:hover {
 .companion-chat-composer-row {
   display: grid;
   min-width: 0;
-  grid-template-columns: 36px minmax(0, 1fr) minmax(0, auto) 36px;
-  align-items: end;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
 }
 
 .companion-chat-composer-control {
@@ -3323,13 +3322,28 @@ a.chat-file-part:hover {
   min-width: 0;
 }
 
-.chat-composer.companion-chat-composer textarea {
+.companion-chat-composer-toolbar {
+  display: flex;
   min-width: 0;
   min-height: 36px;
-  max-height: 132px; field-sizing: content;
-  align-self: end;
-  padding: 6px 8px;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.companion-chat-composer-toolbar .context-control {
+  margin-left: auto;
+}
+
+.chat-composer.companion-chat-composer textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  max-height: 180px;
+  field-sizing: content;
+  padding: 7px 9px 5px;
   overflow-y: auto;
+  box-sizing: border-box;
   color: #303030;
   font-size: 16px;
   line-height: 24px;
@@ -3508,13 +3522,10 @@ a.chat-file-part:hover {
   }
 
   .companion-chat-composer-row {
-    grid-template-columns: 40px minmax(0, 1fr) minmax(0, auto) 40px;
-    row-gap: 4px;
+    gap: 4px;
   }
 
   .chat-composer.companion-chat-composer textarea {
-    grid-column: 1 / -1;
-    grid-row: 1;
     min-height: 42px;
     max-height: 124px;
     padding: 7px 5px 4px;
@@ -3527,22 +3538,6 @@ a.chat-file-part:hover {
     min-width: 40px;
     height: 40px;
     min-height: 40px;
-  }
-
-  .companion-chat-composer-row .actions-control {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .companion-chat-composer-row .context-control {
-    grid-column: 3;
-    grid-row: 2;
-  }
-
-  .companion-chat-composer-row > .chat-send-button,
-  .companion-chat-composer-row > .chat-stop-button {
-    grid-column: 4;
-    grid-row: 2;
   }
 
   .companion-chat-context-button,

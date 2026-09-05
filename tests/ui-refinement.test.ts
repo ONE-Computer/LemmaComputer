@@ -185,10 +185,12 @@ test("Companion exposes Chat and approvals through the compact top-bar switch", 
   assert.match(app, /ariaLabel="Choose workspace"/);
   assert.match(app, /sessions=\{chatSessions\}[\s\S]*companionComposer[\s\S]*historyHasMore=\{chatHistoryHasMore\}/);
   assert.match(app, /className="chat-error-retry"[\s\S]*setHistoryReload/);
-  assert.match(app, /className="companion-chat-composer-control actions-control"[\s\S]*\{messageField\}[\s\S]*className="companion-chat-composer-control context-control"/);
+  assert.match(app, /\{messageField\}[\s\S]*className="companion-chat-composer-toolbar"[\s\S]*className="companion-chat-composer-control actions-control"[\s\S]*className="companion-chat-composer-control context-control"/);
   assert.doesNotMatch(app, /companion-chat-composer-spacer/);
   assert.match(styles, /\.chat-composer\.companion-chat-composer\s*\{[\s\S]*max-width:\s*768px/);
-  assert.match(styles, /\.companion-chat-composer-row\s*\{[\s\S]*grid-template-columns:\s*36px minmax\(0, 1fr\) minmax\(0, auto\) 36px;[\s\S]*align-items:\s*end/);
+  assert.match(styles, /\.companion-chat-composer-row\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(styles, /\.companion-chat-composer-toolbar\s*\{[\s\S]*display:\s*flex;[\s\S]*align-items:\s*flex-end/);
+  assert.match(styles, /\.chat-composer\.companion-chat-composer textarea\s*\{[\s\S]*width:\s*100%/);
   assert.match(companionStyles, /\.companion-mode-switch\s*\{/);
   assert.doesNotMatch(companionStyles, /\.companion-destinations/);
   assert.match(manifest, /Chat with workspace agents and review protected LemmaComputer actions/);
