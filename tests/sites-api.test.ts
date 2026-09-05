@@ -136,6 +136,7 @@ test("site roles authorize external accounts without org membership and email fa
       { method: "POST" as const, url: `${url}/invitations`, payload: { email: "unwanted@example.test" } },
       { method: "POST" as const, url: `${url}/invitations/${sent.json().invitation.id}/resend`, payload: {} },
       { method: "DELETE" as const, url: `${url}/invitations/${sent.json().invitation.id}` },
+      { method: "POST" as const, url: `${url}/invitations/${sent.json().invitation.id}/remove`, payload: {} },
       { method: "POST" as const, url: `${url}/versions/1/restore`, payload: {} },
       { method: "DELETE" as const, url },
     ]) assert.equal((await app.inject({ ...request, headers })).statusCode, 404);
@@ -149,6 +150,11 @@ test("site roles authorize external accounts without org membership and email fa
       assert.equal((await app.inject({ method: "POST", url: `${url}/grants`, headers, payload: { accountUserId: guestId, permission } })).statusCode, 400);
     }
     assert.equal((await app.inject({ method: "GET", url, headers })).json().site.role, "owner");
+    const terminal = await app.inject({ method: "POST", url: `${url}/invitations`, headers: { ...headers, "idempotency-key": "site-terminal-invite-001" }, payload: { email: "terminal@example.test" } });
+    assert.equal(terminal.statusCode, 201, terminal.body);
+    assert.equal((await app.inject({ method: "DELETE", url: `${url}/invitations/${terminal.json().invitation.id}`, headers })).statusCode, 200);
+    assert.equal((await app.inject({ method: "POST", url: `${url}/invitations/${terminal.json().invitation.id}/remove`, headers })).statusCode, 204);
+    assert.equal((await app.inject({ method: "GET", url, headers })).json().invitations.some((item: { id: string }) => item.id === terminal.json().invitation.id), false);
     assert.equal((await app.inject({ method: "PATCH", url, headers, payload: { visibility: "organization" } })).statusCode, 200);
     assert.equal((await app.inject({ method: "POST", url: `${url}/versions/1/restore`, headers, payload: {} })).statusCode, 200);
     assert.equal((await app.inject({ method: "DELETE", url, headers })).statusCode, 204);

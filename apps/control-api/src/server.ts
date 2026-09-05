@@ -1322,7 +1322,7 @@ export function createControlServer(
     const siteViewerPath = /^\/v1\/sites\/viewer\/[A-Za-z0-9_-]{24}$/.test(requestPath)
       || requestPath === "/v1/sites/invitations/accept"
       || requestPath === "/v1/sites"
-      || /^\/v1\/sites\/[0-9a-f-]{36}(?:\/(?:grants(?:\/[0-9a-f-]{36})?|invitations(?:\/[0-9a-f-]{36}(?:\/resend)?)?|versions\/\d+\/restore))?$/.test(requestPath);
+      || /^\/v1\/sites\/[0-9a-f-]{36}(?:\/(?:grants(?:\/[0-9a-f-]{36})?|invitations(?:\/[0-9a-f-]{36}(?:\/(?:resend|remove))?)?|versions\/\d+\/restore))?$/.test(requestPath);
     if (siteViewerPath) {
       if (security.testIdentityMode) {
         const viewer = testPrincipalFromHeaders(request.headers);
@@ -6325,6 +6325,10 @@ export function createControlServer(
   });
   app.delete<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId", async (request) => {
     return requireSites().revokeInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
+  });
+  app.post<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId/remove", async (request, reply) => {
+    await requireSites().removeInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
+    return reply.code(204).send();
   });
   app.post<{ Params: { siteId: string; version: string } }>("/v1/sites/:siteId/versions/:version/restore", async (request) => {
     return requireSites().restore(siteActor(request), request.params.siteId, Number(request.params.version));

@@ -76,13 +76,16 @@ test("PostgreSQL Sites versions, grants, invitations, and tenant scoping are ato
     assert.equal(Number((await pool.query("SELECT count(*) AS count FROM site_invitation_audit_events WHERE tenant_id=$1 AND site_id=$2", [tenantId, prepared.site.id])).rows[0].count), 2);
 
     const expiredAt = new Date(now.getTime() - 1_000);
-    await store.createSiteInvitation({ tenantId, subjectId: ownerId }, {
+    const expiredInvitation = await store.createSiteInvitation({ tenantId, subjectId: ownerId }, {
       siteId: prepared.site.id, email: "expired@example.test", tokenHash: hash("expired-token"),
       idempotencyKeyHash: hash("expired-invite"), expiresAt: expiredAt, now: new Date(expiredAt.getTime() - 1_000),
     });
     const invitations = await store.listSiteInvitations({ tenantId, subjectId: ownerId }, prepared.site.id, now);
     assert.equal(invitations?.find((item) => item.email === "expired@example.test")?.status, "expired");
     assert.equal(Number((await pool.query("SELECT count(*) AS count FROM site_invitation_audit_events WHERE tenant_id=$1 AND site_id=$2 AND event_type='invitation.expired'", [tenantId, prepared.site.id])).rows[0].count), 1);
+    assert.equal(await store.removeSiteInvitation({ tenantId, subjectId: ownerId }, prepared.site.id, expiredInvitation!.invitation.id, now), true);
+    assert.equal((await store.listSiteInvitations({ tenantId, subjectId: ownerId }, prepared.site.id, now))?.find((item) => item.id === expiredInvitation!.invitation.id), undefined);
+    assert.equal(Number((await pool.query("SELECT count(*) AS count FROM site_invitation_audit_events WHERE tenant_id=$1 AND site_id=$2 AND event_type='invitation.removed'", [tenantId, prepared.site.id])).rows[0].count), 1);
   } finally {
     await pool.query("DELETE FROM sites WHERE tenant_id=$1", [tenantId]);
     await pool.query("DELETE FROM users WHERE tenant_id=$1", [tenantId]);

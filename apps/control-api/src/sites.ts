@@ -397,6 +397,12 @@ export class SitesService {
     return { invitation: invitationView(invitation) };
   }
 
+  async removeInvitation(actor: SiteAccessActor, rawSiteId: string, rawInvitationId: string) {
+    if (!await this.store.removeSiteInvitation(actor, z.uuid().parse(rawSiteId), z.uuid().parse(rawInvitationId), new Date())) {
+      throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+    }
+  }
+
   async acceptInvitation(rawToken: string, account: { accountUserId: string; email: string }) {
     const token = z.string().regex(/^lsi_[A-Za-z0-9_-]{32,256}$/).parse(rawToken);
     const accepted = await this.store.acceptSiteInvitation({

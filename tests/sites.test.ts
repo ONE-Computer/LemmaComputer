@@ -81,6 +81,26 @@ test("single-use email invitations grant the verified account", async () => {
   assert.equal((await service.viewer({ tenantId: "", subjectId: "", accountUserId: "33333333-3333-4333-8333-333333333333" }, published.handle)).site.id, published.id);
 });
 
+test("owners can remove revoked and expired invitations from the sharing list", async () => {
+  const store = new MemorySiteStore();
+  const service = new SitesService(store, new MemoryArtifactStore());
+  const site = await service.publish(owner, publishInput("Terminal invitations"));
+  const pending = await service.invite(owner, site.id, { email: "revoked@example.test", idempotencyKey: "revoked-invite-0001" });
+  await assert.rejects(() => service.removeInvitation(owner, site.id, pending.invitation.id), { code: "SITE_NOT_FOUND" });
+  await service.revokeInvitation(owner, site.id, pending.invitation.id);
+  await service.removeInvitation(owner, site.id, pending.invitation.id);
+
+  const now = new Date();
+  const expired = await store.createSiteInvitation(owner, {
+    siteId: site.id, email: "expired@example.test", tokenHash: "expired-token", idempotencyKeyHash: "expired-invite-0001",
+    expiresAt: new Date(now.getTime() - 1), now: new Date(now.getTime() - 2),
+  });
+  await service.manage(owner, site.id);
+  await service.removeInvitation(owner, site.id, expired!.invitation.id);
+  const details = await service.manage(owner, site.id);
+  assert.equal(details.invitations.length, 0);
+});
+
 test("only owners manage sites; organization members and invited accounts can only view", async () => {
   const service = new SitesService(new MemorySiteStore(), new MemoryArtifactStore());
   const site = await service.publish(owner, publishInput("Roles"));
@@ -103,6 +123,7 @@ test("only owners manage sites; organization members and invited accounts can on
       () => service.invite(actor, site.id, { email: "nobody@example.test", idempotencyKey: "unauthorized-001" }),
       () => service.resendInvitation(actor, site.id, invitation.invitation.id),
       () => service.revokeInvitation(actor, site.id, invitation.invitation.id),
+      () => service.removeInvitation(actor, site.id, invitation.invitation.id),
       () => service.revokeGrant(actor, site.id, grant.id),
       () => service.restore(actor, site.id, 1),
       () => service.delete(actor, site.id),

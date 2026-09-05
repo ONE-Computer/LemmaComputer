@@ -58,6 +58,12 @@ is not a grant and cannot be reassigned or downgraded through this UI/API.
 Removing an individual grant does not remove read access supplied by organization
 visibility. Revoking access takes effect on subsequent requests.
 
+Revoked and expired invitations can be removed from the Share dialog. This only
+removes the terminal invitation from the owner's working list: the invitation
+record and its audit events remain retained, including the owner action that
+removed it. Pending and accepted invitations cannot be removed through this
+control.
+
 Site sharing is account-scoped and does not admit external recipients to the
 organization. Only the owner sees the Share button, and the API independently
 enforces ownership for every management operation. Generated iframe content has

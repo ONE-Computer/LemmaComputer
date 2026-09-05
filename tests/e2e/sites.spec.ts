@@ -63,14 +63,25 @@ test("Sites shares view-only access with owner controls and one scroll container
   }));
   let active = true;
   const accountUserId = "22222222-2222-4222-8222-222222222222";
+  let invitations = [
+    { id: "accepted", email: "guest@example.test", status: "accepted", acceptedAccountUserId: accountUserId, expiresAt: timestamp },
+    { id: "revoked", email: "revoked@example.test", status: "revoked", acceptedAccountUserId: null, expiresAt: timestamp },
+    { id: "expired", email: "expired@example.test", status: "expired", acceptedAccountUserId: null, expiresAt: timestamp },
+  ];
   await page.route("**/api/v1/sites", (route) => route.fulfill({ json: { sites } }));
   await page.route(`**/api/v1/sites/${sites[0].id}`, (route) => route.fulfill({ json: {
     site: sites[0], delivery: { mode: "copy-link" }, versions: Array.from({ length: 10 }, (_, index) => ({
       id: `version-${index}`, version: index + 1, state: "ready", fileCount: 4, createdAt: timestamp,
     })),
-    invitations: [{ id: "accepted", email: "guest@example.test", status: "accepted", acceptedAccountUserId: accountUserId, expiresAt: timestamp }],
+    invitations,
     grants: [{ id: "grant-1", accountUserId, permission: "viewer", active }],
   } }));
+  await page.route(`**/api/v1/sites/${sites[0].id}/invitations/*/remove`, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    const invitationId = route.request().url().split("/").at(-2)!;
+    invitations = invitations.filter((invitation) => invitation.id !== invitationId);
+    await route.fulfill({ status: 204 });
+  });
   await page.route(`**/api/v1/sites/${sites[0].id}/grants/grant-1`, async (route) => {
     expect(route.request().method()).toBe("DELETE");
     active = false;
@@ -111,6 +122,14 @@ test("Sites shares view-only access with owner controls and one scroll container
     await expect(dialog).toHaveCount(0);
   }
   await owner.getByRole("button", { name: "Share", exact: true }).click();
+  const revokedRow = page.locator(".site-manage-row").filter({ hasText: "revoked@example.test" });
+  await expect(revokedRow.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await revokedRow.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(revokedRow).toHaveCount(0);
+  const expiredRow = page.locator(".site-manage-row").filter({ hasText: "expired@example.test" });
+  await expect(expiredRow.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expiredRow.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(expiredRow).toHaveCount(0);
   const grantRow = page.locator(".site-manage-row").filter({ has: page.getByRole("button", { name: "Remove", exact: true }) });
   await expect(grantRow).toContainText("Can view");
   await grantRow.getByRole("button", { name: "Remove", exact: true }).click();

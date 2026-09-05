@@ -192,6 +192,7 @@ export const siteApi = {
   invite: (id: string, email: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations`, mutation("POST", { email })),
   resendInvitation: (id: string, invitationId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}/resend`, mutation()),
   revokeInvitation: (id: string, invitationId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}`, mutation("DELETE")),
+  removeInvitation: (id: string, invitationId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}/remove`, mutation()),
   revokeGrant: (id: string, grantId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/grants/${encodeURIComponent(grantId)}`, mutation("DELETE")),
   restore: (id: string, version: number) => request(`/api/v1/sites/${encodeURIComponent(id)}/versions/${version}/restore`, mutation()),
   delete: (id: string) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("DELETE")),

@@ -85,6 +85,7 @@ export type SiteInvitationRecord = {
   createdAt: Date;
   updatedAt: Date;
   revokedAt: Date | null;
+  dismissedAt: Date | null;
 };
 
 export type SitePublicationRecord = {
@@ -131,6 +132,7 @@ export interface SiteStore {
   createSiteInvitation(actor: SiteAccessActor, input: { siteId: string; email: string; tokenHash: string; idempotencyKeyHash: string; expiresAt: Date; now: Date }): Promise<{ invitation: SiteInvitationRecord; replayed: boolean } | null>;
   resendSiteInvitation(actor: SiteAccessActor, input: { siteId: string; invitationId: string; tokenHash: string; expiresAt: Date; now: Date }): Promise<SiteInvitationRecord | null>;
   revokeSiteInvitation(actor: SiteAccessActor, siteId: string, invitationId: string, now: Date): Promise<SiteInvitationRecord | null>;
+  removeSiteInvitation(actor: SiteAccessActor, siteId: string, invitationId: string, now: Date): Promise<boolean>;
   acceptSiteInvitation(input: { tokenHash: string; accountUserId: string; email: string; now: Date }): Promise<{ siteId: string; handle: string } | null>;
   deleteSite(actor: SiteAccessActor, siteId: string): Promise<{ deleted: boolean; storageLocators: string[]; stagingLocators: string[] }>;
 }
@@ -175,6 +177,7 @@ const mapInvitation = (row: Record<string, unknown>): SiteInvitationRecord => ({
   acceptedAccountUserId: row.accepted_account_user_id ? String(row.accepted_account_user_id) : null,
   acceptedAt: row.accepted_at ? new Date(String(row.accepted_at)) : null, createdBy: String(row.created_by), updatedBy: String(row.updated_by),
   createdAt: new Date(String(row.created_at)), updatedAt: new Date(String(row.updated_at)), revokedAt: row.revoked_at ? new Date(String(row.revoked_at)) : null,
+  dismissedAt: row.dismissed_at ? new Date(String(row.dismissed_at)) : null,
 });
 
 const siteSelect = `SELECT id,tenant_id,subject_id,handle,slug,name,state,visibility,current_revision,
@@ -385,7 +388,7 @@ export class PostgresSiteStore implements SiteStore {
       await client.query("BEGIN");
       const expired = await client.query(
         `UPDATE site_invitations SET status='expired',updated_at=$4,updated_by='system'
-         WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 AND status='pending' AND expires_at<=$4 RETURNING *`,
+         WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 AND status='pending' AND dismissed_at IS NULL AND expires_at<=$4 RETURNING *`,
         [site.tenantId, site.subjectId, siteId, now],
       );
       for (const row of expired.rows) {
@@ -395,7 +398,7 @@ export class PostgresSiteStore implements SiteStore {
           [randomUUID(), site.tenantId, site.subjectId, siteId, row.id, row.delivery_generation, now],
         );
       }
-      const result = await client.query("SELECT * FROM site_invitations WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 ORDER BY created_at DESC,id", [site.tenantId, site.subjectId, siteId]);
+      const result = await client.query("SELECT * FROM site_invitations WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 AND dismissed_at IS NULL ORDER BY created_at DESC,id", [site.tenantId, site.subjectId, siteId]);
       await client.query("COMMIT");
       return result.rows.map(mapInvitation);
     } catch (error) {
@@ -457,6 +460,24 @@ export class PostgresSiteStore implements SiteStore {
       await client.query(`INSERT INTO site_invitation_audit_events (id,tenant_id,subject_id,site_id,invitation_id,event_type,actor_user_id,delivery_generation,occurred_at) VALUES ($1,$2,$3,$4,$5,'invitation.revoked',$6,$7,$8)`, [randomUUID(), site.tenantId, site.subjectId, siteId, invitationId, actor.subjectId, updated.rows[0].delivery_generation, now]);
       await client.query("COMMIT");
       return mapInvitation(updated.rows[0]);
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+
+  async removeSiteInvitation(actor: SiteAccessActor, siteId: string, invitationId: string, now: Date) {
+    const site = await this.getManageableSite(actor, siteId);
+    if (!site) return false;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const updated = await client.query(
+        `UPDATE site_invitations SET dismissed_at=$5,updated_at=$5,updated_by=$6
+         WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 AND id=$4 AND dismissed_at IS NULL AND status IN ('expired','revoked') RETURNING *`,
+        [site.tenantId, site.subjectId, siteId, invitationId, now, actor.subjectId],
+      );
+      if (!updated.rowCount) { await client.query("ROLLBACK"); return false; }
+      await client.query(`INSERT INTO site_invitation_audit_events (id,tenant_id,subject_id,site_id,invitation_id,event_type,actor_user_id,delivery_generation,occurred_at) VALUES ($1,$2,$3,$4,$5,'invitation.removed',$6,$7,$8)`, [randomUUID(), site.tenantId, site.subjectId, siteId, invitationId, actor.subjectId, updated.rows[0].delivery_generation, now]);
+      await client.query("COMMIT");
+      return true;
     } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
   }
 
@@ -660,8 +681,8 @@ export class MemorySiteStore implements SiteStore {
 
   async listSiteInvitations(actor: SiteAccessActor, siteId: string, now: Date) {
     if (!await this.getManageableSite(actor, siteId)) return null;
-    for (const invitation of this.invitations.get(siteId) ?? []) if (invitation.status === "pending" && invitation.expiresAt <= now) { invitation.status = "expired"; invitation.updatedAt = now; }
-    return [...(this.invitations.get(siteId) ?? [])];
+    for (const invitation of this.invitations.get(siteId) ?? []) if (!invitation.dismissedAt && invitation.status === "pending" && invitation.expiresAt <= now) { invitation.status = "expired"; invitation.updatedAt = now; }
+    return (this.invitations.get(siteId) ?? []).filter((invitation) => !invitation.dismissedAt);
   }
   async createSiteInvitation(actor: SiteAccessActor, input: { siteId: string; email: string; tokenHash: string; idempotencyKeyHash: string; expiresAt: Date; now: Date }) {
     if (!await this.getManageableSite(actor, input.siteId)) return null;
@@ -672,7 +693,7 @@ export class MemorySiteStore implements SiteStore {
     const invitation: MemoryInvitation = {
       id: randomUUID(), siteId: input.siteId, email: input.email, tokenHash: input.tokenHash, idempotencyKeyHash: input.idempotencyKeyHash,
       status: "pending", deliveryGeneration: 1, expiresAt: input.expiresAt, acceptedAccountUserId: null, acceptedAt: null,
-      createdBy: actor.subjectId, updatedBy: actor.subjectId, createdAt: input.now, updatedAt: input.now, revokedAt: null,
+      createdBy: actor.subjectId, updatedBy: actor.subjectId, createdAt: input.now, updatedAt: input.now, revokedAt: null, dismissedAt: null,
     };
     current.push(invitation); this.invitations.set(input.siteId, current); return { invitation, replayed: false };
   }
@@ -689,6 +710,12 @@ export class MemorySiteStore implements SiteStore {
     const invitation = this.invitations.get(siteId)?.find((item) => item.id === invitationId && item.status === "pending");
     if (!invitation) return null;
     invitation.status = "revoked"; invitation.revokedAt = now; invitation.updatedAt = now; invitation.updatedBy = actor.subjectId; return invitation;
+  }
+  async removeSiteInvitation(actor: SiteAccessActor, siteId: string, invitationId: string, now: Date) {
+    if (!await this.getManageableSite(actor, siteId)) return false;
+    const invitation = this.invitations.get(siteId)?.find((item) => item.id === invitationId && !item.dismissedAt && (item.status === "expired" || item.status === "revoked"));
+    if (!invitation) return false;
+    invitation.dismissedAt = now; invitation.updatedAt = now; invitation.updatedBy = actor.subjectId; return true;
   }
   async acceptSiteInvitation(input: { tokenHash: string; accountUserId: string; email: string; now: Date }) {
     for (const [siteId, invitations] of this.invitations) {
