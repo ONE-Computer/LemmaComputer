@@ -185,7 +185,15 @@ export const skillApi = {
 
 export const siteApi = {
   list: () => request("/api/v1/sites", { cache: "no-store" }),
-  contentUrl: (id: string) => `/api/v1/sites/${encodeURIComponent(id)}/content`,
+  details: (id: string) => request(`/api/v1/sites/${encodeURIComponent(id)}`, { cache: "no-store" }),
+  viewer: (handle: string) => request(`/api/v1/sites/viewer/${encodeURIComponent(handle)}`, { cache: "no-store" }),
+  acceptInvitation: (token: string) => request("/api/v1/sites/invitations/accept", mutation("POST", { token })),
+  setVisibility: (id: string, visibility: string) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("PATCH", { visibility })),
+  invite: (id: string, email: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations`, mutation("POST", { email })),
+  resendInvitation: (id: string, invitationId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}/resend`, mutation()),
+  revokeInvitation: (id: string, invitationId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitationId)}`, mutation("DELETE")),
+  revokeGrant: (id: string, grantId: string) => request(`/api/v1/sites/${encodeURIComponent(id)}/grants/${encodeURIComponent(grantId)}`, mutation("DELETE")),
+  restore: (id: string, version: number) => request(`/api/v1/sites/${encodeURIComponent(id)}/versions/${version}/restore`, mutation()),
   delete: (id: string) => request(`/api/v1/sites/${encodeURIComponent(id)}`, mutation("DELETE")),
 };
 

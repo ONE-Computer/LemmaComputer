@@ -1,0 +1,8 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172033; background: #f4f6f8; }
+body { margin: 0; }
+main { max-width: 72rem; margin: auto; padding: 4rem 2rem; }
+.eyebrow { color: #637083; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+h1 { margin: .5rem 0 2rem; font-size: clamp(2rem, 5vw, 4rem); letter-spacing: -.04em; }
+#metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; }
+.metric { padding: 1.5rem; border: 1px solid #dce1e8; border-radius: 1rem; background: white; box-shadow: 0 .5rem 2rem #1d2a3b0c; }
+.metric strong { display: block; margin-top: .5rem; font-size: 2rem; }

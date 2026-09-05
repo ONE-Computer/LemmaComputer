@@ -31,7 +31,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
     path.join(modules, "toolsets.py"),
     "TOOLSETS = {}\ndef resolve_toolset(name):\n    return {name}\n",
   );
-  for (const skill of [...officeSkills, "make-a-site", "teams-meeting-pipeline"]) {
+  for (const skill of [...officeSkills, "site", "teams-meeting-pipeline"]) {
     await installSkill(bundle, skill);
   }
 
@@ -75,7 +75,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   const legacy = JSON.parse(await readFile(path.join(legacyHome, "config.yaml"), "utf8"));
   assert.equal(legacy.model.default, "lemmacomputer-balanced", "legacy Auto workspace defaults migrate safely to Balanced");
   assert.deepEqual(first.skills.disabled, ["teams-meeting-pipeline"]);
-  for (const skill of [...officeSkills, "make-a-site"]) {
+  for (const skill of [...officeSkills, "site"]) {
     assert.ok(!first.skills.disabled.includes(skill));
   }
 

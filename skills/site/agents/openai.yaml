@@ -1,0 +1,4 @@
+interface:
+  display_name: "Site"
+  short_description: "Create, edit, and publish static sites"
+  default_prompt: "Use $site to create or update and publish a small dashboard site."

@@ -7700,7 +7700,7 @@ a.chat-file-part:hover {
 }
 
 
-/* Sites MVP */
+/* Sites */
 .sites-screen { gap: 28px; }
 .sites-heading > div { display: grid; gap: 4px; }
 .sites-list { display: grid; border-top: 1px solid #dfe4e9; }
@@ -7716,6 +7716,30 @@ a.chat-file-part:hover {
 .site-row-actions .primary-button { width: auto; min-width: 92px; text-decoration: none; }
 .site-row-actions .text-button { margin-top: 0; }
 .sites-empty { min-height: 280px; }
+.site-viewer-shell { width: 100vw; height: 100vh; margin: 0; overflow: hidden; background: #fff; }
+.site-viewer-shell iframe { display: block; width: 100%; height: 100%; border: 0; }
+.site-viewer-state { display: grid; min-height: 100vh; margin: 0; padding: 2rem; place-items: center; background: #f4f6f8; color: var(--navy); text-align: center; }
+.site-viewer-state h1 { margin: 0 0 .75rem; }
+.site-viewer-state p { max-width: 32rem; color: var(--muted); }
+.site-manage-content { display: grid; max-height: min(62vh, 640px); gap: 20px; overflow-y: auto; padding-right: 4px; }
+.site-manage-content section { display: grid; gap: 8px; }
+.site-manage-content h3 { margin: 0; color: var(--navy); font-size: 14px; }
+.site-manage-content section > p { margin: 0; color: var(--muted); font-size: 13px; }
+.site-invite-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.site-copy-link { display: flex; gap: 8px; }
+.site-copy-link input { min-width: 0; flex: 1; }
+.site-manage-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.site-manage-row > span { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.site-manage-row > span:first-child { display: grid; gap: 3px; }
+.site-manage-row small { color: var(--muted); }
+.site-manage-row code { overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 720px) {
+  .site-row { grid-template-columns: 1fr; }
+  .site-row-actions { justify-content: flex-start; }
+  .site-invite-form { grid-template-columns: 1fr; }
+  .site-copy-link { align-items: stretch; flex-direction: column; }
+}
 
 /* Durable artifact library */
 .artifacts-screen { display: grid; gap: 24px; }

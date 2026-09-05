@@ -27,6 +27,17 @@ const read = (path: string) => readFile(new URL(path, rootUrl), "utf8");
 const createdTables = (sql: string) => [...sql.matchAll(/CREATE TABLE(?: IF NOT EXISTS)?\s+"?([A-Za-z0-9_]+)"?/g)]
   .map((match) => match[1]!);
 
+const finalTables = (migrations: string[]) => {
+  const tables = new Set<string>();
+  for (const sql of migrations) {
+    for (const match of sql.matchAll(/\b(CREATE|DROP) TABLE(?: IF (?:NOT )?EXISTS)?\s+"?([A-Za-z0-9_]+)"?/gi)) {
+      if (match[1]!.toUpperCase() === "CREATE") tables.add(match[2]!);
+      else tables.delete(match[2]!);
+    }
+  }
+  return [...tables];
+};
+
 const isolationAuthorityResource = (resource: string) => (
   /^tool_audit_events_(?:\d{4}_\d{2}|default)$/.test(resource)
     ? "tool_audit_events"
@@ -53,7 +64,7 @@ test("the tenant isolation manifest owns every persisted authentication and cont
   const controlSql = await Promise.all(workspaceMigrations.map(read));
   const required = [
     ...authSql.flatMap(createdTables).map((resource) => `authentication:${resource}`),
-    ...controlSql.flatMap(createdTables).map((resource) => `control:${isolationAuthorityResource(resource)}`),
+    ...finalTables(controlSql).map((resource) => `control:${isolationAuthorityResource(resource)}`),
   ];
   const declared = manifest.resources.map(({ store, resource }) => `${store}:${resource}`);
   assert.equal(new Set(declared).size, declared.length, "isolation resources must not be declared twice");

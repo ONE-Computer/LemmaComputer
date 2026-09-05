@@ -295,6 +295,7 @@ const ssoTestConnectionIdFromLocation = () => {
     return "";
   }
 };
+const siteHandleFromLocation = () => window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{24})\/?$/)?.[1] ?? "";
 const attachmentMediaType = (file) => {
   if (chatAttachmentTypes.has(file.type)) return file.type;
   const extension = file.name.split(".").at(-1)?.toLowerCase();
@@ -810,16 +811,73 @@ const siteUpdatedAt = (value) => new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 }).format(new Date(value));
 
-function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
+function SiteViewerScreen({ handle }) {
+  const [viewer, setViewer] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const invitation = url.searchParams.get("invite");
+        if (invitation) {
+          await siteApi.acceptInvitation(invitation);
+          url.searchParams.delete("invite");
+          window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+        }
+        const value = await siteApi.viewer(handle);
+        if (active) setViewer(value);
+      } catch {
+        if (active) setError("This site does not exist or has not been shared with this account.");
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [handle]);
+  if (error) return <main className="site-viewer-state"><div><h1>Site unavailable</h1><p>{error}</p><a href="/">Return to LemmaComputer</a></div></main>;
+  if (!viewer) return <main className="site-viewer-state" role="status">Opening site…</main>;
+  return <main className="site-viewer-shell">
+    <iframe title={viewer.site.name} src={viewer.entryUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" />
+  </main>;
+}
+
+function SiteManageDialog({ site, onClose, onSiteUpdated }) {
+  const [details, setDetails] = useState(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [acceptancePath, setAcceptancePath] = useState("");
+  const refresh = async () => setDetails(await siteApi.details(site.id));
+  useEffect(() => { refresh().catch((value) => setError(value.message)); }, [site.id]);
+  const run = async (operation) => {
+    setBusy(true); setError("");
+    try { await operation(); await refresh(); } catch (value) { setError(value.message); } finally { setBusy(false); }
+  };
+  return <ModalDialog title={`Share ${site.name}`} description="Choose who can open this stable site URL and manage its immutable versions." eyebrow="Site access" labelledBy="site-access-title" onClose={busy ? () => undefined : onClose}>
+    {error && <div className="workspace-error" role="alert">{error}</div>}
+    {!details ? <p>Loading site access…</p> : <div className="site-manage-content">
+      <label className="modal-field"><span>Visibility</span><SelectMenu value={details.site.visibility} options={[{ value: "private", label: "Only me" }, { value: "organization", label: "Everyone in my organization" }, { value: "restricted", label: "Only invited people" }]} ariaLabel="Visibility" disabled={busy} onValueChange={(visibility) => run(async () => { const updated = await siteApi.setVisibility(site.id, visibility); onSiteUpdated(updated); })} /><small>Viewers must always sign in to LemmaComputer.</small></label>
+      <div className="site-invite-form"><label className="modal-field"><span>Invite by email</span><input type="email" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} placeholder="person@example.com" /></label><button className="primary-button" type="button" disabled={busy || !email.trim()} onClick={() => run(async () => { const result = await siteApi.invite(site.id, email.trim()); setEmail(""); setAcceptancePath(result.acceptancePath ?? ""); })}>Invite</button></div>
+      {acceptancePath && <div className="site-copy-link"><input aria-label="Site invitation link" readOnly value={new URL(acceptancePath, window.location.origin).toString()} /><button className="secondary-button" type="button" onClick={() => navigator.clipboard?.writeText(new URL(acceptancePath, window.location.origin).toString())}>Copy link</button></div>}
+      <section><h3>Invitations</h3>{details.invitations.length ? details.invitations.map((item) => <div className="site-manage-row" key={item.id}><span><strong>{item.email}</strong><small>{item.status} · expires {new Date(item.expiresAt).toLocaleDateString()}</small></span>{item.status === "pending" && <span><button className="text-button" disabled={busy} onClick={() => run(async () => { const result = await siteApi.resendInvitation(site.id, item.id); setAcceptancePath(result.acceptancePath ?? ""); })}>Resend</button><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeInvitation(site.id, item.id))}>Revoke</button></span>}</div>) : <p>No invitations.</p>}</section>
+      <section><h3>People with access</h3>{details.grants.filter((item) => item.active).length ? details.grants.filter((item) => item.active).map((item) => <div className="site-manage-row" key={item.id}><code>{item.accountUserId}</code><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeGrant(site.id, item.id))}>Remove</button></div>) : <p>No individual grants.</p>}</section>
+      <section><h3>Versions</h3>{details.versions.map((version) => <div className="site-manage-row" key={version.id}><span><strong>Version {version.version}</strong><small>{version.fileCount} files · {siteUpdatedAt(version.createdAt)}{version.version === details.site.currentRevision ? " · live" : ""}</small></span>{version.state === "ready" && version.version !== details.site.currentRevision && <button className="secondary-button" disabled={busy} onClick={() => run(async () => { const updated = await siteApi.restore(site.id, version.version); onSiteUpdated(updated); })}>Restore</button>}</div>)}</section>
+    </div>}
+    <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Done</button></div>
+  </ModalDialog>;
+}
+
+function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdated }) {
+  const [managedSite, setManagedSite] = useState(null);
   return <div className="secondary-screen sites-screen">
     <header className="page-heading sites-heading">
-      <div><p>Your published apps</p><h1>Sites</h1><span>Sites built by your workspace agents appear here automatically.</span></div>
+      <div><p>Available dashboards</p><h1>Sites</h1><span>Sites built by workspace agents appear here automatically.</span></div>
     </header>
     {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sites unavailable</strong>{error}</span></div>}
     {loading ? <div className="workspace-overview-empty" role="status">Loading sites…</div> : sites.length === 0 ? (
       <section className="workspace-overview-empty sites-empty">
         <Apps48Regular aria-hidden="true" />
-        <div><h2>No sites yet</h2><p>Ask a workspace agent to use Make a site, then publish the result.</p></div>
+        <div><h2>No sites yet</h2><p>Ask a workspace agent to use Site, then publish the result.</p></div>
       </section>
     ) : <section className="sites-list" aria-label="Your sites">
       {sites.map((site) => <article className="site-row" key={site.id}>
@@ -830,18 +888,21 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
           </div>
           <div className="site-row-meta">
             <span>{site.slug}</span>
-            <span>Revision {site.currentRevision}</span>
+            <span>Version {site.currentRevision}</span>
+            <span>{site.visibility === "organization" ? "Organization" : site.visibility === "restricted" ? "Invited people" : "Only me"}</span>
             <span>Published {siteUpdatedAt(site.updatedAt)}</span>
           </div>
         </div>
         <div className="site-row-actions">
-          <a className="primary-button compact-button" href={siteApi.contentUrl(site.id)} target="_blank" rel="noopener noreferrer">
+          <a className="primary-button compact-button" href={`/s/${site.handle}`} target="_blank" rel="noopener noreferrer">
             Open<span className="sr-only"> {site.name} in a new tab</span>
           </a>
-          <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>
+          {site.canManage && <button className="secondary-button compact-button" type="button" onClick={() => setManagedSite(site)}>Share</button>}
+          {site.canManage && <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
         </div>
       </article>)}
     </section>}
+    {managedSite && <SiteManageDialog site={managedSite} onClose={() => setManagedSite(null)} onSiteUpdated={onSiteUpdated} />}
   </div>;
 }
 
@@ -6024,6 +6085,7 @@ export function ChatScreen({
 
 export function App() {
   const invitationActive = window.location.pathname === "/invite";
+  const siteHandle = siteHandleFromLocation();
   const [invitationVerified] = useState(() => window.location.pathname === "/invite"
     && new URLSearchParams(window.location.search).get("verified") === "1");
   const [invitationToken] = useState(() => window.location.pathname === "/invite"
@@ -8010,6 +8072,7 @@ export function App() {
       onSignOut={logout}
     />;
   }
+  if (siteHandle && (session || customerSession)) return <SiteViewerScreen handle={siteHandle} />;
   if (customerSession) {
     return <OrganizationSelectionScreen customerSession={customerSession} error={authError} onSelected={refreshAuthentication} onSignOut={logout} />;
   }
@@ -8142,6 +8205,7 @@ export function App() {
           error={sitesError}
           busySiteId={siteBusyId}
           onDelete={deleteSite}
+          onSiteUpdated={(updated) => setSites((current) => current.map((site) => site.id === updated.id ? { ...site, ...updated } : site))}
         />}
         {activeNav === "Artifacts" && <ArtifactsScreen onOpenConversation={openArtifactConversation} />}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} canReadToolAudit={canReadAudit} users={adminUsers} workspaceMembers={adminWorkspaceMembers} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}

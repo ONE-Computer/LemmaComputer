@@ -500,10 +500,10 @@ fi
 
 install_agent_skill() {
   local home="$1"
-  local target="$home/skills/make-a-site"
+  local target="$home/skills/site"
   install -d -o 1000 -g 1000 -m 0700 "$home/skills"
-  rm -rf -- "$target"
-  cp -a /opt/lemmacomputer/skills/make-a-site "$target"
+  rm -rf -- "$home/skills/make-a-site" "$target"
+  cp -a /opt/lemmacomputer/skills/site "$target"
   chown -R 1000:1000 "$target"
 }
 

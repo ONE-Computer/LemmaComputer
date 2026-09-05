@@ -1,0 +1,8 @@
+{
+  "asOf": "2026-01-01",
+  "metrics": [
+    { "label": "Active initiatives", "value": "12" },
+    { "label": "On track", "value": "9" },
+    { "label": "Needs attention", "value": "3" }
+  ]
+}

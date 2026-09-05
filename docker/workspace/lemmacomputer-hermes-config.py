@@ -19,7 +19,7 @@ OFFICE_DEFAULT_SKILLS = frozenset({
     "powerpoint",
     "xlsx",
 })
-REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS | frozenset({"make-a-site"})
+REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS | frozenset({"site"})
 SKILL_DEFAULTS_VERSION = 1
 SKILL_STATE_FILE = ".lemmacomputer-skill-defaults.json"
 

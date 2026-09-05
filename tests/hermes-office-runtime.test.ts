@@ -306,7 +306,7 @@ test("selected Hermes profiles seed reviewed skills by default and expose the mo
   assert.match(profileConfig, /OFFICE_DEFAULT_SKILLS = frozenset/);
   assert.match(profileConfig, /LEMMACOMPUTER_CONNECTOR_RECOVERY_DEADLINE_SECONDS/);
   assert.doesNotMatch(chatAdapter, /CONNECTOR_RECOVERY_STATE_FILE|connector_state/);
-  assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"make-a-site"}\)/);
+  assert.match(profileConfig, /REVIEWED_DEFAULT_SKILLS = OFFICE_DEFAULT_SKILLS \| frozenset\(\{"site"}\)/);
   for (const skill of ["docx", "pdf", "powerpoint", "xlsx", "ocr-and-documents"]) {
     assert.match(profileConfig, new RegExp(`"${skill}"`));
   }

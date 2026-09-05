@@ -13,6 +13,7 @@ const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
 const container = `lemmacomputer-artifact-qualification-${suffix}`;
 const accessKey = `qualifier${suffix}`;
 const secretKey = `qualifier-secret-${suffix}-${randomUUID()}`;
+const kmsSecretKey = createHash("sha256").update(`kms-${secretKey}`).digest("base64");
 const bucket = `artifacts-${suffix}`;
 const bytes = Buffer.from("LemmaComputer artifact qualification");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
@@ -38,6 +39,9 @@ try {
     "run", "--rm", "-d", "--name", container,
     "-e", `MINIO_ROOT_USER=${accessKey}`,
     "-e", `MINIO_ROOT_PASSWORD=${secretKey}`,
+    // MinIO requires a key manager before accepting the SSE-S3 header that
+    // the production ArtifactStore deliberately sends for every object.
+    "-e", `MINIO_KMS_SECRET_KEY=qualification-key:${kmsSecretKey}`,
     "-p", "127.0.0.1::9000",
     image, "server", "/data", "--address", ":9000",
   ]);

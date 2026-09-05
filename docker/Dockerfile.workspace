@@ -248,8 +248,8 @@ COPY --from=hermes_desktop_builder /src/apps/desktop/assets/icon.png /opt/lemmac
 COPY docker/workspace/lemmacomputer-gateway-proxy.py /usr/local/libexec/lemmacomputer-gateway-proxy
 COPY docker/workspace/lemmacomputer-agent-launch.py /usr/local/libexec/lemmacomputer-agent-launch
 COPY docker/workspace/lemmacomputer-sites.py /usr/local/bin/lemmacomputer-sites
-COPY skills/make-a-site /opt/lemmacomputer/skills/make-a-site
-COPY skills/make-a-site /opt/lemmacomputer/hermes-agent/skills/lemmacomputer/make-a-site
+COPY skills/site /opt/lemmacomputer/skills/site
+COPY skills/site /opt/lemmacomputer/hermes-agent/skills/lemmacomputer/site
 COPY docker/workspace/lemmacomputer-egress-broker.py /usr/local/libexec/lemmacomputer-egress-broker
 COPY docker/workspace/lemmacomputer-connectors-stdio.py /usr/local/libexec/lemmacomputer-connectors-stdio
 COPY --chmod=0644 docker/workspace/lemmacomputer_work_trace.py /usr/local/libexec/lemmacomputer_work_trace.py
@@ -308,8 +308,8 @@ RUN chmod 0755 \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-obsidian.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-hermes-agent-cli.desktop \
       /usr/local/share/lemmacomputer/applications/lemmacomputer-hermes-desktop.desktop \
-    && test -f /opt/lemmacomputer/skills/make-a-site/SKILL.md \
-    && test -f /opt/lemmacomputer/hermes-agent/skills/lemmacomputer/make-a-site/SKILL.md \
+    && test -f /opt/lemmacomputer/skills/site/SKILL.md \
+    && test -f /opt/lemmacomputer/hermes-agent/skills/lemmacomputer/site/SKILL.md \
     && chmod 0644 /usr/share/kasmvnc/www/app/lemmacomputer-kasm-clipboard.js /opt/firefox/distribution/policies.json /etc/opt/chrome/policies/managed/lemmacomputer.json /usr/local/share/lemmacomputer/SCHEDULING.md \
     && test "$(dpkg-query -W -f='${Version}' cron)" = "3.0pl1-137ubuntu3" \
     && grep -q 'dist/style.bundle.js' /usr/share/kasmvnc/www/index.html \

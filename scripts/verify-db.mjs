@@ -174,6 +174,7 @@ try {
     "tests/workspace-node-placement-postgres.test.ts",
     "tests/chat-store-postgres.test.ts",
     "tests/telegram-token-intake-postgres.test.ts",
+    "tests/sites-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
     env: {
@@ -197,6 +198,7 @@ try {
       WORKSPACE_NODE_PLACEMENT_TEST_DATABASE_URL: postgresUrl,
       CHAT_STORE_TEST_DATABASE_URL: postgresUrl,
       TELEGRAM_INTAKE_TEST_DATABASE_URL: postgresUrl,
+      SITES_TEST_DATABASE_URL: postgresUrl,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
     },
