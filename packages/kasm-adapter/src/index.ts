@@ -1135,8 +1135,22 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
     }
   }
 
+  private async containerReferencesNetwork(network: string, container: string) {
+    if (await this.networkContainsContainer(network, container)) return true;
+    // Stopped containers disappear from network.Containers but retain their
+    // configured attachment. Removing that network strands their next start.
+    try {
+      const inspected = await this.request("GET", `/containers/${encodeURIComponent(container)}/json`);
+      const networks = asObject(asObject(inspected.NetworkSettings).Networks);
+      return Object.hasOwn(networks, network);
+    } catch (error) {
+      if (error instanceof LemmaComputerError && error.statusCode === 404) return false;
+      throw error;
+    }
+  }
+
   private async disconnectContainer(network: string, container: string) {
-    if (!(await this.networkContainsContainer(network, container))) return;
+    if (!(await this.containerReferencesNetwork(network, container))) return;
     try {
       await this.request("POST", `/networks/${encodeURIComponent(network)}/disconnect`, { Container: container, Force: true });
     } catch (error) {
@@ -1145,7 +1159,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
       // the membership check but before disconnect. Treat that race as an
       // idempotent success only when a fresh inspection confirms the endpoint
       // is already absent; preserve every genuine Docker failure.
-      if (!(await this.networkContainsContainer(network, container))) return;
+      if (!(await this.containerReferencesNetwork(network, container))) return;
       throw error;
     }
   }
