@@ -1,3 +1,5 @@
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+
 export const transactionalEmailKinds = ["email-verification", "password-recovery", "organization-invitation", "site-invitation"] as const;
 export type TransactionalEmailKind = typeof transactionalEmailKinds[number];
 
@@ -67,8 +69,8 @@ export const deliverSiteInvitationEmail = async (
     subject: `${input.inviterDisplayName} shared ${input.siteName} with you`,
     text: `${input.inviterDisplayName} shared the LemmaComputer site “${input.siteName}” with you.\n\nOpen site:\n${input.activationUrl}\n\nSign in with this email address to accept access. This link expires at ${expiry}. If you did not expect it, ignore this email.`,
     html: `<p><strong>${escapeHtml(input.inviterDisplayName)}</strong> shared the LemmaComputer site <strong>${escapeHtml(input.siteName)}</strong> with you.</p><p><a href="${escapeHtml(input.activationUrl)}">Open site</a></p><p>Sign in with this email address to accept access. This link expires at ${escapeHtml(expiry)}.</p><p>If you did not expect it, ignore this email.</p>`,
-  });
-  if (!result.accepted) throw new Error("Transactional site invitation email delivery failed");
+  }).catch(() => null);
+  if (!result?.accepted) throw new LemmaComputerError("SITE_INVITATION_EMAIL_FAILED", "Email could not be submitted. The invitation is still pending; retry sending it from Invitations.", 503, true);
   return result;
 };
 

@@ -1236,7 +1236,7 @@ const server = http.createServer((request, response) => {
       response.end(JSON.stringify({ error: { code: "SITE_NOT_FOUND", message: "Site not found", retryable: false } }));
       return;
     }
-    response.end(JSON.stringify({ site, grants: [], invitations: [], versions: [{ id: "8c536c1f-6a31-427d-af8f-dbb0c63f8d73", version: 1, state: "ready", fileCount: 3, createdAt: site.createdAt }] }));
+    response.end(JSON.stringify({ site, delivery: { mode: "copy-link", captured: true }, grants: [], invitations: [], versions: [{ id: "8c536c1f-6a31-427d-af8f-dbb0c63f8d73", version: 1, state: "ready", fileCount: 3, createdAt: site.createdAt }] }));
     return;
   }
   if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}$`).test(url.pathname)) {
@@ -1695,6 +1695,8 @@ const server = http.createServer((request, response) => {
             currentRevision: 1,
             visibility: "private",
             canManage: true,
+            canDelete: true,
+            role: "owner",
             stableUrl: `http://127.0.0.1:${port}/s/${helloSiteHandle}`,
             sourceWorkspaceId: workspaceId,
             sourceAgentId: "agent-alex:hermes",

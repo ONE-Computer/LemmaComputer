@@ -41,3 +41,60 @@ with a cookie-authenticated parent and cookie-less sandboxed module imports,
 CSS and JSON. It checks isolation, live session revocation, foreign-tenant denial,
 explicit cross-organization sharing/revocation and deletion. The database gate
 also tests the credential-free session lookup against the owned auth schema.
+
+## Per-site sharing roles
+
+Roles belong to the site, not the user's organization role:
+
+| Role | Read | Share, invite, change roles and visibility, restore versions | Delete |
+| --- | --- | --- | --- |
+| Owner (creator) | Yes | Yes | Yes |
+| Admin (explicit grant) | Yes | Yes | No |
+| Member (organization visibility or ordinary invitation) | Yes | No | No |
+
+Organization owners/admins no longer get implicit access to private sites or
+management rights over another creator's sites. Invitations grant read-only
+Member access; a site Owner or Admin can promote an accepted recipient. Owner
+is not a grant and cannot be reassigned or downgraded through this UI/API.
+Removing an individual grant does not remove read access supplied by organization
+visibility. Demoting or revoking an Admin takes effect on subsequent requests.
+
+Site sharing is account-scoped and does not admit external recipients to the
+organization. An explicitly promoted external Admin can manage access from the
+stable site's Share button without acquiring workspace or organization authority.
+Generated iframe content has no access to this management authority. Source
+editing/publishing still requires the creator's bound workspace and agent bridge;
+site roles do not share workspace files or introduce collaborative source editing.
+
+The forward `site_admin_grants` migration expands the existing grant constraint
+to accept `admin`; `viewer` remains the persisted name for a read-only Member.
+It preserves all existing records, does not change owners, and briefly locks
+`site_grants` while replacing/validating the check. Apply it with the explicit
+migration job before rolling out the new code in either deployment profile.
+Do not roll back to pre-role code after assigning Admin grants: old code used
+organization administration as site authority. No data restore is needed for
+the additive migration; use a forward fix for application rollback.
+
+## Invitation delivery
+
+An invitation's `pending` status means **awaiting acceptance**, not delivered.
+The Share dialog shows the installation's configured delivery mode:
+
+- `LEMMACOMPUTER_INVITATION_DELIVERY_MODE=copy-link`: no email is sent. Create
+  the recipient-bound link and deliver it yourself. New link replaces the old one.
+- `email` with `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=capture`: test messages are
+  captured locally, not sent to an inbox.
+- `email` with `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT=postmark`: the existing
+  transactional adapter submits the invitation. A successful submission is not
+  proof of inbox delivery; use the provider's delivery/bounce information.
+
+Real email requires the existing Postmark server token and verified sender
+configuration. Never commit credentials. External recipients also need a
+reachable `LEMMACOMPUTER_PUBLIC_WEB_URL` with the corresponding sign-in callback
+configuration: localhost points to the recipient's own computer. Do not expose
+a local test stack publicly just to send an invitation.
+
+If submission fails, the API returns `SITE_INVITATION_EMAIL_FAILED` (503), not a
+success response. The invitation remains pending and can be retried; retries
+rotate its hashed token. The UI clears obsolete copy links and does not claim
+delivery. Persistent provider delivery receipts/webhooks are not implemented.

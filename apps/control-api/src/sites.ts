@@ -90,7 +90,8 @@ export class SitesService {
     return site.handle ? new URL(`/s/${site.handle}`, this.publicWebUrl).toString() : null;
   }
 
-  private siteView(site: SiteRecord, actor?: SiteAccessActor) {
+  private async siteView(site: SiteRecord, actor?: SiteAccessActor) {
+    const role = actor ? await this.store.getSiteRole(actor, site) : "owner";
     return {
       id: site.id,
       handle: site.handle,
@@ -102,8 +103,9 @@ export class SitesService {
       stableUrl: this.stableUrl(site),
       sourceWorkspaceId: site.sourceWorkspaceId,
       sourceAgentId: site.sourceAgentId,
-      canManage: actor ? site.tenantId === actor.tenantId
-        && (site.subjectId === actor.subjectId || actor.isOrganizationAdministrator === true) : true,
+      role,
+      canManage: role === "owner" || role === "admin",
+      canDelete: role === "owner",
       createdAt: site.createdAt.toISOString(),
       updatedAt: site.updatedAt.toISOString(),
     };
@@ -130,18 +132,18 @@ export class SitesService {
   }
 
   async list(actor: SiteAccessActor) {
-    return { sites: (await this.store.listSites(actor)).map((site) => this.siteView(site, actor)) };
+    return { sites: await Promise.all((await this.store.listSites(actor)).map((site) => this.siteView(site, actor))) };
   }
 
   async listOwned(identity: IdentityContext) {
-    return { sites: (await this.store.listOwnedSites(identity)).map((site) => this.siteView(site)) };
+    return { sites: await Promise.all((await this.store.listOwnedSites(identity)).map((site) => this.siteView(site))) };
   }
 
   async inspectOwned(identity: IdentityContext, rawSiteId: string) {
     const publication = await this.store.getOwnedPublication(identity, z.uuid().parse(rawSiteId));
     if (!publication) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return {
-      ...this.siteView(publication.site),
+      ...await this.siteView(publication.site),
       publishedVersion: publication.version ? this.versionView(publication.version) : null,
     };
   }
@@ -175,7 +177,7 @@ export class SitesService {
     });
     if (prepared.version.state === "ready") return {
       published: true,
-      ...this.siteView(prepared.site),
+      ...await this.siteView(prepared.site),
       publishedVersion: prepared.version.version,
     };
     if (prepared.version.state === "failed") {
@@ -234,7 +236,7 @@ export class SitesService {
       if (!finalized) throw new Error("Site publication could not move its published version pointer");
       return {
         published: true,
-        ...this.siteView(finalized.site),
+        ...await this.siteView(finalized.site),
         publishedVersion: finalized.version.version,
       };
     } catch (error) {
@@ -247,7 +249,7 @@ export class SitesService {
         if (committed?.version?.id === version.id && committed.version.state === "ready") {
           return {
             published: true,
-            ...this.siteView(committed.site),
+            ...await this.siteView(committed.site),
             publishedVersion: committed.version.version,
           };
         }
@@ -297,7 +299,7 @@ export class SitesService {
     if (!publication?.version) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return {
       tenantId: publication.site.tenantId,
-      site: this.siteView(publication.site, actor),
+      site: await this.siteView(publication.site, actor),
       version: publication.version.version,
     };
   }
@@ -325,7 +327,8 @@ export class SitesService {
       this.store.listSiteInvitations(actor, siteId, new Date()),
     ]);
     return {
-      site: this.siteView(site, actor),
+      site: await this.siteView(site, actor),
+      ownerAccountUserId: site.creatorAccountUserId,
       versions: (versions ?? []).map((version) => this.versionView(version)),
       grants: (grants ?? []).map((grant) => ({
         id: grant.id,
@@ -346,8 +349,8 @@ export class SitesService {
   }
 
   async grant(actor: SiteAccessActor, rawSiteId: string, raw: unknown) {
-    const input = z.strictObject({ accountUserId: z.uuid() }).parse(raw);
-    const grant = await this.store.grantSiteAccess(actor, z.uuid().parse(rawSiteId), input.accountUserId);
+    const input = z.strictObject({ accountUserId: z.uuid(), permission: z.enum(["viewer", "admin"]).default("viewer") }).parse(raw);
+    const grant = await this.store.grantSiteAccess(actor, z.uuid().parse(rawSiteId), input.accountUserId, input.permission);
     if (!grant) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return { id: grant.id, accountUserId: grant.granteeAccountUserId, permission: grant.permission, active: true };
   }

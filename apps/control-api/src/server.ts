@@ -1169,7 +1169,7 @@ export function createControlServer(
   const principals = new WeakMap<object, SessionPrincipal>();
   const platformOperatorPrincipals = new WeakMap<object, PlatformOperatorSession>();
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
-  type SiteViewerAccount = { actor: SiteAccessActor; accountUserId: string; email: string; authenticationSessionId: string };
+  type SiteViewerAccount = { actor: SiteAccessActor; accountUserId: string; email: string; authenticationSessionId: string; displayName: string };
   const siteViewerAccounts = new WeakMap<object, SiteViewerAccount>();
   const siteAssetAccess = new SiteAssetAccessAuthority(proxyToken);
   const siteAssetTenants = new WeakMap<object, string>();
@@ -1180,9 +1180,9 @@ export function createControlServer(
     actor: resolution.status === "authorized" ? {
       tenantId: resolution.principal.tenantId, subjectId: resolution.principal.userId,
       accountUserId: resolution.accountUserId,
-      isOrganizationAdministrator: resolution.principal.role === "owner" || resolution.principal.role === "admin",
-    } : { tenantId: "", subjectId: "", accountUserId: resolution.accountUserId },
+    } : { tenantId: "", subjectId: `account:${resolution.accountUserId}`, accountUserId: resolution.accountUserId },
     accountUserId: resolution.accountUserId, email: resolution.user.email,
+    displayName: resolution.user.name,
     authenticationSessionId: resolution.authenticationSessionId,
   });
 
@@ -1320,7 +1320,9 @@ export function createControlServer(
       return;
     }
     const siteViewerPath = /^\/v1\/sites\/viewer\/[A-Za-z0-9_-]{24}$/.test(requestPath)
-      || requestPath === "/v1/sites/invitations/accept";
+      || requestPath === "/v1/sites/invitations/accept"
+      || requestPath === "/v1/sites"
+      || /^\/v1\/sites\/[0-9a-f-]{36}(?:\/(?:grants(?:\/[0-9a-f-]{36})?|invitations(?:\/[0-9a-f-]{36}(?:\/resend)?)?|versions\/\d+\/restore))?$/.test(requestPath);
     if (siteViewerPath) {
       if (security.testIdentityMode) {
         const viewer = testPrincipalFromHeaders(request.headers);
@@ -1329,10 +1331,10 @@ export function createControlServer(
             tenantId: viewer.tenantId,
             subjectId: viewer.userId,
             accountUserId: viewer.accountUserId,
-            isOrganizationAdministrator: viewer.role === "owner" || viewer.role === "admin",
           },
           accountUserId: viewer.accountUserId!,
           email: viewer.email,
+          displayName: viewer.displayName,
           authenticationSessionId: viewer.accountUserId!,
         };
         siteViewerAccounts.set(request, account);
@@ -1413,12 +1415,13 @@ export function createControlServer(
   });
   const identity = (request: object) => identityContextSchema.parse(principal(request).identity);
   const siteActor = (request: object): SiteAccessActor => {
+    const siteAccount = siteViewerAccounts.get(request);
+    if (siteAccount) return siteAccount.actor;
     const actor = principal(request);
     return {
       tenantId: actor.tenantId,
       subjectId: actor.userId,
       accountUserId: actor.accountUserId,
-      isOrganizationAdministrator: actor.role === "owner" || actor.role === "admin",
     };
   };
   const siteViewerAccount = (request: object) => {
@@ -6252,30 +6255,30 @@ export function createControlServer(
     return reply.header("cache-control", "no-store").send({ skills: reviewedAgentSkillCatalog });
   });
   app.get("/v1/sites", async (request, reply) => {
-    await requirePolicy(request);
     return reply.header("cache-control", "no-store").send(await requireSites().list(siteActor(request)));
   });
   app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
-    await requirePolicy(request);
-    return reply.header("cache-control", "no-store").send(await requireSites().manage(siteActor(request), request.params.siteId));
+    return reply.header("cache-control", "no-store").send({
+      ...await requireSites().manage(siteActor(request), request.params.siteId),
+      delivery: {
+        mode: invitationDelivery?.mode ?? "unavailable",
+        captured: invitationDelivery?.email instanceof CaptureTransactionalEmailAdapter,
+      },
+    });
   });
   app.patch<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request) => {
-    await requirePolicy(request);
     return requireSites().visibility(siteActor(request), request.params.siteId, request.body ?? {});
   });
   app.post<{ Params: { siteId: string } }>("/v1/sites/:siteId/grants", async (request, reply) => {
-    await requirePolicy(request);
     return reply.code(201).send(await requireSites().grant(siteActor(request), request.params.siteId, request.body ?? {}));
   });
   app.delete<{ Params: { siteId: string; grantId: string } }>("/v1/sites/:siteId/grants/:grantId", async (request, reply) => {
-    await requirePolicy(request);
     await requireSites().revokeGrant(siteActor(request), request.params.siteId, request.params.grantId);
     return reply.code(204).send();
   });
   app.post<{ Params: { siteId: string } }>("/v1/sites/:siteId/invitations", async (request, reply) => {
-    await requirePolicy(request);
     if (!invitationDelivery) throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
-    const actor = principal(request);
+    const actor = siteViewerAccount(request);
     const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const details = await requireSites().manage(siteActor(request), request.params.siteId);
     let result = await requireSites().invite(siteActor(request), request.params.siteId, { ...input, idempotencyKey: idempotency(request.headers) });
@@ -6300,13 +6303,12 @@ export function createControlServer(
       invitation: result.invitation,
       replayed: result.replayed,
       acceptancePath: invitationDelivery.mode === "copy-link" ? acceptancePath : null,
-      delivery: { mode: invitationDelivery.mode },
+      delivery: { mode: invitationDelivery.mode, captured: invitationDelivery.email instanceof CaptureTransactionalEmailAdapter },
     });
   });
   app.post<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId/resend", async (request) => {
-    await requirePolicy(request);
     if (!invitationDelivery) throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
-    const actor = principal(request);
+    const actor = siteViewerAccount(request);
     const details = await requireSites().manage(siteActor(request), request.params.siteId);
     const result = await requireSites().resendInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
     const acceptancePath = `/s/${details.site.handle}?invite=${encodeURIComponent(result.token)}`;
@@ -6319,14 +6321,12 @@ export function createControlServer(
         expiresAt: new Date(result.invitation.expiresAt),
       });
     }
-    return { invitation: result.invitation, acceptancePath: invitationDelivery.mode === "copy-link" ? acceptancePath : null, delivery: { mode: invitationDelivery.mode } };
+    return { invitation: result.invitation, acceptancePath: invitationDelivery.mode === "copy-link" ? acceptancePath : null, delivery: { mode: invitationDelivery.mode, captured: invitationDelivery.email instanceof CaptureTransactionalEmailAdapter } };
   });
   app.delete<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId", async (request) => {
-    await requirePolicy(request);
     return requireSites().revokeInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
   });
   app.post<{ Params: { siteId: string; version: string } }>("/v1/sites/:siteId/versions/:version/restore", async (request) => {
-    await requirePolicy(request);
     return requireSites().restore(siteActor(request), request.params.siteId, Number(request.params.version));
   });
   app.post("/v1/sites/invitations/accept", async (request) => {
@@ -6355,7 +6355,6 @@ export function createControlServer(
     return reply.headers(headers).type(asset.mediaType).send(asset.bytes);
   });
   app.delete<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
-    await requirePolicy(request);
     await requireSites().delete(siteActor(request), request.params.siteId);
     return reply.code(204).send();
   });

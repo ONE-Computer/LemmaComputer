@@ -8,6 +8,8 @@ import { AgentBridgeAuthority } from "../apps/control-api/src/agent-bridge.js";
 import { createDeterministicSiteZip, validateSiteBundle } from "../apps/control-api/src/site-bundle.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 import type { ControllerClient } from "../apps/control-api/src/service.js";
+import { SitesService } from "../apps/control-api/src/sites.js";
+import type { TransactionalEmailMessage } from "../apps/control-api/src/transactional-email.js";
 
 const proxyToken = "sites-api-proxy-token-at-least-24-characters";
 const agentBridgeSecret = "sites-api-bridge-secret-at-least-32-characters";
@@ -36,6 +38,7 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
   const token = new AgentBridgeAuthority(agentBridgeSecret).issue(identity, workspace.id, policy, { workspaceGeneration: workspace.accessGeneration });
   const app = createControlServer(workspaceStore, {} as ControllerClient, proxyToken, undefined, undefined, { publicWebUrl: "https://lemma.example" }, {
     testIdentityMode: true, identityPolicyStore: identityPolicies, siteStore, artifactStore: new MemoryArtifactStore(), agentBridgeSecret,
+    invitationDelivery: { mode: "copy-link", email: { send: async () => { assert.fail("copy-link invitations must not send email"); } } },
   });
   try {
     const published = await app.inject({ method: "POST", url: "/internal/v1/agent/sites", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, payload: { ...payload, sourceWorkspaceId: "22222222-2222-4222-8222-222222222222", sourceWorkspaceGeneration: 999, sourceAgentId: "spoofed" } });
@@ -70,6 +73,7 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
     assert.equal(visibility.statusCode, 200, visibility.body);
     const invitation = await app.inject({ method: "POST", url: `/v1/sites/${published.json().id}/invitations`, headers: { ...browserHeaders, "content-type": "application/json", "idempotency-key": "invite-guest-test-0001" }, payload: { email: "guest@example.test" } });
     assert.equal(invitation.statusCode, 201, invitation.body);
+    assert.equal(invitation.json().delivery.mode, "copy-link");
     const replayedInvitation = await app.inject({ method: "POST", url: `/v1/sites/${published.json().id}/invitations`, headers: { ...browserHeaders, "content-type": "application/json", "idempotency-key": "invite-guest-test-0001" }, payload: { email: "guest@example.test" } });
     assert.equal(replayedInvitation.statusCode, 200, replayedInvitation.body);
     assert.equal(replayedInvitation.json().replayed, true);
@@ -85,5 +89,65 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
     const removed = await app.inject({ method: "DELETE", url: `/v1/sites/${published.json().id}`, headers: browserHeaders });
     assert.equal(removed.statusCode, 204);
     assert.equal((await app.inject({ method: "GET", url: assetUrl, headers: browserHeaders })).statusCode, 404, "cached bytes do not bypass deletion");
+  } finally { await app.close(); }
+});
+
+test("site roles authorize external accounts without org membership and email failures remain retryable", async () => {
+  const siteStore = new MemorySiteStore(), artifacts = new MemoryArtifactStore();
+  const service = new SitesService(siteStore, artifacts);
+  const site = await service.publish(identity, { ...payload, sourceWorkspaceId: "22222222-2222-4222-8222-222222222222", sourceWorkspaceGeneration: 1, sourceAgentId: "hermes" });
+  const guestId = "33333333-3333-4333-8333-333333333333";
+  let current: "owner" | "guest" | "anonymous" = "owner", emailAccepted = false;
+  const messages: TransactionalEmailMessage[] = [];
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, { publicWebUrl: "https://lemma.example" }, {
+    agentBridgeSecret,
+    siteStore, artifactStore: artifacts,
+    customerProductAuthentication: { resolve: async () => current === "anonymous" ? { status: "anonymous" } : current === "owner"
+      ? { status: "authorized", principal, accountUserId: principal.accountUserId, authenticationSessionId: principal.accountUserId, user: { name: "Alex", email: principal.email } }
+      : { status: "membership-required", accountUserId: guestId, authenticationSessionId: guestId, user: { name: "Guest", email: "guest@example.test" } } } as never,
+    invitationDelivery: { mode: "email", email: { send: async (message) => { messages.push(message); return { accepted: emailAccepted, failure: emailAccepted ? null : "retryable", providerMessageId: emailAccepted ? "test-provider-id" : null }; } } },
+  });
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, "idempotency-key": "site-email-retry-001" };
+  const url = `/v1/sites/${site.id}`;
+  try {
+    const failed = await app.inject({ method: "POST", url: `${url}/invitations`, headers, payload: { email: "guest@example.test" } });
+    assert.equal(failed.statusCode, 503);
+    assert.equal(failed.json().error.code, "SITE_INVITATION_EMAIL_FAILED");
+    emailAccepted = true;
+    const sent = await app.inject({ method: "POST", url: `${url}/invitations`, headers, payload: { email: "guest@example.test" } });
+    assert.equal(sent.statusCode, 200, sent.body);
+    assert.equal(sent.json().acceptancePath, null);
+    assert.deepEqual(sent.json().delivery, { mode: "email", captured: false });
+    assert.equal(messages.length, 2);
+    assert.equal(messages[1]!.to, "guest@example.test");
+    assert.equal(messages[1]!.kind, "site-invitation");
+    const token = messages[1]!.text.match(/invite=(lsi_[A-Za-z0-9_-]+)/)![1];
+    assert.notEqual(messages[0]!.text, messages[1]!.text, "retry rotates the first unsuccessful invitation token");
+    current = "guest";
+    assert.equal((await app.inject({ method: "POST", url: "/v1/sites/invitations/accept", headers, payload: { token } })).statusCode, 200);
+    const listed = await app.inject({ method: "GET", url: "/v1/sites", headers });
+    assert.equal(listed.json().sites[0].role, "member");
+    for (const request of [
+      { method: "GET" as const, url },
+      { method: "PATCH" as const, url, payload: { visibility: "organization" } },
+      { method: "POST" as const, url: `${url}/grants`, payload: { accountUserId: guestId, permission: "admin" } },
+      { method: "POST" as const, url: `${url}/invitations`, payload: { email: "unwanted@example.test" } },
+      { method: "POST" as const, url: `${url}/versions/1/restore`, payload: {} },
+      { method: "DELETE" as const, url },
+    ]) assert.equal((await app.inject({ ...request, headers })).statusCode, 404);
+    assert.equal(messages.length, 2, "read access cannot trigger an email");
+    await service.grant(identity, site.id, { accountUserId: guestId, permission: "admin" });
+    assert.equal((await app.inject({ method: "GET", url, headers })).json().site.role, "admin");
+    assert.equal((await app.inject({ method: "PATCH", url, headers, payload: { visibility: "organization" } })).statusCode, 200);
+    assert.equal((await app.inject({ method: "POST", url: `${url}/versions/1/restore`, headers, payload: {} })).statusCode, 200);
+    assert.equal((await app.inject({ method: "POST", url: `${url}/invitations`, headers: { ...headers, "idempotency-key": "admin-email-test-001" }, payload: { email: "reader@example.test" } })).statusCode, 201);
+    assert.equal(messages.length, 3);
+    assert.equal((await app.inject({ method: "DELETE", url, headers })).statusCode, 404);
+    assert.equal((await app.inject({ method: "GET", url: "/v1/workspaces", headers })).statusCode, 403, "site Admin grants no organization access");
+    current = "anonymous";
+    assert.equal((await app.inject({ method: "GET", url, headers })).statusCode, 401);
+    assert.equal((await app.inject({ method: "POST", url: `${url}/invitations`, headers, payload: { email: "unwanted@example.test" } })).statusCode, 401);
+    current = "owner";
+    assert.equal((await app.inject({ method: "DELETE", url, headers })).statusCode, 204);
   } finally { await app.close(); }
 });

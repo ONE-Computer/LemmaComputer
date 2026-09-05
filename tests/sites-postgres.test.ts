@@ -36,6 +36,33 @@ test("PostgreSQL Sites versions, grants, invitations, and tenant scoping are ato
     assert.equal((await store.getAccessiblePublicationByHandle({ tenantId, subjectId: ownerId, accountUserId: ownerAccount }, prepared.site.handle!))?.version?.version, 1);
     assert.equal(await store.getAccessiblePublicationByHandle({ tenantId: "other", subjectId: "guest", accountUserId: guestAccount }, prepared.site.handle!), null);
 
+    const owner = { tenantId, subjectId: ownerId, accountUserId: ownerAccount };
+    const orgAdmin = { tenantId, subjectId: "org-admin", accountUserId: guestAccount, isOrganizationAdministrator: true };
+    const external = { tenantId: "", subjectId: "", accountUserId: guestAccount };
+    assert.equal(await store.getManageableSite(orgAdmin, prepared.site.id), null);
+    assert.equal(await store.getAccessiblePublicationByHandle(orgAdmin, prepared.site.handle), null);
+    await store.updateSiteVisibility(owner, prepared.site.id, "organization");
+    assert.ok(await store.getAccessiblePublicationByHandle(orgAdmin, prepared.site.handle));
+    assert.equal(await store.getSiteRole(orgAdmin, prepared.site), "member");
+    assert.equal(await store.grantSiteAccess(orgAdmin, prepared.site.id, guestAccount, "admin"), null);
+    assert.equal((await store.deleteSite(orgAdmin, prepared.site.id)).deleted, false);
+    const adminGrant = await store.grantSiteAccess(owner, prepared.site.id, guestAccount, "admin");
+    assert.equal(adminGrant?.permission, "admin");
+    assert.ok(await store.getManageableSite(external, prepared.site.id));
+    assert.equal(await store.getSiteRole(external, prepared.site), "admin");
+    assert.ok(await store.updateSiteVisibility(external, prepared.site.id, "restricted"));
+    assert.ok(await store.restoreSiteVersion(external, prepared.site.id, 1));
+    assert.equal((await store.deleteSite(external, prepared.site.id)).deleted, false);
+    assert.equal(await store.grantSiteAccess(external, prepared.site.id, ownerAccount, "viewer"), null, "the owner cannot be downgraded via a grant");
+    await store.grantSiteAccess(owner, prepared.site.id, guestAccount, "viewer");
+    assert.equal(await store.getSiteRole(external, prepared.site), "member");
+    assert.equal(await store.getManageableSite(external, prepared.site.id), null);
+    assert.equal(await store.updateSiteVisibility(external, prepared.site.id, "organization"), null);
+    assert.equal(await store.restoreSiteVersion(external, prepared.site.id, 1), null);
+    assert.equal(await store.revokeSiteAccess(external, prepared.site.id, adminGrant!.id), false);
+    await store.revokeSiteAccess(owner, prepared.site.id, adminGrant!.id);
+    assert.equal(await store.getAccessiblePublicationByHandle(external, prepared.site.handle), null);
+
     assert.ok(await store.grantSiteAccess({ tenantId, subjectId: ownerId }, prepared.site.id, guestAccount));
     assert.equal((await store.getAccessiblePublicationByHandle({ tenantId: "other", subjectId: "guest", accountUserId: guestAccount }, prepared.site.handle!))?.site.id, prepared.site.id);
     const now = new Date();

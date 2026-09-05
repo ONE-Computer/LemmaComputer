@@ -813,6 +813,7 @@ const siteUpdatedAt = (value) => new Intl.DateTimeFormat("en", {
 
 function SiteViewerScreen({ handle }) {
   const [viewer, setViewer] = useState(null);
+  const [managing, setManaging] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -838,6 +839,8 @@ function SiteViewerScreen({ handle }) {
   if (!viewer) return <main className="site-viewer-state" role="status">Opening site…</main>;
   return <main className="site-viewer-shell">
     <iframe title={viewer.site.name} src={viewer.entryUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" />
+    {viewer.site.canManage && <button className="secondary-button site-viewer-share" onClick={() => setManaging(true)}>Share</button>}
+    {managing && <SiteManageDialog site={viewer.site} onClose={() => setManaging(false)} onSiteUpdated={(site) => setViewer((current) => ({ ...current, site }))} />}
   </main>;
 }
 
@@ -847,20 +850,43 @@ function SiteManageDialog({ site, onClose, onSiteUpdated }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [acceptancePath, setAcceptancePath] = useState("");
+  const [deliveryStatus, setDeliveryStatus] = useState("");
   const refresh = async () => setDetails(await siteApi.details(site.id));
   useEffect(() => { refresh().catch((value) => setError(value.message)); }, [site.id]);
   const run = async (operation) => {
-    setBusy(true); setError("");
-    try { await operation(); await refresh(); } catch (value) { setError(value.message); } finally { setBusy(false); }
+    setBusy(true); setError(""); setAcceptancePath(""); setDeliveryStatus("");
+    try { await operation(); await refresh(); } catch (value) {
+      setError(value.message);
+      // A delivery failure can leave a pending invitation; expose its retry action.
+      await refresh().catch(() => undefined);
+    } finally { setBusy(false); }
   };
-  return <ModalDialog title={`Share ${site.name}`} description="Choose who can open this stable site URL and manage its immutable versions." eyebrow="Site access" labelledBy="site-access-title" onClose={busy ? () => undefined : onClose}>
+  const invitationResult = (result) => {
+    setAcceptancePath(result.acceptancePath ?? "");
+    setDeliveryStatus(result.delivery?.mode === "copy-link"
+      ? "Invitation link created. No email was sent. Copy the link and send it to the invited person."
+      : result.delivery?.captured ? "Invitation captured for local testing. No email was sent."
+        : "Invitation submitted to the email provider. Inbox delivery is not yet confirmed.");
+  };
+  const copyLink = details?.delivery?.mode === "copy-link";
+  const captured = details?.delivery?.captured;
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  return <ModalDialog title={`Share ${site.name}`} description="Owner can manage and delete. Admin can manage sharing and versions. Member can only read." eyebrow="Site access" labelledBy="site-access-title" onClose={busy ? () => undefined : onClose}>
     {error && <div className="workspace-error" role="alert">{error}</div>}
     {!details ? <p>Loading site access…</p> : <div className="site-manage-content">
-      <label className="modal-field"><span>Visibility</span><SelectMenu value={details.site.visibility} options={[{ value: "private", label: "Only me" }, { value: "organization", label: "Everyone in my organization" }, { value: "restricted", label: "Only invited people" }]} ariaLabel="Visibility" disabled={busy} onValueChange={(visibility) => run(async () => { const updated = await siteApi.setVisibility(site.id, visibility); onSiteUpdated(updated); })} /><small>Viewers must always sign in to LemmaComputer.</small></label>
-      <div className="site-invite-form"><label className="modal-field"><span>Invite by email</span><input type="email" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} placeholder="person@example.com" /></label><button className="primary-button" type="button" disabled={busy || !email.trim()} onClick={() => run(async () => { const result = await siteApi.invite(site.id, email.trim()); setEmail(""); setAcceptancePath(result.acceptancePath ?? ""); })}>Invite</button></div>
+      <p>Your role: <strong>{details.site.role === "owner" ? "Owner" : "Admin"}</strong>. Only the creator is Owner; this role cannot be reassigned here.</p>
+      <label className="modal-field"><span>Visibility</span><SelectMenu value={details.site.visibility} options={[{ value: "private", label: "People with access only" }, { value: "organization", label: "Everyone in my organization" }, { value: "restricted", label: "Only invited people" }]} ariaLabel="Visibility" disabled={busy} onValueChange={(visibility) => run(async () => { const updated = await siteApi.setVisibility(site.id, visibility); onSiteUpdated(updated); })} /><small>Everyone must sign in. Organization access is read-only unless a person is explicitly made a site Admin.</small></label>
+      {(copyLink || captured) && <p role="note">{copyLink ? "Email delivery is off for this installation. Create an invitation link and send it yourself." : "Email is captured for local testing, not sent to recipients."}</p>}
+      {details.delivery?.mode === "unavailable" && <p role="note">Invitation delivery is not configured. Ask your installation administrator to configure email or copy-link delivery.</p>}
+      {loopback && <p role="note">This is a localhost site. Its link works only on this computer; external recipients need a reachable LemmaComputer address.</p>}
+      <div className="site-invite-form"><label className="modal-field"><span>Recipient email</span><input type="email" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} placeholder="person@example.com" /><small>Invited people join as read-only Members. Promote them after they accept.</small></label><button className="primary-button" type="button" disabled={busy || !email.trim() || details.delivery?.mode === "unavailable"} onClick={() => run(async () => { const result = await siteApi.invite(site.id, email.trim()); setEmail(""); invitationResult(result); })}>{copyLink ? "Create invite link" : captured ? "Create test invitation" : "Send invitation"}</button></div>
+      {deliveryStatus && <p role="status">{deliveryStatus}</p>}
       {acceptancePath && <div className="site-copy-link"><input aria-label="Site invitation link" readOnly value={new URL(acceptancePath, window.location.origin).toString()} /><button className="secondary-button" type="button" onClick={() => navigator.clipboard?.writeText(new URL(acceptancePath, window.location.origin).toString())}>Copy link</button></div>}
-      <section><h3>Invitations</h3>{details.invitations.length ? details.invitations.map((item) => <div className="site-manage-row" key={item.id}><span><strong>{item.email}</strong><small>{item.status} · expires {new Date(item.expiresAt).toLocaleDateString()}</small></span>{item.status === "pending" && <span><button className="text-button" disabled={busy} onClick={() => run(async () => { const result = await siteApi.resendInvitation(site.id, item.id); setAcceptancePath(result.acceptancePath ?? ""); })}>Resend</button><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeInvitation(site.id, item.id))}>Revoke</button></span>}</div>) : <p>No invitations.</p>}</section>
-      <section><h3>People with access</h3>{details.grants.filter((item) => item.active).length ? details.grants.filter((item) => item.active).map((item) => <div className="site-manage-row" key={item.id}><code>{item.accountUserId}</code><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeGrant(site.id, item.id))}>Remove</button></div>) : <p>No individual grants.</p>}</section>
+      <section><h3>Invitations</h3><p>Pending means not yet accepted, not proof of email delivery.</p>{details.invitations.length ? details.invitations.map((item) => <div className="site-manage-row" key={item.id}><span><strong>{item.email}</strong><small>{item.status === "pending" ? "Awaiting acceptance" : item.status} · Member · expires {new Date(item.expiresAt).toLocaleDateString()}</small></span>{item.status === "pending" && <span><button className="text-button" disabled={busy} onClick={() => run(async () => { invitationResult(await siteApi.resendInvitation(site.id, item.id)); })}>{copyLink ? "New link" : captured ? "Retry test" : "Resend email"}</button><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeInvitation(site.id, item.id))}>Revoke</button></span>}</div>) : <p>No invitations.</p>}</section>
+      <section><h3>People with access</h3><p>Creator · Owner (cannot be removed)</p>{details.site.visibility === "organization" && <p>Everyone in the organization · Member by default</p>}{details.grants.filter((item) => item.active && item.accountUserId !== details.ownerAccountUserId).map((item) => {
+        const label = details.invitations.find((invite) => invite.acceptedAccountUserId === item.accountUserId)?.email ?? item.accountUserId;
+        return <div className="site-manage-row" key={item.id}><span>{label}</span><SelectMenu value={item.permission} options={[{ value: "viewer", label: "Member — read only" }, { value: "admin", label: "Admin — manage access" }]} ariaLabel={`Role for ${label}`} disabled={busy} onValueChange={(permission) => run(async () => { await siteApi.setGrantPermission(site.id, item.accountUserId, permission); const updated = (await siteApi.list()).sites.find((candidate) => candidate.id === site.id); if (updated) onSiteUpdated(updated); if (!updated?.canManage) onClose(); })} /><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeGrant(site.id, item.id))}>Remove</button></div>;
+      })}</section>
       <section><h3>Versions</h3>{details.versions.map((version) => <div className="site-manage-row" key={version.id}><span><strong>Version {version.version}</strong><small>{version.fileCount} files · {siteUpdatedAt(version.createdAt)}{version.version === details.site.currentRevision ? " · live" : ""}</small></span>{version.state === "ready" && version.version !== details.site.currentRevision && <button className="secondary-button" disabled={busy} onClick={() => run(async () => { const updated = await siteApi.restore(site.id, version.version); onSiteUpdated(updated); })}>Restore</button>}</div>)}</section>
     </div>}
     <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Done</button></div>
@@ -889,6 +915,7 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdate
           <div className="site-row-meta">
             <span>{site.slug}</span>
             <span>Version {site.currentRevision}</span>
+            <span>{site.role === "owner" ? "Owner" : site.role === "admin" ? "Admin" : "Member"}</span>
             <span>{site.visibility === "organization" ? "Organization" : site.visibility === "restricted" ? "Invited people" : "Only me"}</span>
             <span>Published {siteUpdatedAt(site.updatedAt)}</span>
           </div>
@@ -898,7 +925,7 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdate
             Open<span className="sr-only"> {site.name} in a new tab</span>
           </a>
           {site.canManage && <button className="secondary-button compact-button" type="button" onClick={() => setManagedSite(site)}>Share</button>}
-          {site.canManage && <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
+          {site.canDelete && <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
         </div>
       </article>)}
     </section>}

@@ -81,6 +81,43 @@ test("single-use email invitations grant the verified account", async () => {
   assert.equal((await service.viewer({ tenantId: "", subjectId: "", accountUserId: "33333333-3333-4333-8333-333333333333" }, published.handle)).site.id, published.id);
 });
 
+test("per-site roles do not inherit organization authority; only owners can delete", async () => {
+  const service = new SitesService(new MemorySiteStore(), new MemoryArtifactStore());
+  const site = await service.publish(owner, publishInput("Roles"));
+  const member = { tenantId: owner.tenantId, subjectId: "org-admin", accountUserId: "22222222-2222-4222-8222-222222222222", isOrganizationAdministrator: true };
+  const external = { tenantId: "", subjectId: "", accountUserId: "33333333-3333-4333-8333-333333333333" };
+  await assert.rejects(() => service.viewer(member, site.handle), { code: "SITE_NOT_FOUND" });
+  await service.visibility(owner, site.id, { visibility: "organization" });
+  assert.equal((await service.viewer(member, site.handle)).site.role, "member");
+  assert.equal((await service.list(member)).sites[0]?.canManage, false);
+  for (const actor of [member, external]) {
+    for (const operation of [
+      () => service.manage(actor, site.id),
+      () => service.visibility(actor, site.id, { visibility: "organization" }),
+      () => service.grant(actor, site.id, { accountUserId: actor.accountUserId, permission: "admin" }),
+      () => service.invite(actor, site.id, { email: "nobody@example.test", idempotencyKey: "unauthorized-001" }),
+      () => service.restore(actor, site.id, 1),
+      () => service.delete(actor, site.id),
+    ]) await assert.rejects(operation, { code: "SITE_NOT_FOUND" });
+  }
+  const grant = await service.grant(owner, site.id, { accountUserId: external.accountUserId, permission: "admin" });
+  assert.equal((await service.viewer(external, site.handle)).site.role, "admin");
+  assert.equal((await service.viewer(external, site.handle)).site.canDelete, false);
+  await service.visibility(external, site.id, { visibility: "restricted" });
+  await service.restore(external, site.id, 1);
+  const invitation = await service.invite(external, site.id, { email: "member@example.test", idempotencyKey: "admin-invite-0001" });
+  await service.resendInvitation(external, site.id, invitation.invitation.id);
+  await service.revokeInvitation(external, site.id, invitation.invitation.id);
+  await assert.rejects(() => service.delete(external, site.id), { code: "SITE_NOT_FOUND" });
+  await service.grant(owner, site.id, { accountUserId: external.accountUserId, permission: "viewer" });
+  assert.equal((await service.viewer(external, site.handle)).site.role, "member");
+  await assert.rejects(() => service.manage(external, site.id), { code: "SITE_NOT_FOUND" });
+  await service.revokeGrant(owner, site.id, grant.id);
+  await assert.rejects(() => service.viewer(external, site.handle), { code: "SITE_NOT_FOUND" });
+  await assert.rejects(() => service.grant(owner, site.id, { accountUserId: external.accountUserId, permission: "owner" }));
+  await service.delete(owner, site.id);
+});
+
 test("keeps the previous version live when artifact finalization fails", async () => {
   const artifacts = new MemoryArtifactStore();
   const service = new SitesService(new MemorySiteStore(), artifacts);
