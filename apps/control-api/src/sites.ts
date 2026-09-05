@@ -296,9 +296,9 @@ export class SitesService {
     const publication = await this.store.getAccessiblePublicationByHandle(actor, handle);
     if (!publication?.version) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return {
+      tenantId: publication.site.tenantId,
       site: this.siteView(publication.site, actor),
       version: publication.version.version,
-      entryUrl: `/api/v1/sites/viewer/${handle}/versions/${publication.version.version}/assets/index.html`,
     };
   }
 

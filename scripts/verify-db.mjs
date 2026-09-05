@@ -175,6 +175,7 @@ try {
     "tests/chat-store-postgres.test.ts",
     "tests/telegram-token-intake-postgres.test.ts",
     "tests/sites-postgres.test.ts",
+    "tests/site-viewer-session-postgres.test.ts",
     "tests/migration-ledger-baseline-postgres.test.ts",
   ], {
     env: {
@@ -199,6 +200,7 @@ try {
       CHAT_STORE_TEST_DATABASE_URL: postgresUrl,
       TELEGRAM_INTAKE_TEST_DATABASE_URL: postgresUrl,
       SITES_TEST_DATABASE_URL: postgresUrl,
+      SITE_VIEWER_AUTH_TEST_DATABASE_URL: `postgres://postgres:${password}@127.0.0.1:${hostPort}/authentication`,
       MIGRATION_LEDGER_LEGACY_TEST_DATABASE_URL: migrationLedgerLegacyUrl,
       MIGRATION_LEDGER_FRESH_TEST_DATABASE_URL: migrationLedgerFreshUrl,
     },

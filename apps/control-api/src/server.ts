@@ -5,7 +5,7 @@ import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assign
 import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
-import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
+import { PostgresAuthenticationStore, readSiteViewerSession } from "@lemmacomputer/auth-store";
 import { FilesystemArtifactStore, S3ArtifactStore, type ArtifactStore } from "@lemmacomputer/artifact-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
 import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatConversationRecord, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteAccessActor, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
@@ -47,6 +47,7 @@ import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
+import { SiteAssetAccessAuthority, siteAssetAccessPath, siteAssetHeaders, redactSiteAssetAccessUrl } from "./site-asset-access.js";
 import { AgentProcessLifecycleService, callerSuppliedAgentInstanceId } from "./agent-process-lifecycle.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
@@ -84,7 +85,7 @@ type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
   "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
   | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession" | "clearCurrentOrganizationSelection"
->;
+> & Partial<Pick<CustomerProductAuthenticationService, "resolveSiteViewerSession">>;
 type TenantSsoAdministrationBoundary = Pick<
   TenantSsoAdministrationService,
   "list" | "register" | "requestDomainVerification" | "verifyDomain" | "startTest" | "completeTest" | "startEnforcedSignIn" | "startInvitationSignIn" | "transition"
@@ -793,7 +794,7 @@ export function createControlServer(
     toolPolicies: { search_files: "allow" },
   };
   const app = Fastify({
-    logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
+    logger: { serializers: { req: (request) => ({ method: request.method, url: redactSiteAssetAccessUrl(request.url ?? ""), host: request.headers?.host, remoteAddress: request.ip, remotePort: request.socket?.remotePort }) }, redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/(?:callback|admin-consent\/callback|sharepoint-admin-consent\/callback)/.test(request.url)
         || request.url.startsWith("/v1/auth/")
@@ -1168,7 +1169,22 @@ export function createControlServer(
   const principals = new WeakMap<object, SessionPrincipal>();
   const platformOperatorPrincipals = new WeakMap<object, PlatformOperatorSession>();
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
-  const siteViewerAccounts = new WeakMap<object, { actor: SiteAccessActor; accountUserId: string; email: string }>();
+  type SiteViewerAccount = { actor: SiteAccessActor; accountUserId: string; email: string; authenticationSessionId: string };
+  const siteViewerAccounts = new WeakMap<object, SiteViewerAccount>();
+  const siteAssetAccess = new SiteAssetAccessAuthority(proxyToken);
+  const siteAssetTenants = new WeakMap<object, string>();
+  // No customer sessions are cached in production. Test identities have no
+  // Better Auth session database; this map exists only in explicit test mode.
+  const testSiteViewers = security.testIdentityMode ? new Map<string, SiteViewerAccount>() : null;
+  const resolvedSiteViewer = (resolution: CustomerProductAuthenticationResolution): SiteViewerAccount | null => resolution.status === "anonymous" ? null : ({
+    actor: resolution.status === "authorized" ? {
+      tenantId: resolution.principal.tenantId, subjectId: resolution.principal.userId,
+      accountUserId: resolution.accountUserId,
+      isOrganizationAdministrator: resolution.principal.role === "owner" || resolution.principal.role === "admin",
+    } : { tenantId: "", subjectId: "", accountUserId: resolution.accountUserId },
+    accountUserId: resolution.accountUserId, email: resolution.user.email,
+    authenticationSessionId: resolution.authenticationSessionId,
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     // Fastify's request.url includes the raw query string. Authenticate based
@@ -1291,12 +1307,24 @@ export function createControlServer(
       || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/personal-tenant"
       || requestPath === "/v1/auth/owner-step-up"
       || requestPath === "/v1/auth/invitations/context" || requestPath === "/v1/auth/invitations/accept") return;
-    const siteViewerPath = /^\/v1\/sites\/viewer\/[A-Za-z0-9_-]{24}(?:\/versions\/\d+\/assets\/.*)?$/.test(requestPath)
+    const assetAccess = siteAssetAccessPath.exec(requestPath);
+    if (assetAccess) {
+      if (request.method !== "GET" && request.method !== "HEAD") throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+      const claims = siteAssetAccess.verify(assetAccess[3]!, assetAccess[1]!, Number(assetAccess[2]));
+      const account = testSiteViewers
+        ? testSiteViewers.get(claims.authenticationSessionId)
+        : resolvedSiteViewer(await security.customerProductAuthentication?.resolveSiteViewerSession?.(claims.authenticationSessionId, claims.accountUserId) ?? { status: "anonymous" });
+      if (!account || account.accountUserId !== claims.accountUserId) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+      siteViewerAccounts.set(request, account);
+      siteAssetTenants.set(request, claims.tenantId);
+      return;
+    }
+    const siteViewerPath = /^\/v1\/sites\/viewer\/[A-Za-z0-9_-]{24}$/.test(requestPath)
       || requestPath === "/v1/sites/invitations/accept";
     if (siteViewerPath) {
       if (security.testIdentityMode) {
         const viewer = testPrincipalFromHeaders(request.headers);
-        siteViewerAccounts.set(request, {
+        const account = {
           actor: {
             tenantId: viewer.tenantId,
             subjectId: viewer.userId,
@@ -1305,23 +1333,17 @@ export function createControlServer(
           },
           accountUserId: viewer.accountUserId!,
           email: viewer.email,
-        });
+          authenticationSessionId: viewer.accountUserId!,
+        };
+        siteViewerAccounts.set(request, account);
+        testSiteViewers!.set(account.authenticationSessionId, account);
         return;
       }
       const resolution = await security.customerProductAuthentication!.resolve(fromNodeHeaders(request.raw.headers));
       if (resolution.status === "anonymous") {
         return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
       }
-      siteViewerAccounts.set(request, {
-        actor: resolution.status === "authorized" ? {
-          tenantId: resolution.principal.tenantId,
-          subjectId: resolution.principal.userId,
-          accountUserId: resolution.accountUserId,
-          isOrganizationAdministrator: resolution.principal.role === "owner" || resolution.principal.role === "admin",
-        } : { tenantId: "", subjectId: "", accountUserId: resolution.accountUserId },
-        accountUserId: resolution.accountUserId,
-        email: resolution.user.email,
-      });
+      siteViewerAccounts.set(request, resolvedSiteViewer(resolution)!);
       return;
     }
     let customerResolution: CustomerProductAuthenticationResolution | undefined;
@@ -6314,23 +6336,22 @@ export function createControlServer(
   });
   app.get<{ Params: { handle: string } }>("/v1/sites/viewer/:handle", async (request, reply) => {
     const account = siteViewerAccount(request);
-    return reply.header("cache-control", "no-store").send(await requireSites().viewer(account.actor, request.params.handle));
+    const { tenantId, ...viewer } = await requireSites().viewer(account.actor, request.params.handle);
+    const access = siteAssetAccess.issue({ tenantId, handle: request.params.handle, version: viewer.version,
+      accountUserId: account.accountUserId, authenticationSessionId: account.authenticationSessionId });
+    return reply.header("cache-control", "no-store").send({ ...viewer, ...access });
   });
-  app.get<{ Params: { handle: string; version: string; "*": string } }>("/v1/sites/viewer/:handle/versions/:version/assets/*", async (request, reply) => {
+  app.get<{ Params: { handle: string; version: string; access: string; "*": string } }>("/v1/sites/viewer/:handle/versions/:version/access/:access/assets/*", async (request, reply) => {
     const account = siteViewerAccount(request);
     const asset = await requireSites().asset(account.actor, request.params.handle, Number(request.params.version), request.params["*"]);
+    if (asset.site.tenantId !== siteAssetTenants.get(request)) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     const publicOrigin = new URL(connectionOptions.publicWebUrl ?? "http://localhost:4174").origin;
+    const resourceBase = `${publicOrigin}/api/v1/sites/viewer/${request.params.handle}/versions/${request.params.version}/access/${request.params.access}/assets/`;
     const headers: Record<string, string> = {
-      "cache-control": "private, no-store",
-      "content-security-policy": `sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src ${publicOrigin}; form-action 'none'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'; navigate-to 'none'`,
-      "cross-origin-resource-policy": "cross-origin",
-      "referrer-policy": "no-referrer",
-      "x-content-type-options": "nosniff",
+      ...siteAssetHeaders(resourceBase),
       "etag": asset.etag,
     };
     if (request.params["*"] === "index.html") headers["cross-origin-opener-policy"] = "same-origin";
-    headers["access-control-allow-origin"] = "null";
-    headers["access-control-allow-credentials"] = "true";
     return reply.headers(headers).type(asset.mediaType).send(asset.bytes);
   });
   app.delete<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
@@ -6554,7 +6575,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(env.DATABASE_URL);
   const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(protectedWorkspacePolicyStore);
   const customerProductAuthentication = new CustomerProductAuthenticationService(
-    createBetterAuthSessionReader(customerAuthentication),
+    { ...createBetterAuthSessionReader(customerAuthentication),
+      getSiteViewerSession: (sessionId, accountUserId) => readSiteViewerSession(authenticationPool, sessionId, accountUserId) },
     identityPolicyStore,
     () => new Date(),
     { installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND },

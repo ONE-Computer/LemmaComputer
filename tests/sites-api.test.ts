@@ -53,12 +53,18 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
 
     const viewer = await app.inject({ method: "GET", url: `/v1/sites/viewer/${published.json().handle}`, headers: browserHeaders });
     assert.equal(viewer.statusCode, 200, viewer.body);
-    const asset = await app.inject({ method: "GET", url: viewer.json().entryUrl.replace(/^\/api/, ""), headers: browserHeaders });
+    const assetUrl = viewer.json().entryUrl.replace(/^\/api/, "");
+    const asset = await app.inject({ method: "GET", url: assetUrl, headers: { "x-lemmacomputer-proxy-token": proxyToken } });
     assert.equal(asset.statusCode, 200, asset.body);
     assert.equal(asset.headers["cache-control"], "private, no-store");
     assert.match(asset.headers["content-security-policy"] ?? "", /sandbox allow-scripts/);
     assert.match(asset.headers["content-security-policy"] ?? "", /navigate-to 'none'/);
     assert.match(asset.body, /Hello world/);
+    assert.equal(asset.headers["access-control-allow-origin"], "null");
+    assert.equal(asset.headers["access-control-allow-credentials"], undefined);
+    assert.equal((await app.inject({ method: "GET", url: assetUrl })).statusCode, 401, "proxy trust is still required");
+    assert.equal((await app.inject({ method: "POST", url: assetUrl, headers: browserHeaders })).statusCode, 404);
+    assert.equal((await app.inject({ method: "GET", url: assetUrl.replace("/versions/1/", "/versions/2/"), headers: browserHeaders })).statusCode, 404);
 
     const visibility = await app.inject({ method: "PATCH", url: `/v1/sites/${published.json().id}`, headers: { ...browserHeaders, "content-type": "application/json" }, payload: { visibility: "restricted" } });
     assert.equal(visibility.statusCode, 200, visibility.body);
@@ -78,5 +84,6 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
 
     const removed = await app.inject({ method: "DELETE", url: `/v1/sites/${published.json().id}`, headers: browserHeaders });
     assert.equal(removed.statusCode, 204);
+    assert.equal((await app.inject({ method: "GET", url: assetUrl, headers: browserHeaders })).statusCode, 404, "cached bytes do not bypass deletion");
   } finally { await app.close(); }
 });
