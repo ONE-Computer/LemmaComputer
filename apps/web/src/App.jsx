@@ -906,25 +906,25 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdate
       </section>
     ) : <section className="sites-list" aria-label="Your sites">
       {sites.map((site) => <article className="site-row" key={site.id}>
-        <div className="site-row-copy">
-          <div className="site-row-heading">
-            <h2>{site.name}</h2>
-            <span className="site-state"><span aria-hidden="true" />Ready</span>
+          <div className="site-row-copy">
+            <div className="site-row-heading">
+              <h2><a className="site-row-title-link" href={`/s/${site.handle}`} target="_blank" rel="noopener noreferrer">{site.name}<span className="sr-only"> in a new tab</span></a></h2>
+              <span className="site-state"><span aria-hidden="true" />Ready</span>
+            </div>
+            <div className="site-row-meta">
+              <span>{site.slug}</span>
+              <span>Version {site.currentRevision}</span>
+              <span>{site.role === "owner" ? "Owner" : "Can view"}</span>
+              <span>{site.visibility === "organization" ? "Organization" : site.visibility === "restricted" ? "Invited people" : "Only me"}</span>
+              <span>Published {siteUpdatedAt(site.updatedAt)}</span>
+            </div>
           </div>
-          <div className="site-row-meta">
-            <span>{site.slug}</span>
-            <span>Version {site.currentRevision}</span>
-            <span>{site.role === "owner" ? "Owner" : "Can view"}</span>
-            <span>{site.visibility === "organization" ? "Organization" : site.visibility === "restricted" ? "Invited people" : "Only me"}</span>
-            <span>Published {siteUpdatedAt(site.updatedAt)}</span>
-          </div>
-        </div>
         <div className="site-row-actions">
           <a className="primary-button compact-button" href={`/s/${site.handle}`} target="_blank" rel="noopener noreferrer">
             Open<span className="sr-only"> {site.name} in a new tab</span>
           </a>
           {site.canManage && <button className="secondary-button compact-button" type="button" onClick={() => setManagedSite(site)}>Share</button>}
-          {site.canDelete && <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
+          {site.canDelete && <button className="secondary-button danger-button compact-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}><Delete24Regular aria-hidden="true" />{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
         </div>
       </article>)}
     </section>}

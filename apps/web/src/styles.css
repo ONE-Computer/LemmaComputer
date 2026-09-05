@@ -7703,6 +7703,9 @@ a.chat-file-part:hover {
 .site-row-copy { display: grid; gap: 8px; min-width: 0; }
 .site-row-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .site-row-heading h2 { min-width: 0; margin: 0; color: var(--navy); font-size: 18px; overflow-wrap: anywhere; }
+.site-row-title-link { color: inherit; text-decoration: none; }
+.site-row-title-link:hover { text-decoration: underline; }
+.site-row-title-link:focus-visible { border-radius: 2px; outline: 2px solid #436a9f; outline-offset: 3px; }
 .site-state { display: inline-flex; align-items: center; gap: 6px; color: #24734a; font-size: 12px; font-weight: 700; }
 .site-state > span { width: 7px; height: 7px; border-radius: 50%; background: #39a66a; }
 .site-row-meta { display: flex; flex-wrap: wrap; align-items: center; color: #6f7984; font-size: 13px; }

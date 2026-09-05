@@ -16,7 +16,7 @@ test("builds from the reviewed chat skill and manages the published site", async
   await expect(page).toHaveURL(/view=sites/);
   const row = page.getByRole("article").filter({ hasText: "Hello world" });
   await expect(row).toContainText("Version 1");
-  await expect(row.locator("img, svg")).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Delete", exact: true }).locator("svg")).toHaveCount(1);
 
   const [sitePage] = await Promise.all([
     page.context().waitForEvent("page"),
@@ -28,6 +28,13 @@ test("builds from the reviewed chat skill and manages the published site", async
   expect(await sitePage.evaluate(() => window.opener)).toBeNull();
   await testInfo.attach("site-viewer", { body: await sitePage.screenshot(), contentType: "image/png" });
   await sitePage.close();
+
+  const [titleSitePage] = await Promise.all([
+    page.context().waitForEvent("page"),
+    row.getByRole("link", { name: "Hello world in a new tab", exact: true }).click(),
+  ]);
+  await expect(titleSitePage).toHaveURL(/\/s\/[A-Za-z0-9_-]{24}$/);
+  await titleSitePage.close();
 
   await row.getByRole("button", { name: "Share" }).click();
   await expect(page.getByRole("heading", { name: "Share Hello world" })).toBeVisible();
@@ -91,12 +98,14 @@ test("Sites shares view-only access with owner controls and one scroll container
   const owner = page.getByRole("article").filter({ hasText: "owner dashboard" });
   const viewer = page.getByRole("article").filter({ hasText: "viewer dashboard" });
   await expect(owner.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
+  await expect(owner.getByRole("button", { name: "Delete", exact: true })).toHaveClass(/secondary-button/);
+  await expect(owner.getByRole("button", { name: "Delete", exact: true }).locator("svg")).toHaveCount(1);
   await expect(viewer).toContainText("Can view");
   await expect(viewer.getByRole("button")).toHaveCount(0);
-  await expect(viewer.getByRole("link")).toBeVisible();
+  await expect(viewer.getByRole("link", { name: /Open viewer dashboard/ })).toBeVisible();
   for (const viewport of [{ width: 1366, height: 650 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    const open = await owner.getByRole("link").boundingBox();
+    const open = await owner.getByRole("link", { name: /Open owner dashboard/ }).boundingBox();
     const share = await owner.getByRole("button", { name: "Share", exact: true }).boundingBox();
     expect(open!.width).toBe(share!.width);
     expect(open!.height).toBe(share!.height);
