@@ -147,6 +147,9 @@ export class PolicyBundleAuthority {
 // The controller owns the workspace startup deadline. Control needs additional
 // transport grace so it can receive and preserve the controller's typed result.
 export const DEFAULT_CONTROLLER_REQUEST_TIMEOUT_MS = 90_000;
+// Allows destroy + create transport budgets and setup/cleanup grace. A lost
+// Control request must not leave a durable operation claimed indefinitely.
+export const WORKSPACE_OPERATION_TIMEOUT_MS = 5 * 60_000;
 
 export class HttpControllerClient implements ControllerClient {
   constructor(
@@ -398,17 +401,21 @@ export class WorkspaceService {
     return { gateway: primary.gateway, agentBridge: primary.agentBridge, agentGrants };
   }
 
-  private async revokeAgentGrants(workspaceId: string, policy: RuntimePolicy) {
+  private async revokeAgentGrants(workspaceId: string, policy: RuntimePolicy, maximumGeneration?: number) {
+    if (maximumGeneration !== undefined) {
+      await this.gateway?.revokeWorkspace(workspaceId, maximumGeneration);
+      return;
+    }
     await Promise.all(this.agentPolicies(policy).map((agentPolicy) => (
       this.gateway?.revoke(workspaceId, agentPolicy.agentId)
     )));
   }
 
-  private async revokeAgentGrantsReliably(workspaceId: string, policy: RuntimePolicy) {
+  private async revokeAgentGrantsReliably(workspaceId: string, policy: RuntimePolicy, maximumGeneration?: number) {
     const delays = [75, 225];
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await this.revokeAgentGrants(workspaceId, policy);
+        await this.revokeAgentGrants(workspaceId, policy, maximumGeneration);
         return;
       } catch (error) {
         const retryable = error instanceof LemmaComputerError && error.retryable;
@@ -458,7 +465,7 @@ export class WorkspaceService {
     const previousGeneration = claimed.accessGeneration;
     let providerDestroyed = !claimed.providerId;
     try {
-      await this.store.revokeAccessGrants(claimed.id);
+      await this.store.revokeAccessGrants(claimed.id, claimed.operationToken!);
       if (claimed.providerId) {
         await this.controller.destroyWorkspace(claimed.id, claimed.providerId);
         providerDestroyed = true;
@@ -484,7 +491,19 @@ export class WorkspaceService {
     let record = await this.store.getCurrent(identity, grantId);
     if (!record) return null;
     // The operation owner alone decides when a start/restart/stop has finished.
-    if (record.operationToken !== null) return this.view(record, policy);
+    if (record.operationToken !== null) {
+      const expiredBefore = new Date(Date.now() - WORKSPACE_OPERATION_TIMEOUT_MS);
+      if (record.updatedAt <= expiredBefore) {
+        const expired = await this.store.expireOperation(record, expiredBefore);
+        if (expired) {
+          await this.gateway?.revokeWorkspace(record.id, record.accessGeneration).catch(() => undefined);
+          return this.view(expired, policy);
+        }
+        const latest = await this.store.getCurrent(identity, grantId);
+        return latest ? this.view(latest, policy) : null;
+      }
+      return this.view(record, policy);
+    }
     let projectedIntegrity: PolicyIntegrityView | undefined;
     let projectedEgressPolicy: Sandbox["egressPolicyProjection"];
     if (record.providerId && ["provisioning", "ready", "open", "restarting", "stopping"].includes(record.state)) {
@@ -633,6 +652,12 @@ export class WorkspaceService {
     await this.revokeGatewayGrants(workspaceId, policy);
   }
 
+  private async revokeFailedOperation(workspace: WorkspaceRecord) {
+    // An expired/replaced operation must never revoke a replacement's grants.
+    const revoked = await this.store.revokeAccessGrants(workspace.id, workspace.operationToken!);
+    await this.gateway?.revokeWorkspace(workspace.id, revoked.accessGeneration - 1);
+  }
+
   async create(identity: IdentityContext, policy: RuntimePolicy, grantId: string, idempotencyKey: string, correlationId: string) {
     let record = await this.store.createOrGet(identity, grantId, idempotencyKey);
     if (["ready", "open", "provisioning", "restarting"].includes(record.state)) return this.view(record, policy);
@@ -659,7 +684,7 @@ export class WorkspaceService {
       record = await this.store.finish(claimed.id, claimed.operationToken!, { state: sandbox.state === "ready" ? "ready" : "provisioning", providerId: sandbox.providerId, failureCode: sandbox.failureCode });
       return this.view(record, policy, authorized, sandbox.policyIntegrity);
     } catch (error) {
-      await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
+      await this.revokeFailedOperation(claimed).catch(() => undefined);
       await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", failureCode: error instanceof LemmaComputerError ? error.code : "PROVISION_FAILED" });
       throw error;
     }
@@ -705,7 +730,7 @@ export class WorkspaceService {
     const claimed = await this.store.claim(record.id, ["ready", "open", "stopped", "failed"], "restarting");
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     try {
-      const accessRecord = await this.store.revokeAccessGrants(claimed.id);
+      const accessRecord = await this.store.revokeAccessGrants(claimed.id, claimed.operationToken!);
       if (claimed.providerId) await this.controller.destroyWorkspace(claimed.id, claimed.providerId);
       const authorized = this.authorizePolicy(identity, accessRecord, policy);
       const verifiedPolicy = authorized?.payload.policy ?? policy;
@@ -731,7 +756,7 @@ export class WorkspaceService {
         sandbox.policyIntegrity,
       );
     } catch (error) {
-      await this.revokePolicyGrant(claimed.id, policy).catch(() => undefined);
+      await this.revokeFailedOperation(claimed).catch(() => undefined);
       await this.store.finish(claimed.id, claimed.operationToken!, { state: "failed", providerId: null, failureCode: error instanceof LemmaComputerError ? error.code : "RESTART_FAILED" });
       throw error;
     }
@@ -746,7 +771,7 @@ export class WorkspaceService {
       : ["ready" as const, "open" as const, "provisioning" as const, "restarting" as const, "failed" as const];
     const claimed = await this.store.claim(record.id, allowed, "stopping");
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
-    await this.store.revokeAccessGrants(claimed.id);
+    await this.store.revokeAccessGrants(claimed.id, claimed.operationToken!);
     try {
       if (claimed.providerId) await this.controller.destroyWorkspace(claimed.id, claimed.providerId);
     } catch (error) {
@@ -758,7 +783,7 @@ export class WorkspaceService {
       throw error;
     }
     try {
-      await this.revokeAgentGrantsReliably(claimed.id, policy);
+      await this.revokeAgentGrantsReliably(claimed.id, policy, claimed.accessGeneration);
     } catch (error) {
       await this.store.finish(claimed.id, claimed.operationToken!, {
         state: "stopped",

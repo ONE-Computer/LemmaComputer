@@ -473,7 +473,8 @@ export interface WorkspaceStore {
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   reconcile(observed: WorkspaceRecord, patch: Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">): Promise<WorkspaceRecord | null>;
-  revokeAccessGrants(workspaceId: string): Promise<WorkspaceRecord>;
+  revokeAccessGrants(workspaceId: string, operationToken?: string): Promise<WorkspaceRecord>;
+  expireOperation(observed: WorkspaceRecord, expiredBefore: Date): Promise<WorkspaceRecord | null>;
   getDeletionImpact(identity: IdentityContext, workspaceId: string): Promise<WorkspaceDeletionImpact | null>;
   tombstone(identity: IdentityContext, workspaceId: string, contentDisposition: WorkspaceContentDisposition): Promise<boolean>;
   remove(identity: IdentityContext, workspaceId: string): Promise<boolean>;
@@ -1082,10 +1083,24 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
-  async revokeAccessGrants(workspaceId: string) {
+  async expireOperation(observed: WorkspaceRecord, expiredBefore: Date) {
+    if (!observed.operationToken) return null;
     const result = await this.pool.query(
-      "UPDATE workspaces SET access_generation=access_generation+1, updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING *",
-      [workspaceId],
+      `UPDATE workspaces SET state='failed',failure_code='WORKSPACE_OPERATION_INTERRUPTED',
+         operation_token=NULL,access_generation=access_generation+1,updated_at=now()
+       WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND operation_token=$4
+         AND access_generation=$5 AND provider_id IS NOT DISTINCT FROM $6 AND state=$7
+         AND updated_at<=$8 AND deleted_at IS NULL RETURNING *`,
+      [observed.id, observed.tenantId, observed.subjectId, observed.operationToken,
+        observed.accessGeneration, observed.providerId, observed.state, expiredBefore],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
+  }
+
+  async revokeAccessGrants(workspaceId: string, operationToken?: string) {
+    const result = await this.pool.query(
+      "UPDATE workspaces SET access_generation=access_generation+1, updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND ($2::uuid IS NULL OR operation_token=$2) RETURNING *",
+      [workspaceId, operationToken ?? null],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
@@ -2612,9 +2627,19 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       && record.failureCode === patch.failureCode) return record;
     return this.save(record, patch);
   }
-  async revokeAccessGrants(workspaceId: string) {
+  async expireOperation(observed: WorkspaceRecord, expiredBefore: Date) {
+    const record = this.records.get(observed.id);
+    if (!record || record.deletedAt !== null || !observed.operationToken
+      || record.tenantId !== observed.tenantId || record.subjectId !== observed.subjectId
+      || record.operationToken !== observed.operationToken || record.accessGeneration !== observed.accessGeneration
+      || record.providerId !== observed.providerId || record.state !== observed.state
+      || record.updatedAt > expiredBefore) return null;
+    return this.save(record, { state: "failed", failureCode: "WORKSPACE_OPERATION_INTERRUPTED",
+      operationToken: null, accessGeneration: record.accessGeneration + 1 });
+  }
+  async revokeAccessGrants(workspaceId: string, operationToken?: string) {
     const record = this.records.get(workspaceId);
-    if (!record || record.deletedAt !== null) throw new Error("Workspace not found");
+    if (!record || record.deletedAt !== null || (operationToken && record.operationToken !== operationToken)) throw new Error("Workspace not found");
     return this.save(record, { accessGeneration: record.accessGeneration + 1 });
   }
   async getDeletionImpact(identity: IdentityContext, workspaceId: string) {
