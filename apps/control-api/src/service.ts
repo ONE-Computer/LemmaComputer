@@ -441,7 +441,7 @@ export class WorkspaceService {
   async suspendForPolicyChange(
     identity: IdentityContext,
     workspaceId: string,
-    options: { restartPending?: boolean } = {},
+    options: { restartPending?: boolean; observed?: WorkspaceRecord } = {},
   ) {
     const record = await this.owned(identity, workspaceId);
     if (["not_created", "stopped"].includes(record.state)) {
@@ -452,6 +452,7 @@ export class WorkspaceService {
       record.id,
       ["ready", "open", "provisioning", "restarting", "failed"],
       "stopping",
+      options.observed,
     );
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "The workspace must finish its current operation before guardrails can change", 409, true);
     const previousGeneration = claimed.accessGeneration;
@@ -482,6 +483,8 @@ export class WorkspaceService {
   async current(identity: IdentityContext, policy: RuntimePolicy, grantId = "personal") {
     let record = await this.store.getCurrent(identity, grantId);
     if (!record) return null;
+    // The operation owner alone decides when a start/restart/stop has finished.
+    if (record.operationToken !== null) return this.view(record, policy);
     let projectedIntegrity: PolicyIntegrityView | undefined;
     let projectedEgressPolicy: Sandbox["egressPolicyProjection"];
     if (record.providerId && ["provisioning", "ready", "open", "restarting", "stopping"].includes(record.state)) {
@@ -491,13 +494,18 @@ export class WorkspaceService {
       const state = sandbox.state === "ready" && record.state === "open" ? "open" : sandbox.state === "ready" ? "ready" : sandbox.state;
       const failureCode = sandbox.failureCode ?? null;
       const providerStopped = sandbox.state === "stopped" && record.providerId !== null;
-      if (record.state !== state || record.failureCode !== failureCode || providerStopped) {
-        record = await this.store.update(record.id, {
-          state,
-          ...(providerStopped ? { providerId: null } : {}),
-          failureCode,
-        });
+      // Check even unchanged observations: their policy projection and grants
+      // must not be applied to a replacement runtime after a concurrent restart.
+      const reconciled = await this.store.reconcile(record, {
+        state,
+        providerId: providerStopped ? null : record.providerId,
+        failureCode,
+      });
+      if (!reconciled) {
+        const latest = await this.store.getCurrent(identity, grantId);
+        return latest ? this.view(latest, policy) : null;
       }
+      record = reconciled;
     }
     const projectedPolicy = projectedIntegrity?.projected;
     if (
@@ -511,9 +519,12 @@ export class WorkspaceService {
     ) {
       let transition: Awaited<ReturnType<WorkspaceService["suspendForPolicyChange"]>>;
       try {
-        transition = await this.suspendForPolicyChange(identity, record.id);
-      } catch {
+        transition = await this.suspendForPolicyChange(identity, record.id, { observed: record });
+      } catch (error) {
         const failed = await this.store.getOwned(identity, record.id) ?? record;
+        if (error instanceof LemmaComputerError && error.code === "WORKSPACE_BUSY") {
+          return this.view(failed, policy);
+        }
         return toView(
           failed,
           undefined,

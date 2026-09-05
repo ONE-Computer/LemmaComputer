@@ -400,6 +400,103 @@ test("an active workspace grant can adopt a new policy without recreating the sa
   assert.equal(created.state, "ready");
 });
 
+for (const terminalState of ["ready", "stopped", "failed"] as const) {
+  for (const completeRestart of [false, true]) {
+    test(`delayed ${terminalState} observation cannot overwrite a ${completeRestart ? "completed" : "pending"} restart`, async () => {
+      const store = new MemoryWorkspaceStore();
+      const controller = new FakeController();
+      const gateway = new FakeGateway();
+      const service = new WorkspaceService(store, controller, gateway);
+      const workspace = await service.create(alex, policy, "personal", "delayed-status", "create");
+      const statusStarted = Promise.withResolvers<void>();
+      const statusResult = Promise.withResolvers<Sandbox>();
+      controller.status = async () => {
+        statusStarted.resolve();
+        return statusResult.promise;
+      };
+      const poll = service.current(alex, policy);
+      await statusStarted.promise;
+      const replacementStarted = Promise.withResolvers<void>();
+      const replacementReady = Promise.withResolvers<void>();
+      const create = controller.create.bind(controller);
+      controller.create = async (input) => {
+        replacementStarted.resolve();
+        await replacementReady.promise;
+        return create(input);
+      };
+      const restart = service.restart(alex, policy, workspace.id, "restart");
+      await replacementStarted.promise;
+      if (completeRestart) {
+        replacementReady.resolve();
+        await restart;
+      }
+      const before = await store.getOwned(alex, workspace.id);
+      const grants = gateway.grants;
+      const revocations = gateway.workspaceRevocations;
+      try {
+        statusResult.resolve({
+          providerId: `sandbox-${workspace.id}`,
+          state: terminalState,
+          failureCode: terminalState === "failed" ? "WORKSPACE_STARTUP_TIMEOUT" : null,
+          // Even an unchanged Ready response carries stale policy evidence.
+          policyIntegrity: {
+            state: "drift", reasonCode: "POLICY_PROJECTION_DRIFT", expected: null, enforced: null,
+            projected: { version: 0, digest: "0".repeat(64), bundleDigest: "0".repeat(64),
+              keyId: "old-key", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+          },
+        });
+        const view = await poll;
+        assert.equal(view?.state, completeRestart ? "ready" : "restarting");
+        assert.deepEqual(await store.getOwned(alex, workspace.id), before);
+        assert.equal(gateway.grants, grants, "stale observations cannot renew grants");
+        assert.equal(gateway.workspaceRevocations, revocations, "stale policy cannot revoke the new generation");
+        assert.equal(controller.destroys, 1);
+      } finally {
+        replacementReady.resolve();
+        await restart;
+      }
+    });
+  }
+}
+
+test("current does not poll a provider while its lifecycle operation owns readiness", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const service = new WorkspaceService(store, controller);
+  const workspace = await service.create(alex, policy, "personal", "active-status", "create");
+  const claimed = await store.claim(workspace.id, ["ready"], "restarting");
+  controller.status = async () => { throw new Error("must not poll during restart"); };
+  assert.equal((await service.current(alex, policy))?.state, "restarting");
+  assert.deepEqual(await store.getOwned(alex, workspace.id), claimed);
+});
+
+test("a restart between status reconciliation and policy cleanup cannot revoke the replacement", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "policy-cleanup-race", "create");
+  controller.status = async (_id, providerId) => ({
+    providerId, state: "ready", failureCode: null,
+    policyIntegrity: {
+      state: "drift", reasonCode: "POLICY_PROJECTION_DRIFT", expected: null, enforced: null,
+      projected: { version: 0, digest: "0".repeat(64), bundleDigest: "0".repeat(64),
+        keyId: "old-key", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    },
+  });
+  const reconcile = store.reconcile.bind(store);
+  store.reconcile = async (observed, patch) => {
+    const result = await reconcile(observed, patch);
+    await service.restart(alex, policy, workspace.id, "restart-before-cleanup");
+    return result;
+  };
+  assert.equal((await service.current(alex, policy))?.state, "ready");
+  assert.equal((await store.getOwned(alex, workspace.id))?.state, "ready");
+  assert.equal(controller.destroys, 1);
+  assert.equal(gateway.workspaceRevocations, 0, "stale policy cleanup cannot revoke the replacement");
+  assert.equal((await store.getOwned(alex, workspace.id))?.accessGeneration, 2);
+});
+
 test("restart destroys the prior sandbox and retains product identity", async () => {
   const controller = new FakeController();
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller);
