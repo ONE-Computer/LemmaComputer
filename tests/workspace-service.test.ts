@@ -3,7 +3,7 @@ import test from "node:test";
 import { LemmaComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@lemmacomputer/contracts";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@lemmacomputer/litellm-adapter";
-import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, toView, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
+import { EgressProxyGrantAuthority, PolicyBundleAuthority, WORKSPACE_OPERATION_TIMEOUT_MS, WorkspaceService, toView, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
 import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@lemmacomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -42,6 +42,7 @@ class FakeGateway implements GatewayClient {
   grants = 0;
   revocations = 0;
   workspaceRevocations = 0;
+  revokedGenerations: Array<number | undefined> = [];
   lastPolicy: RuntimePolicy | undefined;
   lastAccessGeneration: number | undefined;
   lastReadinessOptions: { includeTools?: boolean } | undefined;
@@ -77,7 +78,9 @@ class FakeGateway implements GatewayClient {
     };
   }
   async revoke() { this.revocations += 1; }
-  async revokeWorkspace() { this.revocations += 1; this.workspaceRevocations += 1; }
+  async revokeWorkspace(_workspaceId?: string, maximumGeneration?: number) {
+    this.revocations += 1; this.workspaceRevocations += 1; this.revokedGenerations.push(maximumGeneration);
+  }
 }
 
 const fakeModelRoute = {
@@ -687,6 +690,7 @@ test("Control signs and self-verifies policy before issuing grants or calling th
 
 
 class FlakyRevokeGateway extends FakeGateway {
+  override async revokeWorkspace() { await this.revoke(); }
   constructor(public remainingFailures: number) { super(); }
   override async revoke() {
     this.revocations += 1;
@@ -731,4 +735,69 @@ test("stop records the destroyed runtime and resumes pending access cleanup", as
   assert.equal(recovered.state, "stopped");
   assert.equal(recovered.failureCode, null);
   assert.equal(controller.destroys, 1);
+});
+
+
+test("abandoned restart expires safely and late failure cannot revoke its replacement", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "abandoned-restart", "create");
+  let rejectOld!: (error: Error) => void;
+  let started!: () => void;
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const create = controller.create.bind(controller);
+  controller.create = async () => { started(); return new Promise((_resolve, reject) => { rejectOld = reject; }); };
+  const oldRestart = service.restart(alex, policy, workspace.id, "abandoned");
+  const oldRejected = assert.rejects(oldRestart);
+  await entered;
+  const active = await store.getOwned(alex, workspace.id);
+  assert.ok(active);
+  assert.equal((await service.current(alex, policy, "personal"))?.state, "restarting");
+  t.mock.timers.tick(WORKSPACE_OPERATION_TIMEOUT_MS + 1);
+  const expired = await service.current(alex, policy, "personal");
+  assert.equal(expired?.state, "failed");
+  assert.equal(expired?.failureCode, "WORKSPACE_OPERATION_INTERRUPTED");
+  const recoveredRecord = await store.getOwned(alex, workspace.id);
+  assert.equal(recoveredRecord?.operationToken, null);
+  assert.equal(recoveredRecord?.providerId, active.providerId);
+  assert.equal(recoveredRecord?.accessGeneration, active.accessGeneration + 1);
+  assert.deepEqual(gateway.revokedGenerations, [active.accessGeneration]);
+  controller.create = create;
+  assert.equal((await service.restart(alex, policy, workspace.id, "retry")).state, "ready");
+  const replacement = await store.getOwned(alex, workspace.id);
+  const revocations = gateway.revocations;
+  rejectOld(new Error("old transport failed"));
+  await oldRejected;
+  assert.deepEqual(await store.getOwned(alex, workspace.id), replacement);
+  assert.equal(gateway.revocations, revocations);
+});
+
+
+test("late stop cleanup is limited to the abandoned generation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "abandoned-stop", "create");
+  const original = await store.getOwned(alex, workspace.id);
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  controller.destroyWorkspace = async () => { entered(); await new Promise<void>((resolve) => { release = resolve; }); };
+  const stopRejected = assert.rejects(service.stop(alex, policy, workspace.id));
+  await started;
+  t.mock.timers.tick(WORKSPACE_OPERATION_TIMEOUT_MS + 1);
+  await service.current(alex, policy, "personal");
+  controller.destroyWorkspace = async () => {};
+  await service.restart(alex, policy, workspace.id, "retry");
+  const replacement = await store.getOwned(alex, workspace.id);
+  release();
+  await stopRejected;
+  assert.deepEqual(await store.getOwned(alex, workspace.id), replacement);
+  assert.equal(gateway.revokedGenerations.at(-1), original?.accessGeneration);
+  assert.ok(gateway.revokedGenerations.every((generation) => generation !== undefined && generation < replacement!.accessGeneration));
 });

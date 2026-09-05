@@ -60,7 +60,25 @@ for (const backend of ["memory", "postgres"] as const) {
       assert.ok(accepted);
       const validClaim = await store.claim(created.id, ["stopped"], "provisioning", accepted);
       assert.ok(validClaim, "a current observation may claim the lifecycle");
-      await store.finish(created.id, validClaim.operationToken!, stopped);
+      assert.equal(await store.expireOperation(validClaim, new Date(validClaim.updatedAt.getTime() - 1)), null);
+      // PostgreSQL row mapping currently has second precision.
+      const cutoff = new Date(validClaim.updatedAt.getTime() + 1_000);
+      for (const wrong of [
+        { ...validClaim, tenantId: "foreign" },
+        { ...validClaim, subjectId: "foreign" },
+        { ...validClaim, operationToken: randomUUID() },
+        { ...validClaim, accessGeneration: validClaim.accessGeneration + 1 },
+        { ...validClaim, providerId: "foreign" },
+        { ...validClaim, state: "restarting" as const },
+      ]) assert.equal(await store.expireOperation(wrong, cutoff), null);
+      const expired = await store.expireOperation(validClaim, cutoff);
+      assert.equal(expired?.failureCode, "WORKSPACE_OPERATION_INTERRUPTED");
+      assert.equal(expired?.operationToken, null);
+      assert.equal(expired?.accessGeneration, validClaim.accessGeneration + 1);
+      await assert.rejects(store.finish(created.id, validClaim.operationToken!, stopped));
+      await assert.rejects(store.revokeAccessGrants(created.id, validClaim.operationToken!));
+      assert.deepEqual(await store.getOwned(identity, created.id), expired);
+      await store.update(created.id, stopped);
       await store.tombstone(identity, created.id, "preserve");
       assert.equal(await store.reconcile(accepted, { ...stopped, state: "ready" }), null);
       assert.equal(await store.getOwned(identity, created.id), null);
