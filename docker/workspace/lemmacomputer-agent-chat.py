@@ -51,9 +51,6 @@ EXECUTION_MODE = os.environ.get("LEMMACOMPUTER_EXECUTION_MODE", "managed")
 CONFIGURED_TIME_ZONE = os.environ.get("LEMMACOMPUTER_TIME_ZONE", "").strip()
 HERMES_URL = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_URL", "")
 HERMES_KEY = os.environ.get("LEMMACOMPUTER_HERMES_CHAT_KEY", "")
-CONNECTOR_RECOVERY_STATE_FILE = Path(
-    os.environ.get("LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE", "")
-)
 HOME = Path("/home/kasm-user")
 STATE_DIR = HOME / ".lemmacomputer-chat" / AGENT
 ATTACHMENT_ROOT = STATE_DIR / "attachments"
@@ -1312,18 +1309,9 @@ async def health(request: Request) -> Response:
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     if AGENT == "hermes-claw":
-        try:
-            recovery_state = json.loads(CONNECTOR_RECOVERY_STATE_FILE.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            recovery_state = {}
-        if isinstance(recovery_state, dict) and recovery_state.get("state") == "exhausted":
-            return JSONResponse(
-                {"status": "unavailable", "code": "hermes_connectors_recovery_exhausted"},
-                status_code=503,
-            )
         if http is None:
             return JSONResponse(
-                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                {"status": "unavailable", "code": "hermes_runtime_unavailable"},
                 status_code=503,
             )
         try:
@@ -1335,27 +1323,18 @@ async def health(request: Request) -> Response:
             document = upstream.json()
         except (httpx.HTTPError, ValueError):
             return JSONResponse(
-                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                {"status": "unavailable", "code": "hermes_runtime_unavailable"},
                 status_code=503,
             )
-        required_mcp = document.get("required_mcp") if isinstance(document, dict) else None
-        if (
-            upstream.status_code != 200
-            or not isinstance(required_mcp, dict)
-            or required_mcp.get("ready") is not True
-            or not isinstance(required_mcp.get("tool_count"), int)
-            or isinstance(required_mcp.get("tool_count"), bool)
-            or required_mcp.get("tool_count", 0) < 1
-        ):
+        if upstream.status_code != 200 or not isinstance(document, dict):
             return JSONResponse(
-                {"status": "unavailable", "code": "hermes_connectors_unavailable"},
+                {"status": "unavailable", "code": "hermes_runtime_unavailable"},
                 status_code=503,
             )
     return JSONResponse({
         "status": "ready",
         "agent": AGENT,
         "protocol": "lemmacomputer-chat-events/v1",
-        "connectors": "ready" if AGENT == "hermes-claw" else "not_applicable",
     })
 
 

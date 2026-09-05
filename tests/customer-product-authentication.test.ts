@@ -68,6 +68,7 @@ const fixture = () => {
   const clearedSelections: Array<Record<string, unknown>> = [];
   const reader: CustomerAuthenticationSessionReader = {
     getSession: async (received) => received.get("cookie") ? verifiedSession : null,
+    getSiteViewerSession: async (id, userId) => id === authenticationSessionId && userId === accountUserId ? verifiedSession : null,
   };
   const store: CustomerProductSessionStore = {
     ensureCustomerAccount: async (input) => {
@@ -156,9 +157,26 @@ const fixture = () => {
     invitationContextReads,
     invitationAcceptances,
     clearedSelections,
+    reader,
     store,
   };
 };
+
+test("site viewer session references recheck live identity, expiry, account state and current membership", async () => {
+  const { service, reader, store } = fixture();
+  await service.selectMembership(headers, membershipId);
+  assert.equal((await service.resolveSiteViewerSession(authenticationSessionId, accountUserId)).status, "authorized");
+  assert.equal((await service.resolveSiteViewerSession(authenticationSessionId, membershipId)).status, "anonymous");
+  await service.clearCurrentOrganizationSelection(headers);
+  assert.equal((await service.resolveSiteViewerSession(authenticationSessionId, accountUserId)).status, "membership-required");
+  reader.getSiteViewerSession = async () => null;
+  assert.equal((await service.resolveSiteViewerSession(authenticationSessionId, accountUserId)).status, "anonymous");
+  reader.getSiteViewerSession = async () => ({ ...verifiedSession, session: { ...verifiedSession.session, expiresAt: new Date(0) } });
+  assert.equal((await service.resolveSiteViewerSession(authenticationSessionId, accountUserId)).status, "anonymous");
+  reader.getSiteViewerSession = async () => verifiedSession;
+  store.ensureCustomerAccount = async () => ({ accountUserId, status: "disabled" });
+  await assert.rejects(() => service.resolveSiteViewerSession(authenticationSessionId, accountUserId), { code: "ACCOUNT_DISABLED" });
+});
 
 test("a raw invitation becomes a hashed redirect-safe context and a fresh Better Auth session accepts it", async () => {
   const { service, invitationContexts, invitationContextReads, invitationAcceptances } = fixture();

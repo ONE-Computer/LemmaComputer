@@ -54,12 +54,12 @@ test("Make-a-site finishes and publishes after its browser stream is refreshed",
   await page.goto("/?view=chat&chat=fixture-session-1");
 
   const composer = page.getByPlaceholder(/message/i);
-  await composer.fill("Use $make-a-site to build Hello world and survive refresh.");
+  await composer.fill("Use $site to build Hello world and survive refresh.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText(/build the smallest Vite site/)).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("Use $make-a-site to build Hello world and survive refresh.")).toBeVisible();
+  await expect(page.getByText("Use $site to build Hello world and survive refresh.")).toBeVisible();
   await expect(page.getByRole("button", { name: /Stop Hermes Agent CLI/ })).toBeVisible();
   await expect(page.getByText(/Published Hello world/)).toBeVisible();
 

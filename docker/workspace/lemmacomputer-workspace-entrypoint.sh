@@ -500,10 +500,10 @@ fi
 
 install_agent_skill() {
   local home="$1"
-  local target="$home/skills/make-a-site"
+  local target="$home/skills/site"
   install -d -o 1000 -g 1000 -m 0700 "$home/skills"
-  rm -rf -- "$target"
-  cp -a /opt/lemmacomputer/skills/make-a-site "$target"
+  rm -rf -- "$home/skills/make-a-site" "$target"
+  cp -a /opt/lemmacomputer/skills/site "$target"
   chown -R 1000:1000 "$target"
 }
 
@@ -750,7 +750,6 @@ if agent_enabled hermes-claw; then
       TZ="${TZ:-Etc/UTC}" \
       LEMMACOMPUTER_TIME_ZONE="$LEMMACOMPUTER_TIME_ZONE" \
       OPENAI_API_KEY=lemmacomputer-loopback-broker \
-      LEMMACOMPUTER_REQUIRED_MCP_SERVER=lemmacomputer_connectors \
       LEMMACOMPUTER_CONNECTORS_BROKER=http://127.0.0.1:4314 \
       LEMMACOMPUTER_SITES_BROKER=http://127.0.0.1:4314 \
       API_SERVER_ENABLED=true \
@@ -766,9 +765,8 @@ if agent_enabled hermes-claw; then
       /opt/lemmacomputer/hermes-venv/bin/hermes gateway run \
       >>/run/lemmacomputer/hermes-gateway-bootstrap.log 2>&1 &
   printf '%s\n' "$!" > /run/lemmacomputer/hermes-gateway.pid
-  # Connector discovery is isolated per server and bounded to five seconds.
-  # Leave enough room for Hermes' own required-MCP retries without allowing a
-  # disconnected connector to terminate the workspace bootstrap.
+  # This probe covers only the Hermes runtime. Connector discovery is an
+  # optional capability and must never participate in workspace bootstrap.
   for _ in $(seq 1 600); do
     if curl -fsS "http://127.0.0.1:8652/health" >/dev/null 2>&1; then break; fi
     sleep 0.1
@@ -805,7 +803,6 @@ start_sdk_chat_adapter() {
       LEMMACOMPUTER_CHAT_PORT="$port" \
       LEMMACOMPUTER_HERMES_CHAT_URL="$hermes_url" \
       LEMMACOMPUTER_HERMES_CHAT_KEY="$hermes_key" \
-      LEMMACOMPUTER_CONNECTOR_RECOVERY_STATE_FILE="/home/kasm-user/.hermes/.lemmacomputer-connectors-recovery.json" \
       /opt/lemmacomputer/agent-chat-venv/bin/python \
       /usr/local/libexec/lemmacomputer-agent-chat \
       >>"/run/lemmacomputer/${agent}-chat.log" 2>&1 &

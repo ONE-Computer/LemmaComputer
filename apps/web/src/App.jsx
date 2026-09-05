@@ -295,6 +295,7 @@ const ssoTestConnectionIdFromLocation = () => {
     return "";
   }
 };
+const siteHandleFromLocation = () => window.location.pathname.match(/^\/s\/([A-Za-z0-9_-]{24})\/?$/)?.[1] ?? "";
 const attachmentMediaType = (file) => {
   if (chatAttachmentTypes.has(file.type)) return file.type;
   const extension = file.name.split(".").at(-1)?.toLowerCase();
@@ -810,38 +811,124 @@ const siteUpdatedAt = (value) => new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 }).format(new Date(value));
 
-function SitesScreen({ sites, loading, error, busySiteId, onDelete }) {
+function SiteViewerScreen({ handle }) {
+  const [viewer, setViewer] = useState(null);
+  const [managing, setManaging] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const invitation = url.searchParams.get("invite");
+        if (invitation) {
+          await siteApi.acceptInvitation(invitation);
+          url.searchParams.delete("invite");
+          window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+        }
+        const value = await siteApi.viewer(handle);
+        if (active) setViewer(value);
+      } catch {
+        if (active) setError("This site does not exist or has not been shared with this account.");
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [handle]);
+  if (error) return <main className="site-viewer-state"><div><h1>Site unavailable</h1><p>{error}</p><a href="/">Return to LemmaComputer</a></div></main>;
+  if (!viewer) return <main className="site-viewer-state" role="status">Opening site…</main>;
+  return <main className="site-viewer-shell">
+    <iframe title={viewer.site.name} src={viewer.entryUrl} sandbox="allow-scripts" referrerPolicy="no-referrer" />
+    {viewer.site.canManage && <button className="secondary-button site-viewer-share" onClick={() => setManaging(true)}>Share</button>}
+    {managing && <SiteManageDialog site={viewer.site} onClose={() => setManaging(false)} onSiteUpdated={(site) => setViewer((current) => ({ ...current, site }))} />}
+  </main>;
+}
+
+function SiteManageDialog({ site, onClose, onSiteUpdated }) {
+  const [details, setDetails] = useState(null);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [acceptancePath, setAcceptancePath] = useState("");
+  const [deliveryStatus, setDeliveryStatus] = useState("");
+  const refresh = async () => setDetails(await siteApi.details(site.id));
+  useEffect(() => { refresh().catch((value) => setError(value.message)); }, [site.id]);
+  const run = async (operation) => {
+    setBusy(true); setError(""); setAcceptancePath(""); setDeliveryStatus("");
+    try { await operation(); await refresh(); } catch (value) {
+      setError(value.message);
+      // A delivery failure can leave a pending invitation; expose its retry action.
+      await refresh().catch(() => undefined);
+    } finally { setBusy(false); }
+  };
+  const invitationResult = (result) => {
+    setAcceptancePath(result.acceptancePath ?? "");
+    setDeliveryStatus(result.delivery?.mode === "copy-link"
+      ? "Invitation link created. No email was sent. Copy the link and send it to the invited person."
+      : result.delivery?.captured ? "Invitation captured for local testing. No email was sent."
+        : "Invitation submitted to the email provider. Inbox delivery is not yet confirmed.");
+  };
+  const copyLink = details?.delivery?.mode === "copy-link";
+  const captured = details?.delivery?.captured;
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  return <ModalDialog title={`Share ${site.name}`} description="Share a view-only dashboard. Only you, the owner, can amend, publish, manage access or delete this site." eyebrow="Site access" labelledBy="site-access-title" onClose={busy ? () => undefined : onClose}>
+    {error && <div className="workspace-error" role="alert">{error}</div>}
+    {!details ? <p>Loading site access…</p> : <div className="site-manage-content">
+      <label className="modal-field"><span>Visibility</span><SelectMenu value={details.site.visibility} options={[{ value: "private", label: "People with access only" }, { value: "organization", label: "Everyone in my organization" }, { value: "restricted", label: "Only invited people" }]} ariaLabel="Visibility" disabled={busy} onValueChange={(visibility) => run(async () => { const updated = await siteApi.setVisibility(site.id, visibility); onSiteUpdated(updated); })} /><small>Everyone must sign in. Shared people can view and interact, but cannot edit or grant access to others.</small></label>
+      {(copyLink || captured) && <p role="note">{copyLink ? "Email delivery is off for this installation. Create an invitation link and send it yourself." : "Email is captured for local testing, not sent to recipients."}</p>}
+      {details.delivery?.mode === "unavailable" && <p role="note">Invitation delivery is not configured. Ask your installation administrator to configure email or copy-link delivery.</p>}
+      {loopback && <p role="note">This is a localhost site. Its link works only on this computer; external recipients need a reachable LemmaComputer address.</p>}
+      <div className="site-invite-form"><label className="modal-field" htmlFor="site-invite-email"><span>Recipient email</span></label><div className="site-invite-input-row"><input id="site-invite-email" type="email" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} placeholder="person@example.com" /><button className="primary-button" type="button" disabled={busy || !email.trim() || details.delivery?.mode === "unavailable"} onClick={() => run(async () => { const result = await siteApi.invite(site.id, email.trim()); setEmail(""); invitationResult(result); })}>{copyLink ? "Create invite link" : captured ? "Create test invitation" : "Send invitation"}</button></div><small>Can view · Only the invited account can accept this invitation.</small></div>
+      {deliveryStatus && <p role="status">{deliveryStatus}</p>}
+      {acceptancePath && <div className="site-copy-link"><input aria-label="Site invitation link" readOnly value={new URL(acceptancePath, window.location.origin).toString()} /><button className="secondary-button" type="button" onClick={() => navigator.clipboard?.writeText(new URL(acceptancePath, window.location.origin).toString())}>Copy link</button></div>}
+      <section><h3>Invitations</h3><p>Pending means not yet accepted, not proof of email delivery. Revoked and expired invitations can be removed from this list.</p>{details.invitations.length ? details.invitations.map((item) => <div className="site-manage-row" key={item.id}><span><strong>{item.email}</strong><small>{item.status === "pending" ? "Awaiting acceptance" : item.status} · Can view · expires {new Date(item.expiresAt).toLocaleDateString()}</small></span>{item.status === "pending" && <span><button className="text-button" disabled={busy} onClick={() => run(async () => { invitationResult(await siteApi.resendInvitation(site.id, item.id)); })}>{copyLink ? "New link" : captured ? "Retry test" : "Resend email"}</button><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeInvitation(site.id, item.id))}>Revoke</button></span>}{(item.status === "revoked" || item.status === "expired") && <button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.removeInvitation(site.id, item.id))}>Remove</button>}</div>) : <p>No invitations.</p>}</section>
+      <section><h3>People with access</h3><p>You · Owner</p>{details.site.visibility === "organization" && <p>Everyone in the organization · Can view. Removing an individual invitation or grant does not remove organization access.</p>}{details.grants.filter((item) => item.active && item.accountUserId !== details.ownerAccountUserId).map((item) => {
+        const label = details.invitations.find((invite) => invite.acceptedAccountUserId === item.accountUserId)?.email ?? item.accountUserId;
+        return <div className="site-manage-row" key={item.id}><span><strong>{label}</strong><small>Can view</small></span><button className="text-button danger-button" disabled={busy} onClick={() => run(() => siteApi.revokeGrant(site.id, item.id))}>Remove</button></div>;
+      })}</section>
+      <section><h3>Versions</h3>{details.versions.map((version) => <div className="site-manage-row" key={version.id}><span><strong>Version {version.version}</strong><small>{version.fileCount} files · {siteUpdatedAt(version.createdAt)}{version.version === details.site.currentRevision ? " · live" : ""}</small></span>{version.state === "ready" && version.version !== details.site.currentRevision && <button className="secondary-button" disabled={busy} onClick={() => run(async () => { const updated = await siteApi.restore(site.id, version.version); onSiteUpdated(updated); })}>Restore</button>}</div>)}</section>
+    </div>}
+    <div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Done</button></div>
+  </ModalDialog>;
+}
+
+function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdated }) {
+  const [managedSite, setManagedSite] = useState(null);
   return <div className="secondary-screen sites-screen">
     <header className="page-heading sites-heading">
-      <div><p>Your published apps</p><h1>Sites</h1><span>Sites built by your workspace agents appear here automatically.</span></div>
+      <div><p>Available dashboards</p><h1>Sites</h1><span>Sites built by workspace agents appear here automatically.</span></div>
     </header>
     {error && <div className="workspace-error" role="alert"><Info24Regular aria-hidden="true" /><span><strong>Sites unavailable</strong>{error}</span></div>}
     {loading ? <div className="workspace-overview-empty" role="status">Loading sites…</div> : sites.length === 0 ? (
       <section className="workspace-overview-empty sites-empty">
         <Apps48Regular aria-hidden="true" />
-        <div><h2>No sites yet</h2><p>Ask a workspace agent to use Make a site, then publish the result.</p></div>
+        <div><h2>No sites yet</h2><p>Ask a workspace agent to use $site, then publish the result.</p></div>
       </section>
     ) : <section className="sites-list" aria-label="Your sites">
       {sites.map((site) => <article className="site-row" key={site.id}>
-        <div className="site-row-copy">
-          <div className="site-row-heading">
-            <h2>{site.name}</h2>
-            <span className="site-state"><span aria-hidden="true" />Ready</span>
+          <div className="site-row-copy">
+            <div className="site-row-heading">
+              <h2><a className="site-row-title-link" href={`/s/${site.handle}`} target="_blank" rel="noopener noreferrer">{site.name}<span className="sr-only"> in a new tab</span></a></h2>
+              <span className="site-state"><span aria-hidden="true" />Ready</span>
+            </div>
+            <div className="site-row-meta">
+              <span>{site.slug}</span>
+              <span>Version {site.currentRevision}</span>
+              <span>{site.role === "owner" ? "Owner" : "Can view"}</span>
+              <span>{site.visibility === "organization" ? "Organization" : site.visibility === "restricted" ? "Invited people" : "Only me"}</span>
+              <span>Published {siteUpdatedAt(site.updatedAt)}</span>
+            </div>
           </div>
-          <div className="site-row-meta">
-            <span>{site.slug}</span>
-            <span>Revision {site.currentRevision}</span>
-            <span>Published {siteUpdatedAt(site.updatedAt)}</span>
-          </div>
-        </div>
         <div className="site-row-actions">
-          <a className="primary-button compact-button" href={siteApi.contentUrl(site.id)} target="_blank" rel="noopener noreferrer">
+          <a className="primary-button compact-button" href={`/s/${site.handle}`} target="_blank" rel="noopener noreferrer">
             Open<span className="sr-only"> {site.name} in a new tab</span>
           </a>
-          <button className="text-button danger-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}>{busySiteId === site.id ? "Deleting…" : "Delete"}</button>
+          {site.canManage && <button className="secondary-button compact-button" type="button" onClick={() => setManagedSite(site)}>Share</button>}
+          {site.canDelete && <button className="secondary-button danger-button compact-button" type="button" disabled={busySiteId === site.id} onClick={() => onDelete(site)}><Delete24Regular aria-hidden="true" />{busySiteId === site.id ? "Deleting…" : "Delete"}</button>}
         </div>
       </article>)}
     </section>}
+    {managedSite && <SiteManageDialog site={managedSite} onClose={() => setManagedSite(null)} onSiteUpdated={onSiteUpdated} />}
   </div>;
 }
 
@@ -5311,12 +5398,6 @@ function ChatConversation({
           <div className="chat-welcome">
             <h1>How can {agentName} help?</h1>
             <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
-            {skills.length > 0 && <div className="chat-welcome-skills" aria-label="Available skills">
-              {skills.map((skill) => <button type="button" key={skill.id} onClick={() => setInput(skill.defaultPrompt)}>
-                <WindowApps24Regular aria-hidden="true" />
-                <span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
-              </button>)}
-            </div>}
           </div>
         ) : visibleMessages.map((message) => (
           <article className={`chat-message ${message.role}`} key={message.id}>
@@ -5423,99 +5504,101 @@ function ChatConversation({
         />
         {companionComposer ? (
           <div className="companion-chat-composer-row">
-            <div ref={chatActionsRef} className="companion-chat-composer-control actions-control">
-              <button
-                className="chat-attach-button"
-                type="button"
-                aria-label="Chat actions"
-                aria-expanded={chatActionsOpen}
-                aria-controls="companion-chat-actions"
-                disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
-                onClick={() => {
-                  setChatActionsOpen((open) => !open);
-                  setContextOpen(false);
-                }}
-              >
-                <Add24Regular aria-hidden="true" />
-              </button>
-              {chatActionsOpen && (
-                <div id="companion-chat-actions" className="companion-chat-composer-menu" role="menu" aria-label="Chat actions">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setChatActionsOpen(false);
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    <Attach24Regular aria-hidden="true" />Attach files
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setChatActionsOpen(false);
-                      onNewThread?.();
-                    }}
-                  >
-                    <Add24Regular aria-hidden="true" />New thread
-                  </button>
-                  {skills.length > 0 && <div className="companion-chat-skill-list" role="group" aria-label="Skills">
-                    <span>Skills</span>
-                    {skills.map((skill) => <button type="button" role="menuitem" key={skill.id} onClick={() => {
-                      setInput(skill.defaultPrompt);
-                      setChatActionsOpen(false);
-                    }}>
-                      <WindowApps24Regular aria-hidden="true" /><span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
-                    </button>)}
-                  </div>}
-                  {sessionOptions.length > 1 && <div className="companion-chat-recent-sessions" role="group" aria-label="Recent conversations">
-                    <span>Recent conversations</span>
-                    {sessionOptions.filter((session) => session.value).map((session) => (
-                      <button
-                        className={session.value === sessionId ? "active" : ""}
-                        type="button"
-                        key={session.value}
-                        onClick={() => {
-                          setChatActionsOpen(false);
-                          onOpenThread?.(session.value);
-                        }}
-                      >
-                        {session.label}
-                      </button>
-                    ))}
-                  </div>}
-                  {historyHasMore && <button type="button" className="companion-chat-load-older" disabled={historyLoadingMore} onClick={onLoadOlder}>
-                    {historyLoadingMore ? "Loading conversations…" : "Load older conversations"}
-                  </button>}
-                </div>
+            {messageField}
+            <div className="companion-chat-composer-toolbar">
+              <div ref={chatActionsRef} className="companion-chat-composer-control actions-control">
+                <button
+                  className="chat-attach-button"
+                  type="button"
+                  aria-label="Chat actions"
+                  aria-expanded={chatActionsOpen}
+                  aria-controls="companion-chat-actions"
+                  disabled={!runtimeAvailable || turnBusy || attachmentBusy || historyState === "loading"}
+                  onClick={() => {
+                    setChatActionsOpen((open) => !open);
+                    setContextOpen(false);
+                  }}
+                >
+                  <Add24Regular aria-hidden="true" />
+                </button>
+                {chatActionsOpen && (
+                  <div id="companion-chat-actions" className="companion-chat-composer-menu" role="menu" aria-label="Chat actions">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatActionsOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <Attach24Regular aria-hidden="true" />Attach files
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatActionsOpen(false);
+                        onNewThread?.();
+                      }}
+                    >
+                      <Add24Regular aria-hidden="true" />New thread
+                    </button>
+                    {skills.length > 0 && <div className="companion-chat-skill-list" role="group" aria-label="Skills">
+                      <span>Skills</span>
+                      {skills.map((skill) => <button type="button" role="menuitem" key={skill.id} onClick={() => {
+                        setInput(skill.defaultPrompt);
+                        setChatActionsOpen(false);
+                      }}>
+                        <WindowApps24Regular aria-hidden="true" /><span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
+                      </button>)}
+                    </div>}
+                    {sessionOptions.length > 1 && <div className="companion-chat-recent-sessions" role="group" aria-label="Recent conversations">
+                      <span>Recent conversations</span>
+                      {sessionOptions.filter((session) => session.value).map((session) => (
+                        <button
+                          className={session.value === sessionId ? "active" : ""}
+                          type="button"
+                          key={session.value}
+                          onClick={() => {
+                            setChatActionsOpen(false);
+                            onOpenThread?.(session.value);
+                          }}
+                        >
+                          {session.label}
+                        </button>
+                      ))}
+                    </div>}
+                    {historyHasMore && <button type="button" className="companion-chat-load-older" disabled={historyLoadingMore} onClick={onLoadOlder}>
+                      {historyLoadingMore ? "Loading conversations…" : "Load older conversations"}
+                    </button>}
+                  </div>
+                )}
+              </div>
+              <div ref={contextRef} className="companion-chat-composer-control context-control">
+                {composerContext ? (
+                  <>
+                    <button
+                      className="companion-chat-context-button"
+                      type="button"
+                      aria-expanded={contextOpen}
+                      aria-controls="companion-chat-context"
+                      onClick={() => {
+                        setContextOpen((open) => !open);
+                        setChatActionsOpen(false);
+                      }}
+                    >
+                      <span>{contextSummary}</span><ChevronDown16Regular aria-hidden="true" />
+                    </button>
+                    {contextOpen && <div id="companion-chat-context" className="companion-chat-composer-menu companion-chat-context-menu" role="dialog" aria-label="Chat context">{composerContext}</div>}
+                  </>
+                ) : <span className="companion-chat-context-static">{contextSummary}</span>}
+              </div>
+              {turnBusy ? (
+                <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
+              ) : (
+                <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
               )}
             </div>
-            {messageField}
-            <div ref={contextRef} className="companion-chat-composer-control context-control">
-              {composerContext ? (
-                <>
-                  <button
-                    className="companion-chat-context-button"
-                    type="button"
-                    aria-expanded={contextOpen}
-                    aria-controls="companion-chat-context"
-                    onClick={() => {
-                      setContextOpen((open) => !open);
-                      setChatActionsOpen(false);
-                    }}
-                  >
-                    <span>{contextSummary}</span><ChevronDown16Regular aria-hidden="true" />
-                  </button>
-                  {contextOpen && <div id="companion-chat-context" className="companion-chat-composer-menu companion-chat-context-menu" role="dialog" aria-label="Chat context">{composerContext}</div>}
-                </>
-              ) : <span className="companion-chat-context-static">{contextSummary}</span>}
-            </div>
-            {turnBusy ? (
-              <button className="chat-stop-button" type="button" aria-label={`Stop ${agentName}`} onClick={stopTurn}><Dismiss24Regular aria-hidden="true" /></button>
-            ) : (
-              <button className="chat-send-button" type="submit" aria-label="Send message" disabled={!runtimeAvailable || !requestedServiceClassAvailable || restoredTurnActive || (!input.trim() && !attachments.length) || attachmentBusy || historyState === "loading"}><ArrowUp24Regular aria-hidden="true" /></button>
-            )}
           </div>
         ) : (
           <>
@@ -6024,6 +6107,7 @@ export function ChatScreen({
 
 export function App() {
   const invitationActive = window.location.pathname === "/invite";
+  const siteHandle = siteHandleFromLocation();
   const [invitationVerified] = useState(() => window.location.pathname === "/invite"
     && new URLSearchParams(window.location.search).get("verified") === "1");
   const [invitationToken] = useState(() => window.location.pathname === "/invite"
@@ -8010,6 +8094,7 @@ export function App() {
       onSignOut={logout}
     />;
   }
+  if (siteHandle && (session || customerSession)) return <SiteViewerScreen handle={siteHandle} />;
   if (customerSession) {
     return <OrganizationSelectionScreen customerSession={customerSession} error={authError} onSelected={refreshAuthentication} onSignOut={logout} />;
   }
@@ -8142,6 +8227,7 @@ export function App() {
           error={sitesError}
           busySiteId={siteBusyId}
           onDelete={deleteSite}
+          onSiteUpdated={(updated) => setSites((current) => current.map((site) => site.id === updated.id ? { ...site, ...updated } : site))}
         />}
         {activeNav === "Artifacts" && <ArtifactsScreen onOpenConversation={openArtifactConversation} />}
         {activeNav === "Trail" && <ActivityScreen displayName={session.user.displayName} operations={operationHistory} canReadToolAudit={canReadAudit} users={adminUsers} workspaceMembers={adminWorkspaceMembers} onOpenOperation={(selected) => { setOperation(selected); setDrawer("request"); }} />}

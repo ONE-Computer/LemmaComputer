@@ -422,10 +422,10 @@ export type ReviewedAgentSkill = z.infer<typeof reviewedAgentSkillSchema>;
 
 export const reviewedAgentSkillCatalog: readonly ReviewedAgentSkill[] = Object.freeze([
   reviewedAgentSkillSchema.parse({
-    id: "make-a-site",
-    displayName: "Make a site",
-    description: "Build and publish a simple owner-only Vite site.",
-    defaultPrompt: "Use $make-a-site to build and publish a simple site.",
+    id: "site",
+    displayName: "$site",
+    description: "Create, edit, publish, inspect, and restore a static dashboard site.",
+    defaultPrompt: "$site",
   }),
 ]);
 

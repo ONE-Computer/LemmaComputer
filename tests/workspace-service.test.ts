@@ -3,7 +3,7 @@ import test from "node:test";
 import { LemmaComputerError, type IdentityContext, type Launch, type RuntimePolicy, type Sandbox, type SignedPolicyBundle } from "@lemmacomputer/contracts";
 import { MemoryWorkspaceStore } from "@lemmacomputer/workspace-store";
 import type { GatewayClient, GatewayGrant } from "@lemmacomputer/litellm-adapter";
-import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
+import { EgressProxyGrantAuthority, PolicyBundleAuthority, WorkspaceService, toView, type ControllerClient, type EgressProxyGrant } from "../apps/control-api/src/service.js";
 import { WorkspaceIngressAuthority, workspaceIngressAccessParameter } from "@lemmacomputer/workspace-ingress-auth";
 import { policyFixture } from "./policy-fixture.js";
 
@@ -44,6 +44,7 @@ class FakeGateway implements GatewayClient {
   workspaceRevocations = 0;
   lastPolicy: RuntimePolicy | undefined;
   lastAccessGeneration: number | undefined;
+  lastReadinessOptions: { includeTools?: boolean } | undefined;
   async ensureGrant(input: Parameters<GatewayClient["ensureGrant"]>[0]): Promise<GatewayGrant> {
     this.grants += 1;
     this.lastPolicy = input.policy;
@@ -51,7 +52,20 @@ class FakeGateway implements GatewayClient {
     return { baseUrl: "http://litellm:4000", credential: `sk-${input.workspaceId}`, modelAlias: "lemmacomputer-assistant", expiresAt: new Date(Date.now() + 60_000).toISOString() };
   }
   async modelCapabilities() { return { vision: true }; }
-  async readiness() { return { models: "ready" as const, tools: "ready" as const, modelRoute: fakeModelRoute }; }
+  async readiness(
+    _workspaceId?: string,
+    _agentId?: string,
+    _policy?: RuntimePolicy,
+    _accessGeneration?: number,
+    options?: { includeTools?: boolean },
+  ) {
+    this.lastReadinessOptions = options;
+    return {
+      models: "ready" as const,
+      tools: options?.includeTools === false ? "unavailable" as const : "ready" as const,
+      modelRoute: fakeModelRoute,
+    };
+  }
   async test() {
     return {
       model: "lemmacomputer-assistant",
@@ -386,6 +400,103 @@ test("an active workspace grant can adopt a new policy without recreating the sa
   assert.equal(created.state, "ready");
 });
 
+for (const terminalState of ["ready", "stopped", "failed"] as const) {
+  for (const completeRestart of [false, true]) {
+    test(`delayed ${terminalState} observation cannot overwrite a ${completeRestart ? "completed" : "pending"} restart`, async () => {
+      const store = new MemoryWorkspaceStore();
+      const controller = new FakeController();
+      const gateway = new FakeGateway();
+      const service = new WorkspaceService(store, controller, gateway);
+      const workspace = await service.create(alex, policy, "personal", "delayed-status", "create");
+      const statusStarted = Promise.withResolvers<void>();
+      const statusResult = Promise.withResolvers<Sandbox>();
+      controller.status = async () => {
+        statusStarted.resolve();
+        return statusResult.promise;
+      };
+      const poll = service.current(alex, policy);
+      await statusStarted.promise;
+      const replacementStarted = Promise.withResolvers<void>();
+      const replacementReady = Promise.withResolvers<void>();
+      const create = controller.create.bind(controller);
+      controller.create = async (input) => {
+        replacementStarted.resolve();
+        await replacementReady.promise;
+        return create(input);
+      };
+      const restart = service.restart(alex, policy, workspace.id, "restart");
+      await replacementStarted.promise;
+      if (completeRestart) {
+        replacementReady.resolve();
+        await restart;
+      }
+      const before = await store.getOwned(alex, workspace.id);
+      const grants = gateway.grants;
+      const revocations = gateway.workspaceRevocations;
+      try {
+        statusResult.resolve({
+          providerId: `sandbox-${workspace.id}`,
+          state: terminalState,
+          failureCode: terminalState === "failed" ? "WORKSPACE_STARTUP_TIMEOUT" : null,
+          // Even an unchanged Ready response carries stale policy evidence.
+          policyIntegrity: {
+            state: "drift", reasonCode: "POLICY_PROJECTION_DRIFT", expected: null, enforced: null,
+            projected: { version: 0, digest: "0".repeat(64), bundleDigest: "0".repeat(64),
+              keyId: "old-key", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+          },
+        });
+        const view = await poll;
+        assert.equal(view?.state, completeRestart ? "ready" : "restarting");
+        assert.deepEqual(await store.getOwned(alex, workspace.id), before);
+        assert.equal(gateway.grants, grants, "stale observations cannot renew grants");
+        assert.equal(gateway.workspaceRevocations, revocations, "stale policy cannot revoke the new generation");
+        assert.equal(controller.destroys, 1);
+      } finally {
+        replacementReady.resolve();
+        await restart;
+      }
+    });
+  }
+}
+
+test("current does not poll a provider while its lifecycle operation owns readiness", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const service = new WorkspaceService(store, controller);
+  const workspace = await service.create(alex, policy, "personal", "active-status", "create");
+  const claimed = await store.claim(workspace.id, ["ready"], "restarting");
+  controller.status = async () => { throw new Error("must not poll during restart"); };
+  assert.equal((await service.current(alex, policy))?.state, "restarting");
+  assert.deepEqual(await store.getOwned(alex, workspace.id), claimed);
+});
+
+test("a restart between status reconciliation and policy cleanup cannot revoke the replacement", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const gateway = new FakeGateway();
+  const service = new WorkspaceService(store, controller, gateway);
+  const workspace = await service.create(alex, policy, "personal", "policy-cleanup-race", "create");
+  controller.status = async (_id, providerId) => ({
+    providerId, state: "ready", failureCode: null,
+    policyIntegrity: {
+      state: "drift", reasonCode: "POLICY_PROJECTION_DRIFT", expected: null, enforced: null,
+      projected: { version: 0, digest: "0".repeat(64), bundleDigest: "0".repeat(64),
+        keyId: "old-key", expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    },
+  });
+  const reconcile = store.reconcile.bind(store);
+  store.reconcile = async (observed, patch) => {
+    const result = await reconcile(observed, patch);
+    await service.restart(alex, policy, workspace.id, "restart-before-cleanup");
+    return result;
+  };
+  assert.equal((await service.current(alex, policy))?.state, "ready");
+  assert.equal((await store.getOwned(alex, workspace.id))?.state, "ready");
+  assert.equal(controller.destroys, 1);
+  assert.equal(gateway.workspaceRevocations, 0, "stale policy cleanup cannot revoke the replacement");
+  assert.equal((await store.getOwned(alex, workspace.id))?.accessGeneration, 2);
+});
+
 test("restart destroys the prior sandbox and retains product identity", async () => {
   const controller = new FakeController();
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller);
@@ -488,7 +599,8 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   const service = new WorkspaceService(new MemoryWorkspaceStore(), controller, gateway);
   const workspace = await service.create(alex, policy, "personal", "gateway-key-0001", "correlation-002");
   assert.equal(workspace.readiness.models, "ready");
-  assert.equal(workspace.readiness.tools, "ready");
+  assert.equal(workspace.readiness.tools, "unavailable");
+  assert.deepEqual(gateway.lastReadinessOptions, { includeTools: false });
   assert.equal(workspace.modelRoute?.limits.requestsPerMinute, 30);
   assert.equal(controller.lastGateway?.modelAlias, "lemmacomputer-assistant");
   assert.equal(gateway.grants, 1);
@@ -497,6 +609,54 @@ test("workspace lifecycle provisions, reports, tests, and revokes a scoped gatew
   assert.deepEqual((await service.testGateway(alex, policy, workspace.id)).tools.map((tool) => tool.name), ["search_files"]);
   await service.stop(alex, policy, workspace.id);
   assert.equal(gateway.revocations, 1);
+});
+
+test("connector failure stays capability-scoped for every selected agent", () => {
+  const agentPolicies = [
+    ["claude-desktop", "claude-desktop-managed-v1"],
+    ["claude-cli", "claude-cli-managed-v1"],
+    ["codex-cli", "codex-cli-managed-v1"],
+    ["hermes-desktop", "hermes-desktop-managed-v1"],
+    ["hermes-claw", "hermes-claw-managed-v1"],
+  ].map(([catalogId, agentProfile]) => ({
+    catalogId,
+    agentId: `${catalogId}-agent`,
+    agentProfile,
+    displayName: catalogId,
+    clientVersion: "test",
+    modelAlias: "lemmacomputer-assistant",
+    mcpServer: "lemmacomputer_optional",
+    allowedTools: ["optional_tool"],
+    toolPolicies: {},
+  })) as NonNullable<RuntimePolicy["agents"]>;
+  const view = toView({
+    id: "00000000-0000-4000-8000-000000000001",
+    tenantId: alex.tenantId,
+    subjectId: alex.subjectId,
+    grantId: "personal",
+    state: "ready",
+    providerId: "sandbox-ready",
+    failureCode: null,
+    operationToken: null,
+    accessGeneration: 1,
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+  }, {
+    models: "ready",
+    tools: "failed",
+    modelRoute: fakeModelRoute,
+  }, { ...policy, agents: agentPolicies });
+
+  assert.equal(view.state, "ready");
+  assert.equal(view.readiness.models, "ready");
+  assert.equal(view.readiness.tools, "failed");
+  assert.deepEqual(view.agents?.map((agent) => [agent.id, agent.state]), [
+    ["claude-desktop", "ready"],
+    ["claude-cli", "ready"],
+    ["codex-cli", "ready"],
+    ["hermes-desktop", "ready"],
+    ["hermes-claw", "ready"],
+  ]);
 });
 
 test("Control signs and self-verifies policy before issuing grants or calling the controller", async () => {

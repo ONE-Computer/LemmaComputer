@@ -366,9 +366,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     const credentialName = tenantCredentialName(input.tenantId, input.provider);
     const deploymentFor = (template: ProviderModelTemplate, candidate = false): ProviderModelDeployment => {
       const suffix = candidate ? `-candidate-${randomBytes(8).toString("hex")}` : "";
-      const alias = candidate
-        ? `${tenantManagedModelAccessGroup(input.tenantId, template.alias)}${suffix}`
-        : template.alias;
+      const alias = `${tenantManagedModelAccessGroup(input.tenantId, template.alias)}${suffix}`;
       return {
         id: `${tenantModelId(input.tenantId, input.provider, template.alias)}${suffix}`,
         provider: input.provider,
@@ -491,7 +489,8 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
-    await this.probe(model.alias, tenantManagedModelAccessGroup(input.tenantId, model.alias), input.provider);
+    const accessGroup = tenantManagedModelAccessGroup(input.tenantId, model.alias);
+    await this.probe(accessGroup, accessGroup, input.provider);
   }
 
   async deleteManagedProvider(input: ManagedProviderOperation) {

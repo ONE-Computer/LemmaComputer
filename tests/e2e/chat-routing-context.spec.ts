@@ -72,19 +72,25 @@ test("routes the next turn through the selected workspace, agent, and stable mod
 
   const composer = page.getByPlaceholder("Message Hermes Agent CLI");
   await composer.fill("Line one\nLine two\nLine three\nLine four");
-  const [rowBox, actionsBox, contextBox, sendBox] = await Promise.all([
-    page.locator(".companion-chat-composer-row").boundingBox(),
+  const [composerBox, textareaBox, toolbarBox, actionsBox, contextBox, sendBox] = await Promise.all([
+    page.locator(".chat-composer:visible").boundingBox(),
+    composer.boundingBox(),
+    page.locator(".companion-chat-composer-toolbar").boundingBox(),
     page.getByRole("button", { name: "Chat actions" }).boundingBox(),
     page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).boundingBox(),
     page.getByRole("button", { name: "Send message" }).boundingBox(),
   ]);
-  expect(rowBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(textareaBox).not.toBeNull();
+  expect(toolbarBox).not.toBeNull();
   expect(actionsBox).not.toBeNull();
   expect(contextBox).not.toBeNull();
   expect(sendBox).not.toBeNull();
+  expect(textareaBox!.width).toBeGreaterThan(composerBox!.width - 36);
+  expect(textareaBox!.y + textareaBox!.height).toBeLessThanOrEqual(toolbarBox!.y + 1);
   const controlBottoms = [actionsBox!, contextBox!, sendBox!].map((box) => box.y + box.height);
   expect(Math.max(...controlBottoms) - Math.min(...controlBottoms)).toBeLessThanOrEqual(1);
-  expect(rowBox!.height).toBeGreaterThan(sendBox!.height);
+  expect(composerBox!.height).toBeGreaterThan(textareaBox!.height);
 
   await composer.fill("Prepare the launch analysis with the selected context.");
   const sent = page.waitForRequest((request) => (

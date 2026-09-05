@@ -469,9 +469,10 @@ export interface WorkspaceStore {
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
   authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates?: WorkspaceState[]): Promise<boolean>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
-  claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState): Promise<WorkspaceRecord | null>;
+  claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord): Promise<WorkspaceRecord | null>;
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
+  reconcile(observed: WorkspaceRecord, patch: Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">): Promise<WorkspaceRecord | null>;
   revokeAccessGrants(workspaceId: string): Promise<WorkspaceRecord>;
   getDeletionImpact(identity: IdentityContext, workspaceId: string): Promise<WorkspaceDeletionImpact | null>;
   tombstone(identity: IdentityContext, workspaceId: string, contentDisposition: WorkspaceContentDisposition): Promise<boolean>;
@@ -1030,11 +1031,18 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     }
   }
 
-  async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState) {
+  async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord) {
     const token = randomUUID();
     const result = await this.pool.query(
-      "UPDATE workspaces SET state=$2, operation_token=$3, failure_code=NULL, updated_at=now() WHERE id=$1 AND state=ANY($4::text[]) AND deleted_at IS NULL RETURNING *",
-      [workspaceId, next, token, allowed],
+      `UPDATE workspaces SET state=$2, operation_token=$3, failure_code=NULL, updated_at=now()
+       WHERE id=$1 AND state=ANY($4::text[]) AND deleted_at IS NULL
+         AND (NOT $5::boolean OR (id=$6 AND tenant_id=$7 AND subject_id=$8
+           AND provider_id IS NOT DISTINCT FROM $9 AND access_generation=$10
+           AND state=$11 AND operation_token IS NULL AND $12::uuid IS NULL))
+       RETURNING *`,
+      [workspaceId, next, token, allowed, Boolean(observed), observed?.id ?? null,
+        observed?.tenantId ?? null, observed?.subjectId ?? null, observed?.providerId ?? null,
+        observed?.accessGeneration ?? null, observed?.state ?? null, observed?.operationToken ?? null],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
@@ -1055,6 +1063,23 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
+  }
+
+  async reconcile(observed: WorkspaceRecord, patch: Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">) {
+    // A controller observation cannot complete or overwrite a lifecycle operation.
+    if (observed.operationToken !== null) return null;
+    const unchanged = observed.state === patch.state && observed.providerId === patch.providerId
+      && observed.failureCode === patch.failureCode;
+    const fence = `WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND provider_id IS NOT DISTINCT FROM $4
+      AND access_generation=$5 AND state=$6 AND operation_token IS NULL AND deleted_at IS NULL`;
+    const values = [observed.id, observed.tenantId, observed.subjectId, observed.providerId,
+      observed.accessGeneration, observed.state];
+    const result = await this.pool.query(
+      unchanged ? `SELECT * FROM workspaces ${fence}`
+        : `UPDATE workspaces SET state=$7,provider_id=$8,failure_code=$9,updated_at=now() ${fence} RETURNING *`,
+      unchanged ? values : [...values, patch.state, patch.providerId, patch.failureCode],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
   async revokeAccessGrants(workspaceId: string) {
@@ -2556,9 +2581,13 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     this.records.set(record.id, record);
     return record;
   }
-  async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState) {
+  async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord) {
     const record = this.records.get(workspaceId);
     if (!record || record.deletedAt !== null || !allowed.includes(record.state)) return null;
+    if (observed && (record.id !== observed.id || record.tenantId !== observed.tenantId
+      || record.subjectId !== observed.subjectId || record.providerId !== observed.providerId
+      || record.accessGeneration !== observed.accessGeneration || record.state !== observed.state
+      || record.operationToken !== null || observed.operationToken !== null)) return null;
     const claimed = { ...record, state: next, failureCode: null, operationToken: randomUUID(), updatedAt: new Date() };
     this.records.set(workspaceId, claimed);
     return claimed;
@@ -2571,6 +2600,16 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>) {
     const record = this.records.get(workspaceId);
     if (!record) throw new Error("Workspace not found");
+    return this.save(record, patch);
+  }
+  async reconcile(observed: WorkspaceRecord, patch: Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">) {
+    const record = this.records.get(observed.id);
+    if (!record || record.deletedAt !== null || observed.operationToken !== null || record.operationToken !== null
+      || record.tenantId !== observed.tenantId || record.subjectId !== observed.subjectId
+      || record.providerId !== observed.providerId || record.accessGeneration !== observed.accessGeneration
+      || record.state !== observed.state) return null;
+    if (record.state === patch.state && record.providerId === patch.providerId
+      && record.failureCode === patch.failureCode) return record;
     return this.save(record, patch);
   }
   async revokeAccessGrants(workspaceId: string) {

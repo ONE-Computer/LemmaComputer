@@ -1,4 +1,6 @@
-export const transactionalEmailKinds = ["email-verification", "password-recovery", "organization-invitation"] as const;
+import { LemmaComputerError } from "@lemmacomputer/contracts";
+
+export const transactionalEmailKinds = ["email-verification", "password-recovery", "organization-invitation", "site-invitation"] as const;
 export type TransactionalEmailKind = typeof transactionalEmailKinds[number];
 
 export type TransactionalEmailMessage = {
@@ -47,6 +49,28 @@ export const deliverOrganizationInvitationEmail = async (
     html: `<p><strong>${escapeHtml(input.organizationDisplayName)}</strong> invited you to LemmaComputer as <strong>${escapeHtml(roleLabel)}</strong>.</p><p><a href="${escapeHtml(input.activationUrl)}">Accept invitation</a></p><p>This link expires at ${escapeHtml(expiry)}. The invitation fixes your organization and role; your authentication provider cannot change them.</p><p>If you did not expect this invitation, ignore this email.</p>`,
   });
   if (!result.accepted) throw new Error("Transactional invitation email delivery failed");
+  return result;
+};
+
+export const deliverSiteInvitationEmail = async (
+  adapter: TransactionalEmailAdapter,
+  input: {
+    recipient: string;
+    siteName: string;
+    inviterDisplayName: string;
+    activationUrl: string;
+    expiresAt: Date;
+  },
+) => {
+  const expiry = input.expiresAt.toISOString();
+  const result = await adapter.send({
+    kind: "site-invitation",
+    to: input.recipient,
+    subject: `${input.inviterDisplayName} shared ${input.siteName} with you`,
+    text: `${input.inviterDisplayName} shared the LemmaComputer site “${input.siteName}” with you.\n\nOpen site:\n${input.activationUrl}\n\nSign in with this email address to accept access. This link expires at ${expiry}. If you did not expect it, ignore this email.`,
+    html: `<p><strong>${escapeHtml(input.inviterDisplayName)}</strong> shared the LemmaComputer site <strong>${escapeHtml(input.siteName)}</strong> with you.</p><p><a href="${escapeHtml(input.activationUrl)}">Open site</a></p><p>Sign in with this email address to accept access. This link expires at ${escapeHtml(expiry)}.</p><p>If you did not expect it, ignore this email.</p>`,
+  }).catch(() => null);
+  if (!result?.accepted) throw new LemmaComputerError("SITE_INVITATION_EMAIL_FAILED", "Email could not be submitted. The invitation is still pending; retry sending it from Invitations.", 503, true);
   return result;
 };
 

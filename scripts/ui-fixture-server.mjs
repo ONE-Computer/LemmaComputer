@@ -408,12 +408,16 @@ const chatMessages = structuredClone(initialChatMessages);
 const activeFixtureTurns = new Map();
 
 const reviewedSkills = [{
-  id: "make-a-site",
-  displayName: "Make a site",
-  description: "Build and publish a simple owner-only static Vite site.",
-  defaultPrompt: "Use $make-a-site to build and publish a simple site.",
+  id: "site",
+  displayName: "$site",
+  description: "Create, edit, publish, inspect, and restore a static dashboard site.",
+  defaultPrompt: "$site",
 }];
-const helloSiteHtml = "<!doctype html><html lang=\"en\"><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Hello world</title><style>html,body{height:100%;margin:0}body{display:grid;place-items:center;font:600 32px system-ui;color:#14233b}</style><body>Hello world</body></html>";
+const helloSiteHtml = "<!doctype html><html lang=\"en\"><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Hello world</title><link rel=\"stylesheet\" href=\"./assets/app.css\"><body><main id=\"app\">Loading…</main><script src=\"./assets/app.js\"></script></body></html>";
+const helloSiteCss = "html,body{height:100%;margin:0}body{display:grid;place-items:center;font:600 32px system-ui;color:#14233b}";
+const helloSiteJavascript = "fetch('./data/snapshot.json',{credentials:'include'}).then((response)=>response.json()).then((snapshot)=>{document.getElementById('app').textContent=snapshot.title})";
+const helloSiteSnapshot = JSON.stringify({ title: "Hello world" });
+const helloSiteHandle = "h".repeat(24);
 let fixtureSites = [];
 
 const activityTurnId = "fixture-turn-1";
@@ -1224,29 +1228,72 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ sites: fixtureSites }));
     return;
   }
-  if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+\/preview$/.test(url.pathname)) {
-    const id = url.pathname.split("/").at(-2);
+  if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+$/.test(url.pathname)) {
+    const id = url.pathname.split("/").at(-1);
     const site = fixtureSites.find((item) => item.id === id);
     if (!site) {
       response.statusCode = 404;
       response.end(JSON.stringify({ error: { code: "SITE_NOT_FOUND", message: "Site not found", retryable: false } }));
       return;
     }
-    response.end(JSON.stringify({ site, revision: site.currentRevision, artifactSha256: "d".repeat(64), html: helloSiteHtml }));
+    response.end(JSON.stringify({ site, delivery: { mode: "copy-link", captured: true }, grants: [], invitations: [], versions: [{ id: "8c536c1f-6a31-427d-af8f-dbb0c63f8d73", version: 1, state: "ready", fileCount: 3, createdAt: site.createdAt }] }));
     return;
   }
-  if (request.method === "GET" && /^\/v1\/sites\/[0-9a-f-]+\/content$/.test(url.pathname)) {
-    const id = url.pathname.split("/").at(-2);
-    const site = fixtureSites.find((item) => item.id === id);
+  if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}$`).test(url.pathname)) {
+    const site = fixtureSites.find((item) => item.handle === helloSiteHandle);
     if (!site) {
       response.statusCode = 404;
       response.end(JSON.stringify({ error: { code: "SITE_NOT_FOUND", message: "Site not found", retryable: false } }));
       return;
     }
+    response.end(JSON.stringify({ site, version: 1, entryUrl: `/api/v1/sites/viewer/${helloSiteHandle}/versions/1/assets/index.html` }));
+    return;
+  }
+  if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}/versions/1/assets/index\\.html$`).test(url.pathname)) {
     response.setHeader("content-type", "text/html; charset=utf-8");
-    response.setHeader("content-security-policy", "sandbox allow-scripts; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'");
-    response.setHeader("cross-origin-opener-policy", "same-origin");
     response.end(helloSiteHtml);
+    return;
+  }
+  if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}/versions/1/assets/assets/app\\.css$`).test(url.pathname)) {
+    response.setHeader("content-type", "text/css; charset=utf-8");
+    response.end(helloSiteCss);
+    return;
+  }
+  if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}/versions/1/assets/assets/app\\.js$`).test(url.pathname)) {
+    response.setHeader("content-type", "text/javascript; charset=utf-8");
+    response.end(helloSiteJavascript);
+    return;
+  }
+  if (request.method === "GET" && new RegExp(`^/v1/sites/viewer/${helloSiteHandle}/versions/1/assets/data/snapshot\\.json$`).test(url.pathname)) {
+    response.setHeader("access-control-allow-credentials", "true");
+    response.setHeader("access-control-allow-origin", "null");
+    response.setHeader("content-type", "application/json; charset=utf-8");
+    response.end(helloSiteSnapshot);
+    return;
+  }
+  if (request.method === "PATCH" && /^\/v1\/sites\/[0-9a-f-]+$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const id = url.pathname.split("/").at(-1);
+      const input = JSON.parse(body);
+      fixtureSites = fixtureSites.map((site) => site.id === id ? { ...site, visibility: input.visibility } : site);
+      response.end(JSON.stringify(fixtureSites.find((site) => site.id === id)));
+    });
+    return;
+  }
+  if (request.method === "POST" && /^\/v1\/sites\/[0-9a-f-]+\/invitations$/.test(url.pathname)) {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      response.statusCode = 201;
+      response.end(JSON.stringify({ invitation: { id: crypto.randomUUID(), email: input.email, status: "pending", expiresAt: new Date(Date.now() + 604800000).toISOString() }, replayed: false, acceptancePath: `/s/${helloSiteHandle}?invite=fixture-token`, delivery: { mode: "copy-link" } }));
+    });
+    return;
+  }
+  if (key === "POST /v1/sites/invitations/accept") {
+    response.end(JSON.stringify({ siteId: fixtureSites[0]?.id, handle: helloSiteHandle, stablePath: `/s/${helloSiteHandle}` }));
     return;
   }
   if (request.method === "DELETE" && /^\/v1\/sites\/[0-9a-f-]+$/.test(url.pathname)) {
@@ -1589,7 +1636,7 @@ const server = http.createServer((request, response) => {
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 2, "tool", "completed", "tool", { toolCallId: `${turnId}-tool`, name: "workspace-context", summary: "Context checked" })), 760);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
       setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
-      const siteRequest = JSON.stringify(input.message).includes("$make-a-site");
+      const siteRequest = JSON.stringify(input.message).includes("$site");
       const siteRefreshRequest = siteRequest && JSON.stringify(input.message).includes("survive refresh");
       const refreshRecoveryRequest = JSON.stringify(input.message).includes("dashboard layout");
       const stopRecoveryRequest = JSON.stringify(input.message).includes("until I stop you");
@@ -1641,10 +1688,16 @@ const server = http.createServer((request, response) => {
           const publishedAt = new Date().toISOString();
           fixtureSites = [{
             id: "7c536c1f-6a31-427d-af8f-dbb0c63f8d73",
+            handle: helloSiteHandle,
             slug: "hello-world",
             name: "Hello world",
             state: "ready",
             currentRevision: 1,
+            visibility: "private",
+            canManage: true,
+            canDelete: true,
+            role: "owner",
+            stableUrl: `http://127.0.0.1:${port}/s/${helloSiteHandle}`,
             sourceWorkspaceId: workspaceId,
             sourceAgentId: "agent-alex:hermes",
             createdAt: publishedAt,

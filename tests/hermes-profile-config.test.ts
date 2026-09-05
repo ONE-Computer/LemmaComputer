@@ -31,7 +31,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
     path.join(modules, "toolsets.py"),
     "TOOLSETS = {}\ndef resolve_toolset(name):\n    return {name}\n",
   );
-  for (const skill of [...officeSkills, "make-a-site", "teams-meeting-pipeline"]) {
+  for (const skill of [...officeSkills, "site", "teams-meeting-pipeline"]) {
     await installSkill(bundle, skill);
   }
 
@@ -52,6 +52,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   const first = JSON.parse(await readFile(path.join(home, "config.yaml"), "utf8"));
   assert.equal(first.model.default, "lemmacomputer-balanced");
   assert.equal(first.model.provider, "custom");
+  assert.equal(first.mcp_servers.lemmacomputer_connectors.connect_timeout, 15);
   assert.equal(first.model.context_length, undefined, "do not pin all aliases to the default tier");
   assert.equal(first.model.max_tokens, 32768);
   assert.equal(first.custom_providers[0].models["lemmacomputer-balanced"].context_length, 1000000);
@@ -80,7 +81,7 @@ test("Hermes enables reviewed default skills and preserves later employee toggle
   const legacy = JSON.parse(await readFile(path.join(legacyHome, "config.yaml"), "utf8"));
   assert.equal(legacy.model.default, "lemmacomputer-balanced", "legacy Auto workspace defaults migrate safely to Balanced");
   assert.deepEqual(first.skills.disabled, ["teams-meeting-pipeline"]);
-  for (const skill of [...officeSkills, "make-a-site"]) {
+  for (const skill of [...officeSkills, "site"]) {
     assert.ok(!first.skills.disabled.includes(skill));
   }
 

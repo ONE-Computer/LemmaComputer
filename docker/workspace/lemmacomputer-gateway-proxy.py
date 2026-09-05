@@ -57,10 +57,16 @@ AGENT_INSTANCE_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89a
 MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 LOCAL_CONNECTOR_TOOLS = {"list-approved-sharepoint-sites"}
 TERMINAL_AGENT_BRIDGE_CODES = {"AGENT_BRIDGE_GRANT_REVOKED", "AGENT_BRIDGE_GRANT_EXPIRED"}
-MCP_DISCOVERY_TIMEOUT_SECONDS = 5
+# Hosted MCP providers can need several seconds to resolve a user-scoped OAuth
+# credential before returning their tool list. Keep this timeout bounded so one
+# connector cannot hold discovery open indefinitely, while allowing the normal
+# GitHub connector path to complete.
+MCP_DISCOVERY_TIMEOUT_SECONDS = int(os.environ.get("LEMMACOMPUTER_MCP_DISCOVERY_TIMEOUT_SECONDS", "10"))
 MAX_INFERENCE_BODY_BYTES = 64 * 1024 * 1024
 MAX_MCP_TOOL_BODY_BYTES = 6 * 1024 * 1024
 MAX_MCP_TOOL_RESPONSE_BYTES = 64 * 1024 * 1024
+MAX_SITE_ARCHIVE_BYTES = 20 * 1024 * 1024
+MAX_SITE_REQUEST_BYTES = 30 * 1024 * 1024
 CLAUDE_GATEWAY_HEALTH_PROBE_MIN_TOKENS = 16
 LOCAL_UPLOAD_ROOT = os.path.realpath("/home/kasm-user")
 UPLOAD_CHUNK_BYTES = 10 * 1024 * 1024
@@ -93,7 +99,8 @@ if (UPSTREAM.scheme not in {"http", "https"} or not UPSTREAM.hostname or len(CRE
         or not ALLOWED_SERVICE_CLASSES
         or any(value not in {"lite", "balanced", "pro"} for value in ALLOWED_SERVICE_CLASSES)
         or DEFAULT_SERVICE_CLASS not in ALLOWED_SERVICE_CLASSES
-        or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}):
+        or LISTEN_PORT not in {4312, 4314, 4315, 4316, 4317}
+        or MCP_DISCOVERY_TIMEOUT_SECONDS < 1 or MCP_DISCOVERY_TIMEOUT_SECONDS > 30):
     raise SystemExit("invalid gateway broker configuration")
 
 
@@ -496,6 +503,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/lemmacomputer/sharepoint-sites":
             self.approved_sharepoint_sites()
             return
+        if self.path == "/lemmacomputer/sites":
+            self.list_sites()
+            return
+        site_match = re.fullmatch(r"/lemmacomputer/sites/([0-9a-f-]{36})", self.path)
+        if site_match:
+            self.inspect_site(site_match.group(1))
+            return
         self.forward()
 
     def do_POST(self) -> None:
@@ -517,6 +531,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/lemmacomputer/sites":
             self.publish_site()
+            return
+        restore_match = re.fullmatch(r"/lemmacomputer/sites/([0-9a-f-]{36})/versions/([1-9][0-9]*)/restore", self.path)
+        if restore_match:
+            self.restore_site(restore_match.group(1), int(restore_match.group(2)))
             return
         self.forward()
 
@@ -684,42 +702,96 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(201, {"operation": operation})
         except AgentBridgeTerminalError as error:
             self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
-        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+        except urllib.error.HTTPError as error:
+            self.send_json(503 if error.code == 429 or error.code >= 500 else 400, {"error": "sites_control_request_failed", "message": str(error)[:240]})
+        except (OSError, urllib.error.URLError) as error:
+            self.send_json(503, {"error": "sites_control_unavailable", "message": str(error)[:240]})
+        except (ValueError, KeyError, json.JSONDecodeError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 
     def publish_site(self) -> None:
         try:
-            value = self.read_json(800 * 1024)
+            value = self.read_json(MAX_SITE_REQUEST_BYTES)
             name = value.get("name")
             slug = value.get("slug")
-            html_base64 = value.get("htmlBase64")
-            artifact_sha256 = value.get("artifactSha256")
+            site_id = value.get("siteId")
+            bundle_base64 = value.get("bundleBase64")
+            archive_sha256 = value.get("archiveSha256")
+            archive_size = value.get("archiveSizeBytes")
+            manifest_sha256 = value.get("manifestSha256")
+            idempotency_key = value.get("idempotencyKey")
+            source_project_path = value.get("sourceProjectPath")
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
                 raise ValueError("name must contain 1 to 80 characters")
             if not isinstance(slug, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug) or not 2 <= len(slug) <= 80:
                 raise ValueError("slug must be 2 to 80 lowercase hyphenated characters")
-            if not isinstance(html_base64, str) or len(html_base64) > 750_000:
-                raise ValueError("htmlBase64 is required")
-            if not isinstance(artifact_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", artifact_sha256):
-                raise ValueError("artifactSha256 is required")
+            if site_id is not None and (not isinstance(site_id, str) or not AGENT_INSTANCE_PATTERN.fullmatch(site_id)):
+                raise ValueError("siteId is invalid")
+            if not isinstance(bundle_base64, str) or len(bundle_base64) > 28_000_000:
+                raise ValueError("bundleBase64 is required")
+            if not isinstance(archive_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", archive_sha256):
+                raise ValueError("archiveSha256 is required")
+            if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", manifest_sha256):
+                raise ValueError("manifestSha256 is required")
+            if not isinstance(archive_size, int) or not 1 <= archive_size <= MAX_SITE_ARCHIVE_BYTES:
+                raise ValueError("archiveSizeBytes is invalid")
+            if not isinstance(idempotency_key, str) or not 16 <= len(idempotency_key) <= 128:
+                raise ValueError("idempotencyKey is invalid")
+            if not isinstance(source_project_path, str) or not 1 <= len(source_project_path) <= 1024 or source_project_path.startswith("/") or "\\" in source_project_path or any(part in {"", ".", ".."} for part in source_project_path.split("/")):
+                raise ValueError("sourceProjectPath is invalid")
             try:
-                content = base64.b64decode(html_base64, validate=True)
-            except (ValueError, base64.binascii.Error):
-                raise ValueError("htmlBase64 is invalid") from None
-            if not content or len(content) > 512 * 1024:
-                raise ValueError("site artifact must be between 1 byte and 512 KB")
-            if hashlib.sha256(content).hexdigest() != artifact_sha256:
-                raise ValueError("site artifact digest does not match")
-            site = self.control_json("/internal/v1/agent/sites", {
+                content = base64.b64decode(bundle_base64, validate=True)
+            except (ValueError, binascii.Error):
+                raise ValueError("bundleBase64 is invalid") from None
+            if len(content) != archive_size or hashlib.sha256(content).hexdigest() != archive_sha256:
+                raise ValueError("site archive size or digest does not match")
+            forwarded = {
                 "name": name.strip(),
                 "slug": slug,
-                "htmlBase64": html_base64,
-                "artifactSha256": artifact_sha256,
-            })
+                "bundleBase64": bundle_base64,
+                "archiveSha256": archive_sha256,
+                "archiveSizeBytes": archive_size,
+                "manifestSha256": manifest_sha256,
+                "idempotencyKey": idempotency_key,
+                "sourceProjectPath": source_project_path,
+            }
+            if site_id is not None:
+                forwarded["siteId"] = site_id
+            site = self.control_json("/internal/v1/agent/sites", forwarded)
             self.send_json(201, site)
         except AgentBridgeTerminalError as error:
             self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def list_sites(self) -> None:
+        try:
+            self.send_json(200, self.control_json("/internal/v1/agent/sites"))
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def inspect_site(self, site_id: str) -> None:
+        try:
+            if not AGENT_INSTANCE_PATTERN.fullmatch(site_id):
+                raise ValueError("siteId is invalid")
+            self.send_json(200, self.control_json(f"/internal/v1/agent/sites/{site_id}"))
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+            self.send_json(400, {"error": str(error)[:240]})
+
+    def restore_site(self, site_id: str, version: int) -> None:
+        try:
+            if not AGENT_INSTANCE_PATTERN.fullmatch(site_id) or version < 1:
+                raise ValueError("siteId or version is invalid")
+            self.read_json()
+            result = self.control_json(f"/internal/v1/agent/sites/{site_id}/versions/{version}/restore", {})
+            self.send_json(200, result)
+        except AgentBridgeTerminalError as error:
+            self.send_json(503, {"error": "workspace_authorization_changed", "message": str(error)})
+        except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
             self.send_json(400, {"error": str(error)[:240]})
 
     def create_onedrive_deletion(self) -> None:

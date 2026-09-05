@@ -33,6 +33,7 @@ export type CustomerAuthenticationSession = z.infer<typeof customerAuthenticatio
 
 export interface CustomerAuthenticationSessionReader {
   getSession(headers: Headers): Promise<unknown | null>;
+  getSiteViewerSession?(sessionId: string, accountUserId: string): Promise<unknown | null>;
 }
 
 export const createBetterAuthSessionReader = (
@@ -68,6 +69,10 @@ export class CustomerProductAuthenticationService {
 
   private async verifiedSession(headers: Headers) {
     const raw = await this.reader.getSession(headers);
+    return this.validateSession(raw);
+  }
+
+  private validateSession(raw: unknown) {
     if (!raw) return null;
     const parsed = customerAuthenticationSessionSchema.safeParse(raw);
     if (!parsed.success) {
@@ -97,7 +102,23 @@ export class CustomerProductAuthenticationService {
   async resolve(headers: Headers): Promise<CustomerProductAuthenticationResolution> {
     const synchronized = await this.synchronize(headers);
     if (!synchronized) return { status: "anonymous" };
-    const { authenticated, account, memberships } = synchronized;
+    return this.resolveSynchronized(synchronized);
+  }
+
+  // Called only after verification of a site/version-scoped access grant.
+  // Re-read the actual auth session so sign-out, expiry and account disablement
+  // revoke bundle access immediately, including already cached bundle bytes.
+  async resolveSiteViewerSession(sessionId: string, accountUserId: string): Promise<CustomerProductAuthenticationResolution> {
+    const raw = await this.reader.getSiteViewerSession?.(z.uuid().parse(sessionId), z.uuid().parse(accountUserId));
+    const authenticated = this.validateSession(raw);
+    if (!authenticated || authenticated.session.id !== sessionId || authenticated.user.id !== accountUserId) return { status: "anonymous" };
+    const account = await this.store.ensureCustomerAccount({ accountUserId });
+    if (account.status !== "active") throw new LemmaComputerError("ACCOUNT_DISABLED", "This account is disabled", 403);
+    const memberships = await this.store.listCustomerMemberships(accountUserId);
+    return this.resolveSynchronized({ authenticated, account, memberships });
+  }
+
+  private async resolveSynchronized({ authenticated, account, memberships }: NonNullable<Awaited<ReturnType<CustomerProductAuthenticationService["synchronize"]>>>): Promise<CustomerProductAuthenticationResolution> {
     const base: AuthenticatedResolutionBase = {
       accountUserId: account.accountUserId,
       authenticationSessionId: authenticated.session.id,

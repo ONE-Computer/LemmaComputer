@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { managedProviderAliasForAccessGroup } from "@lemmacomputer/litellm-adapter";
 import {
   DeterministicModelRouter,
   RoutingDecisionBindingAuthority,
@@ -445,9 +444,6 @@ export class RoutingAdministrationService {
     });
   }
 }
-const executionModelGroup = (tenantId: string, providerDeployment: string) =>
-  managedProviderAliasForAccessGroup(tenantId, providerDeployment) ?? providerDeployment;
-
 /**
  * Older immutable mappings predate the reasoning-capability projection.
  * Enrich only missing capabilities from the code-owned exact route registry;
@@ -740,7 +736,7 @@ export class RoutingExecutionService {
       reasonCode: String(prior.reason_code),
       executedDeploymentId: deploymentId,
       executedProviderDeployment: String(prior.executed_provider_deployment),
-      executedModelGroup: executionModelGroup(tenantId, String(prior.executed_provider_deployment)),
+      executedModelGroup: String(prior.executed_provider_deployment),
       executedOutputTokenLimit: Math.min(Number(capabilities?.outputTokens), Number(capabilities?.contextTokens ?? Infinity) - inputTokens),
       binding: this.bindings.issue({
         tenantId,
@@ -881,7 +877,7 @@ export class RoutingExecutionService {
       reasonCode: decision.reasonCode,
       executedDeploymentId: decision.executedDeployment.id,
       executedProviderDeployment: decision.executedDeployment.deployment,
-      executedModelGroup: executionModelGroup(input.tenantId, decision.executedDeployment.deployment),
+      executedModelGroup: decision.executedDeployment.deployment,
       executedOutputTokenLimit: Math.min(
         executedCapabilities.outputTokens,
         executedCapabilities.contextTokens - Math.max(input.estimatedInputTokens, input.requiredCapabilities.contextTokens ?? 0),

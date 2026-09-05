@@ -13,7 +13,7 @@ const openHistoricalActivity = async (page: Page) => {
   return panel;
 };
 
-test("chat composer grows with input and stops after five lines", async ({ page }) => {
+test("chat composer grows with input and stops at the stacked composer's 180px cap", async ({ page }) => {
   await page.goto(chatPath);
   const composer = page.getByPlaceholder(/message/i);
   const size = () => composer.evaluate((field: HTMLTextAreaElement) => ({
@@ -25,12 +25,16 @@ test("chat composer grows with input and stops after five lines", async ({ page 
   const oneLine = await size();
   await composer.fill("One\nTwo\nThree\nFour\nFive");
   const fiveLines = await size();
-  await composer.fill("One\nTwo\nThree\nFour\nFive\nSix\nSeven");
-  const sevenLines = await size();
+  await composer.fill("One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight\nNine");
+  const nineLines = await size();
 
   expect(fiveLines.height).toBeGreaterThan(oneLine.height);
-  expect(sevenLines.height).toBeLessThanOrEqual(fiveLines.height + 1);
-  expect(sevenLines.scrollHeight).toBeGreaterThan(sevenLines.clientHeight);
+  // The stacked-composer change replaced the old five-line cap with 180px.
+  expect(nineLines.height).toBeGreaterThan(fiveLines.height);
+  expect(nineLines.height).toBe(180);
+  expect(nineLines.scrollHeight).toBeGreaterThan(nineLines.clientHeight);
+  await composer.fill(Array.from({ length: 12 }, (_, index) => `Line ${index}`).join("\n"));
+  expect((await size()).height).toBe(nineLines.height);
 });
 
 test.describe("streaming Activity panel", () => {

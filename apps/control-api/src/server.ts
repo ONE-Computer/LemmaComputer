@@ -5,10 +5,10 @@ import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assign
 import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
-import { PostgresAuthenticationStore } from "@lemmacomputer/auth-store";
+import { PostgresAuthenticationStore, readSiteViewerSession } from "@lemmacomputer/auth-store";
 import { FilesystemArtifactStore, S3ArtifactStore, type ArtifactStore } from "@lemmacomputer/artifact-store";
 import { PolicyBundleSigner } from "@lemmacomputer/policy-integrity";
-import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatConversationRecord, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
+import { hasOrganizationPermission, organizationPermissionCatalog, organizationPermissionCatalogVersion, organizationPermissions, permissionsByOrganizationRole, PostgresAgentInstanceStore, PostgresChatStore, PostgresConnectorRegistryStore, PostgresIdentityPolicyStore, PostgresPlatformOperatorStore, PostgresProviderSettingsStore, PostgresRoutingStore, PostgresScheduleStore, PostgresSiteStore, PostgresTeamBudgetStore, PostgresTeamStore, PostgresToolAuditStore, PostgresWorkspaceStore, runtimePolicyFor, type ActivityEventScope, type ActivityStore, type AgentInstanceStore, type ChannelStore, type ChatConversationRecord, type ChatStore, type ConnectorRegistryStore, type EffectivePolicy, type GovernanceStore, type IdentityPolicyStore, type OrganizationPermission, type OrganizationResourceScope, type OrganizationResourceScopeType, type PlatformOperatorSession, type ProviderSettingsStore, type RoutingStore, type ScheduleStore, type SessionPrincipal, type SiteAccessActor, type SiteStore, type TeamBudgetStore, type TeamStore, type ToolAuditStore, type WorkspaceStore } from "@lemmacomputer/workspace-store";
 import { PostgresProtectedWorkspacePolicyStore, type OrganizationWorkspacePolicyVersionRecord } from "@lemmacomputer/workspace-store";
 import { compileEgressSecurityGroup } from "@lemmacomputer/egress-policy";
 import { WorkspaceIngressAuthority } from "@lemmacomputer/workspace-ingress-auth";
@@ -47,12 +47,13 @@ import { SchedulePromptVault, ScheduleService } from "./schedules.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
+import { SiteAssetAccessAuthority, siteAssetAccessPath, siteAssetHeaders, redactSiteAssetAccessUrl } from "./site-asset-access.js";
 import { AgentProcessLifecycleService, callerSuppliedAgentInstanceId } from "./agent-process-lifecycle.js";
 import { UsageLedgerService,UsageTaskBindingAuthority,adminRateCardSchema,adminReconciliationSchema,adminUsageQuerySchema,decodeUsageCursor,encodeUsageCursor,internalUsageAdmissionSchema,internalUsageCompletionSchema } from "./usage-ledger.js";
 import { assertHostedLiteLlmAdminSecurity } from "./litellm-admin-security.js";
 import {RoutingAdministrationService,RoutingExecutionService,createRoutingMappingSchema,internalRoutingDecisionSchema,internalRoutingObservationSchema} from "./routing.js";
 import { createCustomerAuthentication, createCustomerSsoAuthentication, customerAuthenticationBasePath, customerAuthenticationControlPath, parseVersionedBetterAuthSecrets, registerCustomerAuthenticationRoutes, type CustomerAuthentication } from "./customer-authentication.js";
-import { CaptureTransactionalEmailAdapter, createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
+import { CaptureTransactionalEmailAdapter, createTransactionalEmailAdapter, deliverOrganizationInvitationEmail, deliverSiteInvitationEmail, type TransactionalEmailAdapter } from "./transactional-email.js";
 import {
   customerInvitationContextMaxAgeSeconds,
   createBetterAuthSessionReader,
@@ -84,7 +85,7 @@ type CustomerProductAuthenticationBoundary = Pick<
   CustomerProductAuthenticationService,
   "resolve" | "selectMembership" | "createOrganization" | "createPersonalTenant" | "prepareInvitation" | "getInvitationContext" | "getInvitationSsoContext" | "acceptInvitation"
   | "recordRecentStepUp" | "requireRecentStepUp" | "revokeCurrentSession" | "clearCurrentOrganizationSelection"
->;
+> & Partial<Pick<CustomerProductAuthenticationService, "resolveSiteViewerSession">>;
 type TenantSsoAdministrationBoundary = Pick<
   TenantSsoAdministrationService,
   "list" | "register" | "requestDomainVerification" | "verifyDomain" | "startTest" | "completeTest" | "startEnforcedSignIn" | "startInvitationSignIn" | "transition"
@@ -94,8 +95,11 @@ type TenantSsoAdministrationBoundary = Pick<
 const testPrincipalFromHeaders = (headers: Record<string, unknown>): SessionPrincipal => {
   const tenantId = String(headers["x-lemmacomputer-test-tenant-id"] ?? "test-tenant");
   const userId = String(headers["x-lemmacomputer-test-user-id"] ?? "test-user");
+  const accountHex = createHash("sha256").update(`${tenantId}:${userId}`).digest("hex");
+  const accountUserId = String(headers["x-lemmacomputer-test-account-user-id"] ?? `${accountHex.slice(0, 8)}-${accountHex.slice(8, 12)}-4${accountHex.slice(13, 16)}-8${accountHex.slice(17, 20)}-${accountHex.slice(20, 32)}`);
   return {
     userId,
+    accountUserId,
     tenantId,
     organizationId: tenantId,
     membershipId: `test-membership:${tenantId}:${userId}`,
@@ -619,7 +623,11 @@ const agentBridgeScopeForRequest = (method: string, url: string): AgentBridgeSco
     path === "/internal/v1/agent/mcp-discovery-plan"
     || path === "/internal/v1/agent/sharepoint-sites"
   )) return "agent:mcp-discovery";
-  if (method === "POST" && path === "/internal/v1/agent/sites") return "agent:sites";
+  if ((method === "GET" || method === "POST") && (
+    path === "/internal/v1/agent/sites"
+    || /^\/internal\/v1\/agent\/sites\/[^/]+$/.test(path)
+    || /^\/internal\/v1\/agent\/sites\/[^/]+\/versions\/\d+\/restore$/.test(path)
+  )) return "agent:sites";
   if (method === "GET" && /^\/internal\/v1\/agent\/operations\/[^/]+$/.test(path)) return "agent:operations:read";
   if (method === "POST" && (
     path === "/internal/v1/agent/uploads"
@@ -786,7 +794,7 @@ export function createControlServer(
     toolPolicies: { search_files: "allow" },
   };
   const app = Fastify({
-    logger: { redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
+    logger: { serializers: { req: (request) => ({ method: request.method, url: redactSiteAssetAccessUrl(request.url ?? ""), host: request.headers?.host, remoteAddress: request.ip, remotePort: request.socket?.remotePort }) }, redact: ["req.headers.x-lemmacomputer-proxy-token", "req.headers.x-lemmacomputer-mcp-policy-token", "req.headers.x-lemmacomputer-ai-usage-token", "req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie", "req.body", "*.arguments", "*.launchUrl"] },
     logController: new LogController({
       disableRequestLogging: (request) => /^\/v1\/connections\/[^/]+\/(?:callback|admin-consent\/callback|sharepoint-admin-consent\/callback)/.test(request.url)
         || request.url.startsWith("/v1/auth/")
@@ -869,7 +877,9 @@ export function createControlServer(
   }
   const agentProcesses = new AgentProcessLifecycleService(security.agentInstanceStore);
   const activityEvents = new ActivityEventService(store);
-  const sites = security.siteStore ? new SitesService(security.siteStore) : undefined;
+  const sites = security.siteStore && security.artifactStore
+    ? new SitesService(security.siteStore, security.artifactStore, { publicWebUrl: connectionOptions.publicWebUrl })
+    : undefined;
   const requireSites = () => {
     if (!sites) throw new LemmaComputerError("SITES_NOT_CONFIGURED", "Sites are unavailable", 503, true);
     return sites;
@@ -1159,6 +1169,22 @@ export function createControlServer(
   const principals = new WeakMap<object, SessionPrincipal>();
   const platformOperatorPrincipals = new WeakMap<object, PlatformOperatorSession>();
   const agentPrincipals = new WeakMap<object, AgentBridgeIdentity>();
+  type SiteViewerAccount = { actor: SiteAccessActor; accountUserId: string; email: string; authenticationSessionId: string; displayName: string };
+  const siteViewerAccounts = new WeakMap<object, SiteViewerAccount>();
+  const siteAssetAccess = new SiteAssetAccessAuthority(proxyToken);
+  const siteAssetTenants = new WeakMap<object, string>();
+  // No customer sessions are cached in production. Test identities have no
+  // Better Auth session database; this map exists only in explicit test mode.
+  const testSiteViewers = security.testIdentityMode ? new Map<string, SiteViewerAccount>() : null;
+  const resolvedSiteViewer = (resolution: CustomerProductAuthenticationResolution): SiteViewerAccount | null => resolution.status === "anonymous" ? null : ({
+    actor: resolution.status === "authorized" ? {
+      tenantId: resolution.principal.tenantId, subjectId: resolution.principal.userId,
+      accountUserId: resolution.accountUserId,
+    } : { tenantId: "", subjectId: `account:${resolution.accountUserId}`, accountUserId: resolution.accountUserId },
+    accountUserId: resolution.accountUserId, email: resolution.user.email,
+    displayName: resolution.user.name,
+    authenticationSessionId: resolution.authenticationSessionId,
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     // Fastify's request.url includes the raw query string. Authenticate based
@@ -1224,12 +1250,11 @@ export function createControlServer(
         subjectId: actor.subjectId,
         audience: "lemmacomputer-control",
       } as const;
-      // Connector discovery is part of workspace bootstrap: Hermes resolves
-      // its MCP tool catalogue before the controller can mark the sandbox
-      // ready. Keep every mutating/operational bridge scope ready-only, while
-      // allowing this read-only, generation-bound projection during the two
-      // states that actively create a replacement runtime.
-      const activeStates: WorkspaceState[] = agentBridgeScope === "agent:mcp-discovery"
+      // Discovery and process registration can occur while the selected agent
+      // runtimes are booting. Both grants remain workspace-generation-bound;
+      // every other mutating or operational scope stays ready-only.
+      const bootstrapScopes = new Set(["agent:mcp-discovery", "agent:instances"]);
+      const activeStates: WorkspaceState[] = bootstrapScopes.has(agentBridgeScope)
         ? ["provisioning", "restarting", "ready", "open"]
         : ["ready", "open"];
       if (!await store.authorizeWorkspaceAccess({
@@ -1282,6 +1307,47 @@ export function createControlServer(
       || requestPath === "/v1/auth/organizations" || requestPath === "/v1/auth/personal-tenant"
       || requestPath === "/v1/auth/owner-step-up"
       || requestPath === "/v1/auth/invitations/context" || requestPath === "/v1/auth/invitations/accept") return;
+    const assetAccess = siteAssetAccessPath.exec(requestPath);
+    if (assetAccess) {
+      if (request.method !== "GET" && request.method !== "HEAD") throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+      const claims = siteAssetAccess.verify(assetAccess[3]!, assetAccess[1]!, Number(assetAccess[2]));
+      const account = testSiteViewers
+        ? testSiteViewers.get(claims.authenticationSessionId)
+        : resolvedSiteViewer(await security.customerProductAuthentication?.resolveSiteViewerSession?.(claims.authenticationSessionId, claims.accountUserId) ?? { status: "anonymous" });
+      if (!account || account.accountUserId !== claims.accountUserId) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+      siteViewerAccounts.set(request, account);
+      siteAssetTenants.set(request, claims.tenantId);
+      return;
+    }
+    const siteViewerPath = /^\/v1\/sites\/viewer\/[A-Za-z0-9_-]{24}$/.test(requestPath)
+      || requestPath === "/v1/sites/invitations/accept"
+      || requestPath === "/v1/sites"
+      || /^\/v1\/sites\/[0-9a-f-]{36}(?:\/(?:grants(?:\/[0-9a-f-]{36})?|invitations(?:\/[0-9a-f-]{36}(?:\/(?:resend|remove))?)?|versions\/\d+\/restore))?$/.test(requestPath);
+    if (siteViewerPath) {
+      if (security.testIdentityMode) {
+        const viewer = testPrincipalFromHeaders(request.headers);
+        const account = {
+          actor: {
+            tenantId: viewer.tenantId,
+            subjectId: viewer.userId,
+            accountUserId: viewer.accountUserId,
+          },
+          accountUserId: viewer.accountUserId!,
+          email: viewer.email,
+          displayName: viewer.displayName,
+          authenticationSessionId: viewer.accountUserId!,
+        };
+        siteViewerAccounts.set(request, account);
+        testSiteViewers!.set(account.authenticationSessionId, account);
+        return;
+      }
+      const resolution = await security.customerProductAuthentication!.resolve(fromNodeHeaders(request.raw.headers));
+      if (resolution.status === "anonymous") {
+        return reply.code(401).send({ error: { code: "UNAUTHENTICATED", message: "Sign in with your work account", correlationId: request.id, retryable: false } });
+      }
+      siteViewerAccounts.set(request, resolvedSiteViewer(resolution)!);
+      return;
+    }
     let customerResolution: CustomerProductAuthenticationResolution | undefined;
     if (security.customerProductAuthentication && !security.testIdentityMode) {
       customerResolution = await security.customerProductAuthentication.resolve(fromNodeHeaders(request.raw.headers));
@@ -1348,6 +1414,21 @@ export function createControlServer(
     sessionFor: platformOperatorPrincipal,
   });
   const identity = (request: object) => identityContextSchema.parse(principal(request).identity);
+  const siteActor = (request: object): SiteAccessActor => {
+    const siteAccount = siteViewerAccounts.get(request);
+    if (siteAccount) return siteAccount.actor;
+    const actor = principal(request);
+    return {
+      tenantId: actor.tenantId,
+      subjectId: actor.userId,
+      accountUserId: actor.accountUserId,
+    };
+  };
+  const siteViewerAccount = (request: object) => {
+    const account = siteViewerAccounts.get(request);
+    if (!account) throw new LemmaComputerError("UNAUTHENTICATED", "Sign in with your work account", 401);
+    return account;
+  };
   const allowsPermission = (
     value: SessionPrincipal,
     permission: OrganizationPermission,
@@ -2375,7 +2456,7 @@ export function createControlServer(
     return { agentInstanceId: updated!.id, status: updated!.status };
   });
 
-  app.post("/internal/v1/agent/sites", { bodyLimit: 800 * 1024 }, async (request, reply) => {
+  const agentSiteOwner = async (request: object) => {
     const actor = agentPrincipals.get(request);
     if (!actor) throw new LemmaComputerError("UNAUTHENTICATED", "Agent bridge authentication is required", 401);
     const owner = { tenantId: actor.tenantId, subjectId: actor.subjectId, audience: "lemmacomputer-control" as const };
@@ -2384,13 +2465,34 @@ export function createControlServer(
     if (!allowedAgentIds.has(actor.agentId)) {
       throw new LemmaComputerError("SITE_POLICY_BINDING_MISMATCH", "Publishing is not assigned to this workspace agent", 403);
     }
+    return { actor, owner };
+  };
+  app.get("/internal/v1/agent/sites", async (request) => {
+    const { owner } = await agentSiteOwner(request);
+    return requireSites().listOwned(owner);
+  });
+  app.get<{ Params: { siteId: string } }>("/internal/v1/agent/sites/:siteId", async (request) => {
+    const { actor, owner } = await agentSiteOwner(request);
+    const site = await requireSites().inspectOwned(owner, request.params.siteId);
+    if (site.sourceWorkspaceId !== actor.workspaceId) throw new LemmaComputerError("SITE_SOURCE_WORKSPACE_MISMATCH", "This site belongs to another source workspace", 409);
+    return site;
+  });
+  app.post("/internal/v1/agent/sites", { bodyLimit: 30 * 1024 * 1024 }, async (request, reply) => {
+    const { actor, owner } = await agentSiteOwner(request);
     const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const site = await requireSites().publish(owner, {
       ...input,
       sourceWorkspaceId: actor.workspaceId,
+      sourceWorkspaceGeneration: actor.workspaceGeneration,
       sourceAgentId: actor.agentId,
     });
     return reply.code(201).send(site);
+  });
+  app.post<{ Params: { siteId: string; version: string } }>("/internal/v1/agent/sites/:siteId/versions/:version/restore", async (request) => {
+    const { actor, owner } = await agentSiteOwner(request);
+    const existing = await requireSites().inspectOwned(owner, request.params.siteId);
+    if (existing.sourceWorkspaceId !== actor.workspaceId) throw new LemmaComputerError("SITE_SOURCE_WORKSPACE_MISMATCH", "This site belongs to another source workspace", 409);
+    return requireSites().restore({ tenantId: owner.tenantId, subjectId: owner.subjectId }, request.params.siteId, Number(request.params.version));
   });
 
   app.get<{ Params: { operationId: string } }>("/internal/v1/agent/operations/:operationId", async (request) => {
@@ -6153,30 +6255,111 @@ export function createControlServer(
     return reply.header("cache-control", "no-store").send({ skills: reviewedAgentSkillCatalog });
   });
   app.get("/v1/sites", async (request, reply) => {
-    await requirePolicy(request);
-    return reply.header("cache-control", "no-store").send(await requireSites().list(identity(request)));
+    return reply.header("cache-control", "no-store").send(await requireSites().list(siteActor(request)));
   });
-  app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId/preview", async (request, reply) => {
-    await requirePolicy(request);
-    return reply.header("cache-control", "no-store").send(await requireSites().preview(identity(request), request.params.siteId));
+  app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
+    return reply.header("cache-control", "no-store").send({
+      ...await requireSites().manage(siteActor(request), request.params.siteId),
+      delivery: {
+        mode: invitationDelivery?.mode ?? "unavailable",
+        captured: invitationDelivery?.email instanceof CaptureTransactionalEmailAdapter,
+      },
+    });
   });
-  app.get<{ Params: { siteId: string } }>("/v1/sites/:siteId/content", async (request, reply) => {
-    await requirePolicy(request);
-    const { html } = await requireSites().preview(identity(request), request.params.siteId);
-    return reply
-      .headers({
-        "cache-control": "no-store",
-        "content-security-policy": "sandbox allow-scripts; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'",
-        "cross-origin-opener-policy": "same-origin",
-        "referrer-policy": "no-referrer",
-        "x-content-type-options": "nosniff",
-      })
-      .type("text/html; charset=utf-8")
-      .send(html);
+  app.patch<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request) => {
+    return requireSites().visibility(siteActor(request), request.params.siteId, request.body ?? {});
+  });
+  app.post<{ Params: { siteId: string } }>("/v1/sites/:siteId/grants", async (request, reply) => {
+    return reply.code(201).send(await requireSites().grant(siteActor(request), request.params.siteId, request.body ?? {}));
+  });
+  app.delete<{ Params: { siteId: string; grantId: string } }>("/v1/sites/:siteId/grants/:grantId", async (request, reply) => {
+    await requireSites().revokeGrant(siteActor(request), request.params.siteId, request.params.grantId);
+    return reply.code(204).send();
+  });
+  app.post<{ Params: { siteId: string } }>("/v1/sites/:siteId/invitations", async (request, reply) => {
+    if (!invitationDelivery) throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
+    const actor = siteViewerAccount(request);
+    const input = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+    const details = await requireSites().manage(siteActor(request), request.params.siteId);
+    let result = await requireSites().invite(siteActor(request), request.params.siteId, { ...input, idempotencyKey: idempotency(request.headers) });
+    // Invitation tokens are stored only as hashes. If the first response was
+    // lost, rotate the pending invitation on an idempotent replay so the
+    // caller receives a usable link and email delivery can be retried.
+    if (!result.token) {
+      const resumed = await requireSites().resendInvitation(siteActor(request), request.params.siteId, result.invitation.id);
+      result = { ...resumed, replayed: true };
+    }
+    const acceptancePath = result.token ? `/s/${details.site.handle}?invite=${encodeURIComponent(result.token)}` : null;
+    if (result.token && invitationDelivery.mode === "email") {
+      await deliverSiteInvitationEmail(invitationDelivery.email!, {
+        recipient: result.invitation.email,
+        siteName: details.site.name,
+        inviterDisplayName: actor.displayName,
+        activationUrl: new URL(acceptancePath!, connectionOptions.publicWebUrl ?? "http://localhost:4174").toString(),
+        expiresAt: new Date(result.invitation.expiresAt),
+      });
+    }
+    return reply.code(result.replayed ? 200 : 201).send({
+      invitation: result.invitation,
+      replayed: result.replayed,
+      acceptancePath: invitationDelivery.mode === "copy-link" ? acceptancePath : null,
+      delivery: { mode: invitationDelivery.mode, captured: invitationDelivery.email instanceof CaptureTransactionalEmailAdapter },
+    });
+  });
+  app.post<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId/resend", async (request) => {
+    if (!invitationDelivery) throw new LemmaComputerError("INVITATION_DELIVERY_NOT_CONFIGURED", "Invitation delivery is unavailable", 503, true);
+    const actor = siteViewerAccount(request);
+    const details = await requireSites().manage(siteActor(request), request.params.siteId);
+    const result = await requireSites().resendInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
+    const acceptancePath = `/s/${details.site.handle}?invite=${encodeURIComponent(result.token)}`;
+    if (invitationDelivery.mode === "email") {
+      await deliverSiteInvitationEmail(invitationDelivery.email!, {
+        recipient: result.invitation.email,
+        siteName: details.site.name,
+        inviterDisplayName: actor.displayName,
+        activationUrl: new URL(acceptancePath, connectionOptions.publicWebUrl ?? "http://localhost:4174").toString(),
+        expiresAt: new Date(result.invitation.expiresAt),
+      });
+    }
+    return { invitation: result.invitation, acceptancePath: invitationDelivery.mode === "copy-link" ? acceptancePath : null, delivery: { mode: invitationDelivery.mode, captured: invitationDelivery.email instanceof CaptureTransactionalEmailAdapter } };
+  });
+  app.delete<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId", async (request) => {
+    return requireSites().revokeInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
+  });
+  app.post<{ Params: { siteId: string; invitationId: string } }>("/v1/sites/:siteId/invitations/:invitationId/remove", async (request, reply) => {
+    await requireSites().removeInvitation(siteActor(request), request.params.siteId, request.params.invitationId);
+    return reply.code(204).send();
+  });
+  app.post<{ Params: { siteId: string; version: string } }>("/v1/sites/:siteId/versions/:version/restore", async (request) => {
+    return requireSites().restore(siteActor(request), request.params.siteId, Number(request.params.version));
+  });
+  app.post("/v1/sites/invitations/accept", async (request) => {
+    const account = siteViewerAccount(request);
+    const input = z.strictObject({ token: z.string().min(1).max(512) }).parse(request.body ?? {});
+    return requireSites().acceptInvitation(input.token, account);
+  });
+  app.get<{ Params: { handle: string } }>("/v1/sites/viewer/:handle", async (request, reply) => {
+    const account = siteViewerAccount(request);
+    const { tenantId, ...viewer } = await requireSites().viewer(account.actor, request.params.handle);
+    const access = siteAssetAccess.issue({ tenantId, handle: request.params.handle, version: viewer.version,
+      accountUserId: account.accountUserId, authenticationSessionId: account.authenticationSessionId });
+    return reply.header("cache-control", "no-store").send({ ...viewer, ...access });
+  });
+  app.get<{ Params: { handle: string; version: string; access: string; "*": string } }>("/v1/sites/viewer/:handle/versions/:version/access/:access/assets/*", async (request, reply) => {
+    const account = siteViewerAccount(request);
+    const asset = await requireSites().asset(account.actor, request.params.handle, Number(request.params.version), request.params["*"]);
+    if (asset.site.tenantId !== siteAssetTenants.get(request)) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
+    const publicOrigin = new URL(connectionOptions.publicWebUrl ?? "http://localhost:4174").origin;
+    const resourceBase = `${publicOrigin}/api/v1/sites/viewer/${request.params.handle}/versions/${request.params.version}/access/${request.params.access}/assets/`;
+    const headers: Record<string, string> = {
+      ...siteAssetHeaders(resourceBase),
+      "etag": asset.etag,
+    };
+    if (request.params["*"] === "index.html") headers["cross-origin-opener-policy"] = "same-origin";
+    return reply.headers(headers).type(asset.mediaType).send(asset.bytes);
   });
   app.delete<{ Params: { siteId: string } }>("/v1/sites/:siteId", async (request, reply) => {
-    await requirePolicy(request);
-    await requireSites().delete(identity(request), request.params.siteId);
+    await requireSites().delete(siteActor(request), request.params.siteId);
     return reply.code(204).send();
   });
   app.get("/v1/schedules", async (request) => {
@@ -6395,7 +6578,8 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const protectedWorkspacePolicyStore = PostgresProtectedWorkspacePolicyStore.fromConnectionString(env.DATABASE_URL);
   const protectedWorkspacePolicy = new ProtectedWorkspacePolicyAdministrationService(protectedWorkspacePolicyStore);
   const customerProductAuthentication = new CustomerProductAuthenticationService(
-    createBetterAuthSessionReader(customerAuthentication),
+    { ...createBetterAuthSessionReader(customerAuthentication),
+      getSiteViewerSession: (sessionId, accountUserId) => readSiteViewerSession(authenticationPool, sessionId, accountUserId) },
     identityPolicyStore,
     () => new Date(),
     { installationKind: env.LEMMACOMPUTER_INSTALLATION_KIND },
