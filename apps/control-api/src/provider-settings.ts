@@ -1,6 +1,7 @@
 import { LemmaComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@lemmacomputer/contracts";
 import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
+import { modelLimitsSchema } from "@lemmacomputer/contracts";
 
 type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
 type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & EmissionsSelection & (
@@ -186,6 +187,30 @@ export class ProviderSettingsService {
     };
   }
 
+  async saveModelLimits(actor: SessionPrincipal, provider: ManagedProviderName, deploymentId: string, limits: { contextTokens: number; outputTokens: number }) {
+    limits = modelLimitsSchema.parse(limits);
+    return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
+      const current = await this.activeRecord(actor, provider);
+      const deployment = toView(provider, current).deployments.find((item) => item.id === deploymentId);
+      if (!deployment) throw new LemmaComputerError("MODEL_DEPLOYMENT_NOT_FOUND", "Model deployment not found", 404);
+      const lifecycle = await this.store.ensureProviderLifecycle({ tenantId: actor.tenantId, provider, updatedBy: actor.userId });
+      const saved = await this.store.saveProviderSettingIfCurrent({
+        expected: this.expectation(lifecycle),
+        record: {
+          ...current,
+          updatedBy: actor.userId,
+          configuration: {
+            ...current.configuration,
+            modelLimits: { ...current.configuration.modelLimits, [deployment.providerDeployment]: limits },
+          },
+        },
+      });
+      if (!saved) throw new LemmaComputerError("PROVIDER_LIFECYCLE_FENCED", "Provider changed; reload before retrying", 409);
+      await this.recordLifecycleEvent(lifecycle, "model-limits-updated", actor.userId, { deploymentId, ...limits });
+      return toView(provider, saved);
+    });
+  }
+
   async assertConfigured(actor: Pick<SessionPrincipal, "tenantId">, modelAlias: string) {
     const provider = managedProviderForAlias(modelAlias);
     if (!provider) return;
@@ -282,6 +307,7 @@ export class ProviderSettingsService {
             modelIds: route.modelIds,
             configuration: {
               ...route.configuration,
+              ...(currentMetadata.success && currentMetadata.data.modelLimits ? { modelLimits: currentMetadata.data.modelLimits } : {}),
               ...(emissionsRegion ? { emissionsRegion } : {}),
             },
             state: "active",

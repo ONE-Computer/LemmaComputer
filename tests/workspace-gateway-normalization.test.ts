@@ -323,6 +323,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS: "lemmacomputer-auto",
       LEMMACOMPUTER_REQUESTED_SERVICE_CLASS: "lite",
       LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES: "lite,pro",
+      LEMMACOMPUTER_MODEL_LIMITS: JSON.stringify({ lite: { contextTokens: 128000, outputTokens: 16000 }, pro: { contextTokens: 1000000, outputTokens: 32768 } }),
       LEMMACOMPUTER_CONTROL_UPSTREAM: `http://127.0.0.1:${upstreamPort}`,
       LEMMACOMPUTER_AGENT_BRIDGE_TOKEN: initialBridgeGrant,
       LEMMACOMPUTER_GATEWAY_LISTEN_PORT: String(brokerPort),
@@ -350,6 +351,9 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       "lemmacomputer-lite",
       "lemmacomputer-pro",
     ]);
+    assert.equal(modelsDocument.data[0].context_length, 128000);
+    assert.equal(modelsDocument.data[1].context_length, 1000000);
+    assert.equal(modelsDocument.data[1].max_output_tokens, 32768);
     assert.equal((await fetch(`http://127.0.0.1:${brokerPort}/v1/models/claude-sonnet-4-6-20260101`)).status, 200);
     assert.equal((await fetch(`http://127.0.0.1:${brokerPort}/v1/models/claude-sonnet-4-6-20260102`)).status, 404);
     for (let attempt = 0; attempt < 100 && renewalRequests === 0; attempt += 1) {

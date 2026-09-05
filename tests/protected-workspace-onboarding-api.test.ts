@@ -105,7 +105,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     revisionNote: "Initial Lite route",
     createdBy: administrator.userId,
     createdAt: new Date("2026-08-12T08:00:00.000Z"),
-    deployments: [{ serviceClass: "lite" as const }],
+    deployments: [{ serviceClass: "lite" as const, capabilities: { contextTokens: 128000, outputTokens: 32768, vision: true, tools: true, streaming: true, residency: [] as string[] } }],
   };
   const routingStore = {
     latestMappingVersion: async () => currentMapping,
@@ -218,6 +218,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.equal(createdPolicies[0]?.egressMode, "restricted");
     assert.equal(createdPolicies[0]?.requestedServiceClass, "lite");
     assert.deepEqual(createdPolicies[0]?.allowedServiceClasses, ["lite"]);
+    assert.deepEqual(createdPolicies[0]?.modelLimits, { lite: { contextTokens: 128000, outputTokens: 32768 } });
     assert.equal(createdPolicies[0]?.egress?.defaultAction, "deny");
     assert.equal(createdEgressProxy?.expectedGrant.egressMode, "restricted");
     assert.equal(createdEgressProxy?.expectedGrant.securityGroupVersionId, managedFallback.id);

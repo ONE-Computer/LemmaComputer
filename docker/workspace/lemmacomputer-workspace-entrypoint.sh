@@ -687,6 +687,7 @@ start_agent_broker() {
     LEMMACOMPUTER_TRANSPORT_MODEL_ALIAS="${!transport_model_variable}" \
     LEMMACOMPUTER_REQUESTED_SERVICE_CLASS="${!service_class_variable}" \
     LEMMACOMPUTER_ALLOWED_SERVICE_CLASSES="${!allowed_service_classes_variable}" \
+    LEMMACOMPUTER_MODEL_LIMITS="${LEMMACOMPUTER_MODEL_LIMITS:-}" \
     LEMMACOMPUTER_CONTROL_UPSTREAM="${!control_variable}" \
     LEMMACOMPUTER_AGENT_BRIDGE_TOKEN="${!bridge_variable}" \
     LEMMACOMPUTER_GATEWAY_LISTEN_PORT="$port" \

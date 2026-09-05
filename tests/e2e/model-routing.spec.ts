@@ -1,5 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+test("model limits validate, save without a key, and persist after reload", async ({ page }) => {
+  let limits = { contextTokens: 128000, outputTokens: 32768 };
+  let received: unknown;
+  const provider = () => ({ provider: "openai", state: "active", deployments: [{ id: "test-model", providerAccountId: "test-account", providerModel: "openai/gpt-5.6-terra", providerDeployment: "test-deployment", displayName: "OpenAI GPT-5.6 Terra", modelLimits: limits }] });
+  await page.route("**/api/v1/admin/provider-settings", (route) => route.fulfill({ json: { providers: [provider()] } }));
+  await page.route("**/api/v1/admin/routing/mappings/latest", (route) => route.fulfill({ json: { mapping: null } }));
+  await page.route("**/api/v1/admin/provider-settings/openai/model-limits", (route) => {
+    received = route.request().postDataJSON();
+    limits = (received as { limits: typeof limits }).limits;
+    return route.fulfill({ json: { provider: provider(), mapping: null } });
+  });
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  const inspector = page.getByRole("complementary", { name: "Model details" });
+  await inspector.getByRole("button", { name: "Edit model limits" }).click();
+  const dialog = page.getByRole("dialog", { name: "Edit model limits" });
+  await expect(dialog.getByLabel("Context window (tokens)")).toHaveValue("128000");
+  await dialog.getByLabel("Context window (tokens)").fill("2000");
+  await expect(dialog.getByRole("button", { name: "Save model limits" })).toBeDisabled();
+  await dialog.getByLabel("Context window (tokens)").fill("1000000");
+  await page.screenshot({ path: "test-results/model-limits-editor.png" });
+  await dialog.getByRole("button", { name: "Save model limits" }).click();
+  await expect(dialog).toBeHidden();
+  expect(received).toEqual({ deploymentId: "test-model", limits: { contextTokens: 1000000, outputTokens: 32768 } });
+  await expect(inspector).toContainText("1,000,000 context");
+  await page.reload();
+  await expect(inspector).toContainText("1,000,000 context");
+});
+
 test("models, pricing, and organization routes form one continuous maintenance surface", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {

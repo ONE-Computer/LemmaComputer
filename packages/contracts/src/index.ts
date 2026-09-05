@@ -206,7 +206,15 @@ export type ProviderEmissionsRegion = z.infer<typeof providerEmissionsRegionSche
 // Provider Settings persists only read-safe route selection metadata. The API
 // key itself is deliberately absent: LiteLLM owns its encrypted credential
 // record and Control stores only approved model/region choices.
+export const modelLimitsSchema = z.strictObject({
+  contextTokens: z.number().int().min(1024).max(100_000_000),
+  outputTokens: z.number().int().positive().max(100_000_000),
+}).refine((value) => value.outputTokens < value.contextTokens, {
+  message: "Maximum output must be smaller than the context window",
+  path: ["outputTokens"],
+});
 export const providerSettingMetadataSchema = z.strictObject({
+  modelLimits: z.record(z.string().min(1).max(300), modelLimitsSchema).optional(),
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
   modelId: providerModelIdSchema.optional(),
@@ -903,6 +911,7 @@ export const runtimePolicySchema = z.object({
   // runtime bundles; new projections always include it.
   allowedServiceClasses: z.array(z.enum(["lite", "balanced", "pro"]))
     .max(3).optional(),
+  modelLimits: z.partialRecord(z.enum(["lite", "balanced", "pro"]), modelLimitsSchema).optional(),
   maximumReasoningEffort: workspaceReasoningEffortSchema.optional(),
   allowedTools: z.array(z.string().min(1).max(128)).min(1),
   mcpServers: z.array(z.string().min(1).max(128)).min(1).max(32).optional(),

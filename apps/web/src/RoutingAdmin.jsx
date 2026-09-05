@@ -292,6 +292,7 @@ function MappingEditor({ editor, inventory, rateCards, busy, onChange, onClose, 
             ...selected,
             id: deployment.id,
             serviceClass: deployment.serviceClass,
+            capabilities: { ...deployment.capabilities, ...selected.modelCapabilities, ...selected.modelLimits },
             rateCardId: latestRateCardForDeployment(rateCards, selected)?.id ?? "",
           });
         };

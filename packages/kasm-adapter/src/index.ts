@@ -529,6 +529,7 @@ export class DockerKasmVncAdapter implements SandboxAdapter {
         `LEMMACOMPUTER_COWORK_ENABLED=${coworkEnabled}`,
         `LEMMACOMPUTER_ELECTRON_SANDBOX_ENABLED=${electronSandboxRequired}`,
         `LEMMACOMPUTER_EXECUTION_MODE=${input.policy.executionMode}`,
+        `LEMMACOMPUTER_MODEL_LIMITS=${JSON.stringify(input.policy.modelLimits ?? {})}`,
         `LEMMACOMPUTER_EGRESS_MODE=${input.policy.egressMode}`,
         `LEMMACOMPUTER_WORKSPACE_IMAGE_VERSION=${this.config.image}`,
         ...(this.config.image.includes("@sha256:") ? [`LEMMACOMPUTER_WORKSPACE_IMAGE_DIGEST=${this.config.image.slice(this.config.image.indexOf("@") + 1)}`] : []),

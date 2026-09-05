@@ -23,6 +23,7 @@ import { isStaticCredentialGroup, type StaticCredentialGroup } from "./connector
 import { ToolAuditService } from "./tool-audit.js";
 import { resolveConnectorPolicyApplication, resolveEffectiveConnectorPolicy } from "./connector-policy-administration.js";
 import { ProviderSettingsService } from "./provider-settings.js";
+import { modelLimitsSchema } from "@lemmacomputer/contracts";
 import { EgressProxyGrantAuthority, HttpControllerClient, PolicyBundleAuthority, RoutedControllerClient, WorkspaceService, type ControllerClient } from "./service.js";
 import { McpPolicyService, m365CapabilityDefinitions, resumableUploadCapability } from "./mcp-policy.js";
 import { OpenVtcApprovalCoordinator } from "./openvtc.js";
@@ -924,7 +925,7 @@ export function createControlServer(
   const budgets=security.budgetStore?new TeamBudgetAdministrationService(security.budgetStore,security.budgetProjector):undefined;
   const requireBudgets=()=>{if(!budgets)throw new LemmaComputerError("BUDGETS_NOT_CONFIGURED","Team budget administration is unavailable",503,true);return budgets;};
   const routingExecution=security.routingStore&&security.teamStore&&usageBindings?new RoutingExecutionService(security.routingStore,security.teamStore,new RoutingDecisionBindingAuthority(security.usageTaskBindingSecret!),usageBindings,security.budgetStore):undefined;
-  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore,security.teamStore):undefined;
+  const routing=security.routingStore?new RoutingAdministrationService(security.routingStore,security.teamStore,security.providerSettingsStore):undefined;
   const requireRouting=()=>{if(!routing)throw new LemmaComputerError("ROUTING_NOT_CONFIGURED","Model routing administration is unavailable",503,true);return routing;};
   const publishedWorkspaceServiceClassesFor = async (tenantId: string): Promise<ExplicitWorkspaceServiceClass[] | null> => {
     if (!security.routingStore) return null;
@@ -1564,6 +1565,16 @@ export function createControlServer(
       if (document.maximumEgressMode === "restricted" && policy.egressMode !== "restricted") {
         throw new LemmaComputerError("EGRESS_MODE_NOT_ASSIGNED", "Full-web egress is denied by the organization policy", 403);
       }
+    }
+    if (routing && policy.modelAlias === "lemmacomputer-auto") {
+      const mapping = await routing.latestMapping({ tenantId: value.tenantId, userId: value.userId });
+      const modelLimits: NonNullable<RuntimePolicy["modelLimits"]> = {};
+      for (const deployment of mapping?.deployments ?? []) {
+        if (!policy.allowedServiceClasses?.includes(deployment.serviceClass)) continue;
+        const parsed = modelLimitsSchema.safeParse({ contextTokens: deployment.capabilities.contextTokens, outputTokens: deployment.capabilities.outputTokens });
+        if (parsed.success) modelLimits[deployment.serviceClass] = parsed.data;
+      }
+      policy = { ...policy, modelLimits };
     }
     const projected = connections ? await connections.projectConnectedConnectors(value.identity, policy) : policy;
     const organizationConnectorIds = effective?.document && Array.isArray((effective.document as Record<string, unknown>).organizationConnectorIds)
@@ -4267,6 +4278,36 @@ export function createControlServer(
       resourceId: provider.provider,
     }));
     return { providers: visible };
+  });
+  app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/model-limits", async (request, reply) => {
+    const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
+    const input = z.strictObject({ deploymentId: z.string().min(1).max(300), limits: modelLimitsSchema }).parse(request.body);
+    const saved = await requireProviderSettings().saveModelLimits(actor, provider, input.deploymentId, input.limits);
+    const latest = await routing?.latestMapping(actor) ?? null;
+    const selected = saved.deployments.find((item) => item.id === input.deploymentId)!;
+    let mapping = latest;
+    let workspaceActivation;
+    let activationError: string | undefined;
+    if (latest?.deployments.some((item) => item.provider === provider && item.providerAccountId === selected.providerAccountId && item.providerDeployment === selected.providerDeployment)) {
+      try {
+        const active = await security.routingStore!.resolveEffectivePolicy(actor.tenantId, null, []);
+        mapping = await requireRouting().createMapping(actor, {
+          revisionNote: `Update model limits for ${selected.displayName}`,
+          billingCurrency: active?.policy.billingCurrency ?? "USD",
+          deployments: latest.deployments.map(({ serviceClass, provider, providerAccountId, providerModel, providerDeployment, region, providerServiceTier, rateCardId, capabilities, approved, evaluationPassed }) => ({
+            serviceClass, provider, ...(providerAccountId ? { providerAccountId } : {}), providerModel, providerDeployment,
+            ...(region ? { region } : {}), ...(providerServiceTier ? { providerServiceTier } : {}), ...(rateCardId ? { rateCardId } : {}),
+            capabilities, approved, evaluationPassed,
+          })),
+        });
+        workspaceActivation = await reconcileTenantWorkspaceRoutePolicies(actor.tenantId, mapping.id, request.id);
+      } catch {
+        activationError = "Model limits were stored, but route activation did not complete. Retry saving these limits to apply them to workspaces.";
+      }
+    }
+    reply.header("cache-control", "no-store");
+    return { provider: saved, mapping, workspaceActivation, activationError };
   });
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);

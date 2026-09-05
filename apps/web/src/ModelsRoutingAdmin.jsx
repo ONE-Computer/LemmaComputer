@@ -139,6 +139,24 @@ function HistoryDialog({ kind, deployment, rateCards, mapping, onClose }) {
   </ModalDialog>;
 }
 
+function ModelLimitsEditor({ deployment, limits, busy, error, onClose, onSave }) {
+  const [contextTokens, setContextTokens] = useState(String(limits?.contextTokens ?? ""));
+  const [outputTokens, setOutputTokens] = useState(String(limits?.outputTokens ?? ""));
+  const context = Number(contextTokens);
+  const output = Number(outputTokens);
+  const valid = Number.isSafeInteger(context) && context >= 1024 && context <= 100_000_000
+    && Number.isSafeInteger(output) && output > 0 && output < context;
+  return <ModalDialog title="Edit model limits" eyebrow={deployment.displayName} labelledBy="model-limits-title" onClose={busy ? () => undefined : onClose}>
+    <p>Use the limits supported by your provider deployment. Increasing these values does not increase the model's actual capacity.</p>
+    {error && <p role="alert">{error}</p>}
+    <label className="modal-field"><span>Context window (tokens)</span><input type="number" min="1024" max="100000000" step="1" value={contextTokens} disabled={busy} onChange={(event) => setContextTokens(event.target.value)} /></label>
+    <label className="modal-field"><span>Maximum output tokens</span><input type="number" min="1" step="1" value={outputTokens} disabled={busy} onChange={(event) => setOutputTokens(event.target.value)} /></label>
+    {!valid && <p role="status">Enter whole numbers. Maximum output must be smaller than the context window.</p>}
+    <p>Saving updates this deployment's organization routes and restarts running workspaces through the route-update flow. Agent context settings apply when the workspace starts.</p>
+    <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !valid} onClick={() => onSave({ contextTokens: context, outputTokens: output })}>{busy ? "Saving" : "Save model limits"}</button></div>
+  </ModalDialog>;
+}
+
 export function ModelsRoutingAdmin({
   providers,
   providerLoading,
@@ -168,15 +186,20 @@ export function ModelsRoutingAdmin({
   const [mappingEditor, setMappingEditor] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [history, setHistory] = useState(null);
+  const [limitsEditor, setLimitsEditor] = useState(null);
+  const [updatedProviders, setUpdatedProviders] = useState({});
+  useEffect(() => setUpdatedProviders({}), [providers]);
   const focusApplied = useRef(false);
 
-  const inventory = useMemo(() => configuredProviderDeployments(providers), [providers]);
+  const inventory = useMemo(() => configuredProviderDeployments(providers.map((provider) => updatedProviders[provider.provider] ?? provider)), [providers, updatedProviders]);
   const cardById = useMemo(() => new Map(rateCards.map((card) => [card.id, card])), [rateCards]);
   const effectiveRoutes = useMemo(() => [...(draft?.deployments ?? mapping?.deployments ?? [])].sort((left, right) => (routeRank[left.serviceClass] ?? 9) - (routeRank[right.serviceClass] ?? 9)), [draft, mapping]);
   const routeByDeployment = useMemo(() => new Map(effectiveRoutes.map((route) => [providerDeploymentKey(route), route])), [effectiveRoutes]);
   const selected = inventory.find((deployment) => deployment.id === selectedId) ?? inventory[0] ?? null;
   const selectedProvider = selected ? providers.find((provider) => provider.provider === selected.provider) : null;
   const selectedRoute = selected ? routeByDeployment.get(providerDeploymentKey(selected)) : null;
+  const availableLimits = selected?.modelLimits ?? selectedRoute?.capabilities;
+  const selectedLimits = Number.isSafeInteger(availableLimits?.contextTokens) && Number.isSafeInteger(availableLimits?.outputTokens) ? availableLimits : null;
   const selectedCard = selected ? cardById.get(selectedRoute?.rateCardId) ?? latestRateCardForDeployment(rateCards, selected) : null;
   const selectedCoverage = pricingCoverage(selectedCard);
   const routeReadiness = useMemo(() => organizationRouteReadiness(effectiveRoutes, inventory, cardById), [cardById, effectiveRoutes, inventory]);
@@ -217,6 +240,23 @@ export function ModelsRoutingAdmin({
     else next.add(provider);
     return next;
   });
+  const saveModelLimits = async (limits) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await adminApi.saveModelLimits(limitsEditor.deployment.provider, { deploymentId: limitsEditor.deployment.id, limits });
+      setUpdatedProviders((current) => ({ ...current, [result.provider.provider]: result.provider }));
+      setMapping(result.mapping);
+      setLimitsEditor(null);
+      const attention = (result.workspaceActivation?.restartFailed ?? 0) + (result.workspaceActivation?.actionRequired ?? 0);
+      if (result.activationError) setError(result.activationError);
+      else setNotice(attention ? `Model limits saved. ${attention} workspaces need administrator attention.` : result.workspaceActivation ? "Model limits saved. Published routes and workspace settings now use these limits." : "Model limits saved. They will apply when this deployment is assigned to a route.");
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const draftableDeployments = () => {
     const source = routeClasses.map((serviceClass) => effectiveRoutes.find((route) => route.serviceClass === serviceClass) ?? {
       id: `draft-${serviceClass}`,
@@ -238,8 +278,8 @@ export function ModelsRoutingAdmin({
           vision: normalized.modelCapabilities?.vision ?? normalized.capabilities?.vision ?? false,
           tools: normalized.modelCapabilities?.tools ?? normalized.capabilities?.tools ?? true,
           streaming: normalized.modelCapabilities?.streaming ?? normalized.capabilities?.streaming ?? true,
-          contextTokens: normalized.capabilities?.contextTokens ?? 32000,
-          outputTokens: normalized.capabilities?.outputTokens ?? 32768,
+          contextTokens: normalized.modelLimits?.contextTokens ?? normalized.capabilities?.contextTokens ?? 32000,
+          outputTokens: normalized.modelLimits?.outputTokens ?? normalized.capabilities?.outputTokens ?? 32768,
           residency: normalized.capabilities?.residency ?? (normalized.region ? [normalized.region] : []),
         },
         approved: normalized.approved ?? true,
@@ -423,6 +463,7 @@ export function ModelsRoutingAdmin({
         {selected ? <>
           <header><div><span>{providerTitle(selected.provider)}</span><strong>{selected.displayName}</strong><small>Model</small></div><button type="button" aria-label="Close model details" onClick={() => setSelectedId("")}><Dismiss24Regular aria-hidden="true" /></button></header>
           <div className="models-routing-model-id"><span>Model ID (LemmaComputer)</span><strong>{selected.id}</strong></div>
+          <section><div className="models-routing-inspector-title"><strong>Model limits</strong>{canManageProviders && <button type="button" aria-label="Edit model limits" disabled={busy || loading || Boolean(draft)} onClick={() => setLimitsEditor({ deployment: selected, limits: selectedLimits })}>Edit</button>}</div><p>{selectedLimits ? `${selectedLimits.contextTokens.toLocaleString()} context · ${selectedLimits.outputTokens.toLocaleString()} maximum output tokens` : "Not configured"}</p><small>{draft ? "Save or discard route changes before editing model limits." : "Provider deployment capacity, shared by routing and agent context settings."}</small></section>
           <section><div className="models-routing-inspector-title"><strong>Availability</strong>{canManageProviders && selectedProvider && <button type="button" onClick={() => setProviderEditor(selectedProvider)}>Edit</button>}</div><span className="models-routing-ready"><CheckmarkCircle20Regular aria-hidden="true" />Enabled</span><p>This approved model is enabled for your organization.</p></section>
           <section><div className="models-routing-inspector-title"><strong>Pricing</strong><Info20Regular aria-hidden="true" /></div>{selectedCoverage.complete ? <span className="models-routing-ready"><CheckmarkCircle20Regular aria-hidden="true" />{rateLabel(selectedCard, "input_uncached_token")} input · {rateLabel(selectedCard, "output_token")} output</span> : <span className="models-routing-gap"><ErrorCircle20Regular aria-hidden="true" />Pricing missing</span>}<p>{selectedCoverage.complete ? "Current immutable rates shown per 1M tokens." : "Add input, output, cache-read, and cache-write prices to make this model routable."}</p>{canManagePricing && <button className="secondary-button" type="button" onClick={() => openPricing(selected)}>{selectedCard ? "Add price version" : "Add pricing"}</button>}<button className="models-routing-inline-link" type="button" onClick={() => setHistory({ kind: "pricing", deployment: selected })}>View pricing history</button></section>
           <section><div className="models-routing-inspector-title"><strong>Organization route</strong><Info20Regular aria-hidden="true" /></div>{selectedRoute ? <span className={selectedCoverage.complete ? "models-routing-ready" : "models-routing-gap"}>{selectedCoverage.complete ? <CheckmarkCircle20Regular aria-hidden="true" /> : <ErrorCircle20Regular aria-hidden="true" />}{serviceClassLabels[selectedRoute.serviceClass]}</span> : <span className="models-routing-gap"><ErrorCircle20Regular aria-hidden="true" />Not assigned</span>}<p>{selectedCoverage.complete ? "Assign this model to Lite, Balanced, or Pro in the organization route changes." : "Pricing must exist before a route using this model can be saved."}</p>{canManageRouting && <div className="models-routing-route-actions"><button className="secondary-button" type="button" disabled={!inventory.length} onClick={openMappingEditor}>{selectedRoute ? "Change route" : "Assign route"}</button>{selectedRoute && <button className="models-routing-inline-link danger-button" type="button" onClick={removeSelectedRoute}>Remove from {serviceClassLabels[selectedRoute.serviceClass]}</button>}</div>}<button className="models-routing-inline-link" type="button" onClick={() => setHistory({ kind: "routes", deployment: selected })}>View route versions</button></section>
@@ -431,6 +472,7 @@ export function ModelsRoutingAdmin({
       </aside>
     </div>
     {providerEditor && <ProviderEditor provider={providerEditor} busy={providerBusy} onClose={() => setProviderEditor(null)} onSave={onSaveProvider} onDelete={deleteProvider} />}
+    {limitsEditor && <ModelLimitsEditor {...limitsEditor} error={error} busy={busy} onClose={() => setLimitsEditor(null)} onSave={saveModelLimits} />}
     {priceEditor && <PricingEditor editor={priceEditor} busy={busy} onChange={setPriceEditor} onClose={() => setPriceEditor(null)} onCreate={createPriceRecord} />}
     {mappingEditor && <MappingEditor editor={mappingEditor} inventory={inventory} rateCards={rateCards} busy={busy} onChange={setMappingEditor} onClose={() => setMappingEditor(null)} onSave={saveMappingDraft} />}
     {publishOpen && <ModalDialog title="Save organization routes?" description="Saving creates an immutable route version and immediately updates Chat and every workspace according to its assigned workspace policy." eyebrow="Models & routing" labelledBy="models-routing-publish-title" onClose={busy ? () => undefined : () => setPublishOpen(false)}><div className="route-editor-warning"><Info20Regular aria-hidden="true" /><span>{assignedRoutes ? "Every assigned route must point to an enabled model with complete pricing. Unassigned service levels remain unavailable in Chat and workspace settings." : "Saving this removal makes every organization route unavailable in Chat and workspace settings."}</span></div><div className="modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={() => setPublishOpen(false)}>Cancel</button><button className="primary-button" type="button" disabled={busy || !routesReadyToPublish} onClick={publishMapping}>{busy ? "Saving…" : assignedRoutes ? `Save ${readyRoutes} ${readyRoutes === 1 ? "route" : "routes"}` : "Save route removal"}</button></div></ModalDialog>}
