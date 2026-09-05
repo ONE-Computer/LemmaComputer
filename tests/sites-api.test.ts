@@ -46,6 +46,8 @@ test("agent publication, stable authenticated viewing, sharing, and deletion use
 
     const skills = await app.inject({ method: "GET", url: "/v1/skills", headers: browserHeaders });
     assert.equal(skills.json().skills[0].id, "site");
+    assert.equal(skills.json().skills[0].displayName, "$site");
+    assert.equal(skills.json().skills[0].defaultPrompt, "$site");
     const listed = await app.inject({ method: "GET", url: "/v1/sites", headers: browserHeaders });
     assert.equal(listed.json().sites[0].id, published.json().id);
 

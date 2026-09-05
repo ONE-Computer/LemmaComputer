@@ -409,9 +409,9 @@ const activeFixtureTurns = new Map();
 
 const reviewedSkills = [{
   id: "site",
-  displayName: "Site",
+  displayName: "$site",
   description: "Create, edit, publish, inspect, and restore a static dashboard site.",
-  defaultPrompt: "Use $site to create or update and publish a small dashboard site.",
+  defaultPrompt: "$site",
 }];
 const helloSiteHtml = "<!doctype html><html lang=\"en\"><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Hello world</title><link rel=\"stylesheet\" href=\"./assets/app.css\"><body><main id=\"app\">Loading…</main><script src=\"./assets/app.js\"></script></body></html>";
 const helloSiteCss = "html,body{height:100%;margin:0}body{display:grid;place-items:center;font:600 32px system-ui;color:#14233b}";

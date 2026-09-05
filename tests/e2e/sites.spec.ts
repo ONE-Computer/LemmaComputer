@@ -3,10 +3,11 @@ import { expect, test } from "@playwright/test";
 test("builds from the reviewed chat skill and manages the published site", async ({ page }, testInfo) => {
   await page.goto("/?view=chat&chat=fixture-session-1");
 
+  await expect(page.getByLabel("Available skills")).toHaveCount(0);
   await page.getByRole("button", { name: "Chat actions" }).click();
-  await page.getByRole("menuitem", { name: /^Site/ }).click();
+  await page.getByRole("menuitem", { name: /^\$site/ }).click();
   const composer = page.getByPlaceholder(/message/i);
-  await expect(composer).toHaveValue("Use $site to create or update and publish a small dashboard site.");
+  await expect(composer).toHaveValue("$site");
   await composer.fill("Use $site to build and publish a Hello world site with text centered in the page.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText(/Published Hello world/)).toBeVisible();

@@ -877,7 +877,7 @@ function SitesScreen({ sites, loading, error, busySiteId, onDelete, onSiteUpdate
     {loading ? <div className="workspace-overview-empty" role="status">Loading sites…</div> : sites.length === 0 ? (
       <section className="workspace-overview-empty sites-empty">
         <Apps48Regular aria-hidden="true" />
-        <div><h2>No sites yet</h2><p>Ask a workspace agent to use Site, then publish the result.</p></div>
+        <div><h2>No sites yet</h2><p>Ask a workspace agent to use $site, then publish the result.</p></div>
       </section>
     ) : <section className="sites-list" aria-label="Your sites">
       {sites.map((site) => <article className="site-row" key={site.id}>
@@ -5372,12 +5372,6 @@ function ChatConversation({
           <div className="chat-welcome">
             <h1>How can {agentName} help?</h1>
             <p>Ask about the files, approved tools, and connections in your managed workspace.</p>
-            {skills.length > 0 && <div className="chat-welcome-skills" aria-label="Available skills">
-              {skills.map((skill) => <button type="button" key={skill.id} onClick={() => setInput(skill.defaultPrompt)}>
-                <WindowApps24Regular aria-hidden="true" />
-                <span><strong>{skill.displayName}</strong><small>{skill.description}</small></span>
-              </button>)}
-            </div>}
           </div>
         ) : visibleMessages.map((message) => (
           <article className={`chat-message ${message.role}`} key={message.id}>
