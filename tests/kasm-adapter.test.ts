@@ -1343,3 +1343,50 @@ test("local Kasm allowlists bounded entrypoint validation without exposing arbit
   );
   assert.equal(diagnostic("provider secret=do-not-surface"), undefined);
 });
+
+
+test("destroy detaches stopped Control metadata before deleting its workspace network", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lemmacomputer-stopped-network-"));
+  const socketPath = join(directory, "docker.sock");
+  const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+  const network = `lemmacomputer-workspace-${workspaceId}`;
+  let attached = true;
+  let removed = false;
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+    const path = request.url?.replace(/^\/v1\.47/, "") ?? "";
+    response.setHeader("content-type", "application/json");
+    if (request.method === "GET" && path === "/containers/control/json") {
+      response.end(JSON.stringify({ State: { Running: false }, NetworkSettings: { Networks: attached ? { [network]: { NetworkID: "old-network" } } : {} } }));
+      return;
+    }
+    if (request.method === "GET" && path === `/networks/${network}`) {
+      response.end(JSON.stringify({ Containers: {} })); return;
+    }
+    if (request.method === "POST" && path === `/networks/${network}/disconnect`) {
+      assert.deepEqual(body, { Container: "control", Force: true });
+      attached = false;
+    } else if (request.method === "DELETE" && path === `/networks/${network}`) {
+      assert.equal(attached, false, "Docker must forget stopped Control's attachment before network removal");
+      removed = true;
+    } else {
+      response.statusCode = 404;
+    }
+    response.end(JSON.stringify({}));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    const adapter = new DockerKasmVncAdapter({ socketPath, image: "sha256:pinned-workspace",
+      networkPrefix: "lemmacomputer-workspace", controlNetwork: "lemmacomputer-control",
+      gatewayContainer: "gateway", controlContainer: "control", relayImage: "sha256:pinned-relay",
+      installationKind: "customer-managed" });
+    await adapter.destroy(workspaceId, "missing-sandbox");
+    assert.equal(removed, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
