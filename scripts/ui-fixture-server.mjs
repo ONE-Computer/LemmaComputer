@@ -1630,12 +1630,16 @@ const server = http.createServer((request, response) => {
       const turnId = `fixture-turn-${Date.now()}`;
       const messageId = `fixture-message-${Date.now()}`;
       const createdAt = new Date().toISOString();
+      const activityReconnectRequest = JSON.stringify(input.message).includes("Activity reconnect path");
       activityByTurn.set(turnId, [activityEvent(turnId, 0, "plan", "running", "deterministic_system", { title: "Understand the request" })]);
       disconnectActivityOnce.add(turnId);
-      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 1, "progress", "running", "deterministic_system", { activityId: `${turnId}-progress`, label: "Checking workspace context" })), 650);
-      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 2, "tool", "completed", "tool", { toolCallId: `${turnId}-tool`, name: "workspace-context", summary: "Context checked" })), 760);
-      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), 900);
-      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), 1_000);
+      const activityTiming = activityReconnectRequest
+        ? { progress: 1_200, disconnect: 3_000, summary: 3_300, terminal: 3_600 }
+        : { progress: 650, disconnect: 760, summary: 900, terminal: 1_000 };
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 1, "progress", "running", "deterministic_system", { activityId: `${turnId}-progress`, label: "Checking workspace context" })), activityTiming.progress);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 2, "tool", "completed", "tool", { toolCallId: `${turnId}-tool`, name: "workspace-context", summary: "Context checked" })), activityTiming.disconnect);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 3, "provider_summary", "completed", "provider_generated", { summary: "The workspace context is ready for the response.", provider: "Hermes" })), activityTiming.summary);
+      setTimeout(() => appendActivity(turnId, activityEvent(turnId, 4, "terminal", "completed", "deterministic_system", { turnState: "completed" })), activityTiming.terminal);
       const siteRequest = JSON.stringify(input.message).includes("$site");
       const siteRefreshRequest = siteRequest && JSON.stringify(input.message).includes("survive refresh");
       const refreshRecoveryRequest = JSON.stringify(input.message).includes("dashboard layout");
