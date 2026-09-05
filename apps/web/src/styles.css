@@ -7708,7 +7708,7 @@ a.chat-file-part:hover {
 .site-row-meta { display: flex; flex-wrap: wrap; align-items: center; color: #6f7984; font-size: 13px; }
 .site-row-meta > span + span::before { content: "·"; margin: 0 9px; color: #a2a9b0; }
 .site-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
-.site-row-actions .primary-button { width: auto; min-width: 92px; text-decoration: none; }
+.site-row-actions .compact-button { width: 92px; min-width: 92px; height: 44px; min-height: 44px; padding: 0 12px; text-decoration: none; }
 .site-row-actions .text-button { margin-top: 0; }
 .sites-empty { min-height: 280px; }
 .site-viewer-shell { width: 100vw; height: 100vh; margin: 0; overflow: hidden; background: #fff; }
@@ -7717,7 +7717,7 @@ a.chat-file-part:hover {
 .site-viewer-state { display: grid; min-height: 100vh; margin: 0; padding: 2rem; place-items: center; background: #f4f6f8; color: var(--navy); text-align: center; }
 .site-viewer-state h1 { margin: 0 0 .75rem; }
 .site-viewer-state p { max-width: 32rem; color: var(--muted); }
-.site-manage-content { display: grid; max-height: min(62vh, 640px); gap: 20px; overflow-y: auto; padding-right: 4px; }
+.site-manage-content { display: grid; min-width: 0; gap: 20px; }
 .site-manage-content > p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .site-manage-content section { display: grid; gap: 8px; }
 .site-manage-content h3 { margin: 0; color: var(--navy); font-size: 14px; }

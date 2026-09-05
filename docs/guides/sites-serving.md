@@ -46,34 +46,37 @@ also tests the credential-free session lookup against the owned auth schema.
 
 Roles belong to the site, not the user's organization role:
 
-| Role | Read | Share, invite, change roles and visibility, restore versions | Delete |
+| Role | Read | Share, invite, revoke access, change visibility, restore versions | Delete |
 | --- | --- | --- | --- |
 | Owner (creator) | Yes | Yes | Yes |
-| Admin (explicit grant) | Yes | Yes | No |
-| Member (organization visibility or ordinary invitation) | Yes | No | No |
+| Can view (organization visibility or invitation/grant) | Yes | No | No |
 
 Organization owners/admins no longer get implicit access to private sites or
-management rights over another creator's sites. Invitations grant read-only
-Member access; a site Owner or Admin can promote an accepted recipient. Owner
+management rights over another creator's sites. Invitations and grants provide
+view-only access. There is no promotion or delegated site management. Owner
 is not a grant and cannot be reassigned or downgraded through this UI/API.
 Removing an individual grant does not remove read access supplied by organization
-visibility. Demoting or revoking an Admin takes effect on subsequent requests.
+visibility. Revoking access takes effect on subsequent requests.
 
 Site sharing is account-scoped and does not admit external recipients to the
-organization. An explicitly promoted external Admin can manage access from the
-stable site's Share button without acquiring workspace or organization authority.
-Generated iframe content has no access to this management authority. Source
+organization. Only the owner sees the Share button, and the API independently
+enforces ownership for every management operation. Generated iframe content has
+no access to this management authority. Source
 editing/publishing still requires the creator's bound workspace and agent bridge;
 site roles do not share workspace files or introduce collaborative source editing.
 
-The forward `site_admin_grants` migration expands the existing grant constraint
-to accept `admin`; `viewer` remains the persisted name for a read-only Member.
-It preserves all existing records, does not change owners, and briefly locks
-`site_grants` while replacing/validating the check. Apply it with the explicit
-migration job before rolling out the new code in either deployment profile.
-Do not roll back to pre-role code after assigning Admin grants: old code used
-organization administration as site authority. No data restore is needed for
-the additive migration; use a forward fix for application rollback.
+This release deliberately excludes collaborative editing, shared workspaces,
+delegated agent execution and source checkout/push workflows. Recipients can
+interact with the published dashboard, but amendments go through the owner's
+existing workspace agent.
+
+No schema change is required. Historical migrations remain immutable; the
+earlier database constraint still permits stored `admin` values, but all grants
+are exposed and authorized as view-only. New grants and invitation acceptance
+write only `viewer`, and the API rejects `admin`, `editor` and `owner` grants.
+Existing sites, invitations and viewing access are preserved. Deploy this code
+to every Control API instance in either profile; do not roll back to code that
+interprets old grants as management authority.
 
 ## Invitation delivery
 

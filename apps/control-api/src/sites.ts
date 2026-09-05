@@ -104,7 +104,7 @@ export class SitesService {
       sourceWorkspaceId: site.sourceWorkspaceId,
       sourceAgentId: site.sourceAgentId,
       role,
-      canManage: role === "owner" || role === "admin",
+      canManage: role === "owner",
       canDelete: role === "owner",
       createdAt: site.createdAt.toISOString(),
       updatedAt: site.updatedAt.toISOString(),
@@ -349,8 +349,8 @@ export class SitesService {
   }
 
   async grant(actor: SiteAccessActor, rawSiteId: string, raw: unknown) {
-    const input = z.strictObject({ accountUserId: z.uuid(), permission: z.enum(["viewer", "admin"]).default("viewer") }).parse(raw);
-    const grant = await this.store.grantSiteAccess(actor, z.uuid().parse(rawSiteId), input.accountUserId, input.permission);
+    const input = z.strictObject({ accountUserId: z.uuid(), permission: z.literal("viewer").default("viewer") }).parse(raw);
+    const grant = await this.store.grantSiteAccess(actor, z.uuid().parse(rawSiteId), input.accountUserId);
     if (!grant) throw new LemmaComputerError("SITE_NOT_FOUND", "Site not found", 404);
     return { id: grant.id, accountUserId: grant.granteeAccountUserId, permission: grant.permission, active: true };
   }

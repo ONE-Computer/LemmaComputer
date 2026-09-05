@@ -126,28 +126,31 @@ test("site roles authorize external accounts without org membership and email fa
     current = "guest";
     assert.equal((await app.inject({ method: "POST", url: "/v1/sites/invitations/accept", headers, payload: { token } })).statusCode, 200);
     const listed = await app.inject({ method: "GET", url: "/v1/sites", headers });
-    assert.equal(listed.json().sites[0].role, "member");
+    assert.equal(listed.json().sites[0].role, "viewer");
+    assert.equal(listed.json().sites[0].canManage, false);
+    assert.equal(listed.json().sites[0].canDelete, false);
     for (const request of [
       { method: "GET" as const, url },
       { method: "PATCH" as const, url, payload: { visibility: "organization" } },
-      { method: "POST" as const, url: `${url}/grants`, payload: { accountUserId: guestId, permission: "admin" } },
+      { method: "POST" as const, url: `${url}/grants`, payload: { accountUserId: guestId, permission: "viewer" } },
       { method: "POST" as const, url: `${url}/invitations`, payload: { email: "unwanted@example.test" } },
+      { method: "POST" as const, url: `${url}/invitations/${sent.json().invitation.id}/resend`, payload: {} },
+      { method: "DELETE" as const, url: `${url}/invitations/${sent.json().invitation.id}` },
       { method: "POST" as const, url: `${url}/versions/1/restore`, payload: {} },
       { method: "DELETE" as const, url },
     ]) assert.equal((await app.inject({ ...request, headers })).statusCode, 404);
     assert.equal(messages.length, 2, "read access cannot trigger an email");
-    await service.grant(identity, site.id, { accountUserId: guestId, permission: "admin" });
-    assert.equal((await app.inject({ method: "GET", url, headers })).json().site.role, "admin");
-    assert.equal((await app.inject({ method: "PATCH", url, headers, payload: { visibility: "organization" } })).statusCode, 200);
-    assert.equal((await app.inject({ method: "POST", url: `${url}/versions/1/restore`, headers, payload: {} })).statusCode, 200);
-    assert.equal((await app.inject({ method: "POST", url: `${url}/invitations`, headers: { ...headers, "idempotency-key": "admin-email-test-001" }, payload: { email: "reader@example.test" } })).statusCode, 201);
-    assert.equal(messages.length, 3);
-    assert.equal((await app.inject({ method: "DELETE", url, headers })).statusCode, 404);
-    assert.equal((await app.inject({ method: "GET", url: "/v1/workspaces", headers })).statusCode, 403, "site Admin grants no organization access");
+    assert.equal((await app.inject({ method: "GET", url: "/v1/workspaces", headers })).statusCode, 403, "site viewing grants no organization access");
     current = "anonymous";
     assert.equal((await app.inject({ method: "GET", url, headers })).statusCode, 401);
     assert.equal((await app.inject({ method: "POST", url: `${url}/invitations`, headers, payload: { email: "unwanted@example.test" } })).statusCode, 401);
     current = "owner";
+    for (const permission of ["admin", "editor", "owner"]) {
+      assert.equal((await app.inject({ method: "POST", url: `${url}/grants`, headers, payload: { accountUserId: guestId, permission } })).statusCode, 400);
+    }
+    assert.equal((await app.inject({ method: "GET", url, headers })).json().site.role, "owner");
+    assert.equal((await app.inject({ method: "PATCH", url, headers, payload: { visibility: "organization" } })).statusCode, 200);
+    assert.equal((await app.inject({ method: "POST", url: `${url}/versions/1/restore`, headers, payload: {} })).statusCode, 200);
     assert.equal((await app.inject({ method: "DELETE", url, headers })).statusCode, 204);
   } finally { await app.close(); }
 });

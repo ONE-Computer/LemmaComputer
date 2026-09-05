@@ -54,49 +54,59 @@ test("builds from the reviewed chat skill and manages the published site", async
   await expect(page.getByRole("heading", { name: "No sites yet" })).toBeVisible();
 });
 
-test("Sites exposes Owner, Admin and Member actions and explicit role changes", async ({ page }, testInfo) => {
+test("Sites shares view-only access with owner controls and one scroll container", async ({ page }, testInfo) => {
   const timestamp = "2026-09-05T00:00:00.000Z";
-  const sites = ["owner", "admin", "member"].map((role, index) => ({
+  const sites = ["owner", "viewer"].map((role, index) => ({
     id: `11111111-1111-4111-8111-11111111111${index}`, handle: role.padEnd(24, "x"),
-    name: `${role} dashboard`, slug: `${role}-dashboard`, role, canManage: role !== "member", canDelete: role === "owner",
+    name: `${role} dashboard`, slug: `${role}-dashboard`, role, canManage: role === "owner", canDelete: role === "owner",
     currentRevision: 1, visibility: "organization", createdAt: timestamp, updatedAt: timestamp,
   }));
-  let permission = "viewer";
+  let active = true;
   const accountUserId = "22222222-2222-4222-8222-222222222222";
   await page.route("**/api/v1/sites", (route) => route.fulfill({ json: { sites } }));
   await page.route(`**/api/v1/sites/${sites[0].id}`, (route) => route.fulfill({ json: {
-    site: sites[0], delivery: { mode: "copy-link" }, versions: [],
+    site: sites[0], delivery: { mode: "copy-link" }, versions: Array.from({ length: 10 }, (_, index) => ({
+      id: `version-${index}`, version: index + 1, state: "ready", fileCount: 4, createdAt: timestamp,
+    })),
     invitations: [{ id: "accepted", email: "guest@example.test", status: "accepted", acceptedAccountUserId: accountUserId, expiresAt: timestamp }],
-    grants: [{ id: "grant-1", accountUserId, permission, active: true }],
+    grants: [{ id: "grant-1", accountUserId, permission: "viewer", active }],
   } }));
-  await page.route(`**/api/v1/sites/${sites[0].id}/grants`, async (route) => {
-    const body = route.request().postDataJSON();
-    expect(body.accountUserId).toBe(accountUserId);
-    permission = body.permission;
-    await route.fulfill({ json: { id: "grant-1", accountUserId, permission, active: true } });
+  await page.route(`**/api/v1/sites/${sites[0].id}/grants/grant-1`, async (route) => {
+    expect(route.request().method()).toBe("DELETE");
+    active = false;
+    await route.fulfill({ status: 204 });
   });
   await page.goto("/?view=sites");
   const owner = page.getByRole("article").filter({ hasText: "owner dashboard" });
-  const admin = page.getByRole("article").filter({ hasText: "admin dashboard" });
-  const member = page.getByRole("article").filter({ hasText: "member dashboard" });
+  const viewer = page.getByRole("article").filter({ hasText: "viewer dashboard" });
   await expect(owner.getByRole("button", { name: "Delete", exact: true })).toBeVisible();
-  await expect(admin.getByRole("button", { name: "Share", exact: true })).toBeVisible();
-  await expect(admin.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
-  await expect(member.getByRole("button")).toHaveCount(0);
-  await expect(member.getByRole("link")).toBeVisible();
+  await expect(viewer).toContainText("Can view");
+  await expect(viewer.getByRole("button")).toHaveCount(0);
+  await expect(viewer.getByRole("link")).toBeVisible();
+  for (const viewport of [{ width: 1366, height: 650 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const open = await owner.getByRole("link").boundingBox();
+    const share = await owner.getByRole("button", { name: "Share", exact: true }).boundingBox();
+    expect(open!.width).toBe(share!.width);
+    expect(open!.height).toBe(share!.height);
+    await owner.getByRole("button", { name: "Share", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Only you, the owner");
+    await expect(dialog.getByRole("combobox")).toHaveCount(1);
+    await expect(dialog).not.toContainText(/\bAdmin\b|\bMember\b|Can edit/);
+    expect(await dialog.evaluate((element) => [element, ...element.querySelectorAll("*")].filter((node) => {
+      const style = getComputedStyle(node);
+      return /auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight;
+    }).length)).toBe(1);
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await testInfo.attach(`site-sharing-${viewport.width}`, { body: await page.screenshot({ path: testInfo.outputPath(`site-sharing-${viewport.width}.png`) }), contentType: "image/png" });
+    await dialog.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  }
   await owner.getByRole("button", { name: "Share", exact: true }).click();
-  const rolePicker = page.getByRole("combobox", { name: "Role for guest@example.test" });
-  await rolePicker.click();
-  await expect(page.getByRole("option", { name: /Owner/ })).toHaveCount(0);
-  await page.getByRole("option", { name: "Admin — manage access" }).click();
-  await expect(rolePicker).toContainText("Admin");
-  await rolePicker.click();
-  await page.getByRole("option", { name: "Member — read only" }).click();
-  await expect(rolePicker).toContainText("Member");
-  await testInfo.attach("site-permissions-desktop", { body: await page.screenshot(), contentType: "image/png" });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await rolePicker.scrollIntoViewIfNeeded();
-  await expect(rolePicker).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await testInfo.attach("site-permissions-mobile", { body: await page.screenshot(), contentType: "image/png" });
+  const grantRow = page.locator(".site-manage-row").filter({ has: page.getByRole("button", { name: "Remove", exact: true }) });
+  await expect(grantRow).toContainText("Can view");
+  await grantRow.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(grantRow).toHaveCount(0);
 });

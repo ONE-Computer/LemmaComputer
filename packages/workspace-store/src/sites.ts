@@ -5,8 +5,8 @@ import pg from "pg";
 export type SiteVisibility = "private" | "organization" | "restricted";
 export type SiteVersionState = "staging" | "ready" | "failed";
 export type SiteStorageBackend = "filesystem" | "s3";
-export type SiteRole = "owner" | "admin" | "member";
-export type SiteGrantPermission = "viewer" | "admin";
+export type SiteRole = "owner" | "viewer";
+export type SiteGrantPermission = "viewer";
 
 export type SiteAccessActor = {
   tenantId: string;
@@ -125,7 +125,7 @@ export interface SiteStore {
   restoreSiteVersion(actor: SiteAccessActor, siteId: string, version: number): Promise<SiteRecord | null>;
   updateSiteVisibility(actor: SiteAccessActor, siteId: string, visibility: SiteVisibility): Promise<SiteRecord | null>;
   listSiteGrants(actor: SiteAccessActor, siteId: string): Promise<SiteGrantRecord[] | null>;
-  grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string, permission?: SiteGrantPermission): Promise<SiteGrantRecord | null>;
+  grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string): Promise<SiteGrantRecord | null>;
   revokeSiteAccess(actor: SiteAccessActor, siteId: string, grantId: string): Promise<boolean>;
   listSiteInvitations(actor: SiteAccessActor, siteId: string, now: Date): Promise<SiteInvitationRecord[] | null>;
   createSiteInvitation(actor: SiteAccessActor, input: { siteId: string; email: string; tokenHash: string; idempotencyKeyHash: string; expiresAt: Date; now: Date }): Promise<{ invitation: SiteInvitationRecord; replayed: boolean } | null>;
@@ -165,7 +165,7 @@ const mapVersion = (row: Record<string, unknown>): SiteVersionRecord => ({
 });
 
 const mapGrant = (row: Record<string, unknown>): SiteGrantRecord => ({
-  id: String(row.id), siteId: String(row.site_id), granteeAccountUserId: String(row.grantee_account_user_id), permission: String(row.permission) as SiteGrantPermission,
+  id: String(row.id), siteId: String(row.site_id), granteeAccountUserId: String(row.grantee_account_user_id), permission: "viewer",
   grantedBy: String(row.granted_by), createdAt: new Date(String(row.created_at)), revokedAt: row.revoked_at ? new Date(String(row.revoked_at)) : null,
 });
 
@@ -185,10 +185,6 @@ const versionSelect = `SELECT id AS version_id,tenant_id,subject_id,site_id,vers
   source_agent_id AS version_source_agent_id,source_project_path,created_by_account_user_id,idempotency_key_hash,
   failure_code,created_at AS version_created_at,ready_at,failed_at FROM site_versions`;
 const ownedSql = (alias = "s") => `(${alias}.tenant_id=$1 AND ${alias}.subject_id=$2)`;
-const manageableSql = (alias = "s") => `(${ownedSql(alias)} OR ($3::uuid IS NOT NULL AND EXISTS (
-  SELECT 1 FROM site_grants g WHERE g.tenant_id=${alias}.tenant_id AND g.subject_id=${alias}.subject_id
-    AND g.site_id=${alias}.id AND g.grantee_account_user_id=$3::uuid AND g.revoked_at IS NULL AND g.permission='admin'
-)))`;
 const accessibleSql = (alias = "s") => `(
   (${alias}.tenant_id=$1 AND ${alias}.subject_id=$2)
   OR (${alias}.tenant_id=$1 AND ${alias}.visibility='organization')
@@ -205,12 +201,7 @@ export class PostgresSiteStore implements SiteStore {
   async close() { await this.pool.end(); }
 
   async getSiteRole(actor: SiteAccessActor, site: SiteRecord): Promise<SiteRole> {
-    if (owned(actor, site)) return "owner";
-    const result = await this.pool.query(
-      "SELECT permission FROM site_grants WHERE tenant_id=$1 AND subject_id=$2 AND site_id=$3 AND grantee_account_user_id=$4 AND revoked_at IS NULL",
-      [site.tenantId, site.subjectId, site.id, actor.accountUserId ?? null],
-    );
-    return result.rows[0]?.permission === "admin" ? "admin" : "member";
+    return owned(actor, site) ? "owner" : "viewer";
   }
 
   async listSites(actor: SiteAccessActor) {
@@ -330,7 +321,7 @@ export class PostgresSiteStore implements SiteStore {
   }
 
   async getManageableSite(actor: SiteAccessActor, siteId: string) {
-    const result = await this.pool.query(`${siteSelect} s WHERE s.id=$4 AND s.deleted_at IS NULL AND ${manageableSql("s")}`, [...actorValues(actor), siteId]);
+    const result = await this.pool.query(`${siteSelect} s WHERE s.id=$3 AND s.deleted_at IS NULL AND ${ownedSql("s")}`, [actor.tenantId, actor.subjectId, siteId]);
     return result.rowCount ? mapSite(result.rows[0]) : null;
   }
 
@@ -367,14 +358,14 @@ export class PostgresSiteStore implements SiteStore {
     return result.rows.map(mapGrant);
   }
 
-  async grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string, permission: SiteGrantPermission = "viewer") {
+  async grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string) {
     const site = await this.getManageableSite(actor, siteId);
     if (!site) return null;
     const result = await this.pool.query(
       `INSERT INTO site_grants (id,tenant_id,subject_id,site_id,grantee_account_user_id,permission,granted_by,created_at)
-       SELECT $4,$1,$2,$3,account.id,$7,$6,now() FROM account_users account WHERE account.id=$5 AND account.status='active' AND account.id IS DISTINCT FROM $8::uuid
+       SELECT $4,$1,$2,$3,account.id,'viewer',$6,now() FROM account_users account WHERE account.id=$5 AND account.status='active' AND account.id IS DISTINCT FROM $7::uuid
        ON CONFLICT (tenant_id,subject_id,site_id,grantee_account_user_id) DO UPDATE SET permission=EXCLUDED.permission,granted_by=EXCLUDED.granted_by,created_at=now(),revoked_at=NULL,revoked_by=NULL RETURNING *`,
-      [site.tenantId, site.subjectId, siteId, randomUUID(), accountUserId, actor.subjectId || actor.accountUserId, permission, site.creatorAccountUserId],
+      [site.tenantId, site.subjectId, siteId, randomUUID(), accountUserId, actor.subjectId || actor.accountUserId, site.creatorAccountUserId],
     );
     return result.rowCount ? mapGrant(result.rows[0]) : null;
   }
@@ -496,7 +487,7 @@ export class PostgresSiteStore implements SiteStore {
       await client.query(
         `INSERT INTO site_grants (id,tenant_id,subject_id,site_id,grantee_account_user_id,permission,granted_by,created_at)
          VALUES ($1,$2,$3,$4,$5,'viewer',$6,$7)
-         ON CONFLICT (tenant_id,subject_id,site_id,grantee_account_user_id) DO UPDATE SET permission=CASE WHEN site_grants.revoked_at IS NULL THEN site_grants.permission ELSE 'viewer' END,granted_by=EXCLUDED.granted_by,created_at=EXCLUDED.created_at,revoked_at=NULL,revoked_by=NULL`,
+         ON CONFLICT (tenant_id,subject_id,site_id,grantee_account_user_id) DO UPDATE SET permission='viewer',granted_by=EXCLUDED.granted_by,created_at=EXCLUDED.created_at,revoked_at=NULL,revoked_by=NULL`,
         [randomUUID(), row.tenant_id, row.subject_id, row.site_id, input.accountUserId, row.created_by, input.now],
       );
       await client.query(`UPDATE site_invitations SET status='accepted',accepted_account_user_id=$2::uuid,accepted_at=$3,updated_at=$3,updated_by=($2::uuid)::text WHERE id=$1`, [row.id, input.accountUserId, input.now]);
@@ -526,9 +517,7 @@ export class PostgresSiteStore implements SiteStore {
 }
 
 const owned = (actor: SiteAccessActor, site: SiteRecord) => site.tenantId === actor.tenantId && site.subjectId === actor.subjectId;
-const manageable = (actor: SiteAccessActor, site: SiteRecord, grants: SiteGrantRecord[]) => owned(actor, site)
-  || Boolean(actor.accountUserId && grants.some((grant) => grant.granteeAccountUserId === actor.accountUserId && !grant.revokedAt && grant.permission === "admin"));
-const accessible = (actor: SiteAccessActor, site: SiteRecord, grants: SiteGrantRecord[]) => manageable(actor, site, grants)
+const accessible = (actor: SiteAccessActor, site: SiteRecord, grants: SiteGrantRecord[]) => owned(actor, site)
   || (site.tenantId === actor.tenantId && site.visibility === "organization")
   || Boolean(actor.accountUserId && grants.some((grant) => grant.granteeAccountUserId === actor.accountUserId && !grant.revokedAt));
 
@@ -541,7 +530,7 @@ export class MemorySiteStore implements SiteStore {
   private readonly invitations = new Map<string, MemoryInvitation[]>();
 
   async getSiteRole(actor: SiteAccessActor, site: SiteRecord): Promise<SiteRole> {
-    return owned(actor, site) ? "owner" : manageable(actor, site, this.grants.get(site.id) ?? []) ? "admin" : "member";
+    return owned(actor, site) ? "owner" : "viewer";
   }
 
   async listSites(actor: SiteAccessActor) {
@@ -633,7 +622,7 @@ export class MemorySiteStore implements SiteStore {
     return version ? { site, version } : null;
   }
   async getManageableSite(actor: SiteAccessActor, siteId: string) {
-    const site = this.sites.get(siteId); return site && manageable(actor, site, this.grants.get(siteId) ?? []) ? site : null;
+    const site = this.sites.get(siteId); return site && owned(actor, site) ? site : null;
   }
   async listSiteVersions(actor: SiteAccessActor, siteId: string) {
     return await this.getManageableSite(actor, siteId) ? [...(this.versions.get(siteId) ?? [])].sort((left, right) => right.version - left.version) : null;
@@ -653,7 +642,8 @@ export class MemorySiteStore implements SiteStore {
   async listSiteGrants(actor: SiteAccessActor, siteId: string) {
     return await this.getManageableSite(actor, siteId) ? [...(this.grants.get(siteId) ?? [])] : null;
   }
-  async grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string, permission: SiteGrantPermission = "viewer") {
+  async grantSiteAccess(actor: SiteAccessActor, siteId: string, accountUserId: string) {
+    const permission = "viewer" as const;
     const site = await this.getManageableSite(actor, siteId);
     if (!site || site.creatorAccountUserId === accountUserId) return null;
     const current = this.grants.get(siteId) ?? [];
@@ -705,8 +695,7 @@ export class MemorySiteStore implements SiteStore {
       const invitation = invitations.find((item) => item.tokenHash === input.tokenHash);
       const site = this.sites.get(siteId);
       if (!invitation || !site || invitation.status !== "pending" || invitation.expiresAt <= input.now || invitation.email !== input.email) continue;
-      const existing = this.grants.get(siteId)?.find((grant) => grant.granteeAccountUserId === input.accountUserId && !grant.revokedAt);
-      await this.grantSiteAccess({ tenantId: site.tenantId, subjectId: site.subjectId }, siteId, input.accountUserId, existing?.permission ?? "viewer");
+      await this.grantSiteAccess({ tenantId: site.tenantId, subjectId: site.subjectId }, siteId, input.accountUserId);
       invitation.status = "accepted"; invitation.acceptedAccountUserId = input.accountUserId; invitation.acceptedAt = input.now;
       invitation.updatedAt = input.now; invitation.updatedBy = input.accountUserId; return { siteId, handle: site.handle! };
     }
