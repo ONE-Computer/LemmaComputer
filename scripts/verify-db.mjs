@@ -45,7 +45,9 @@ let hostPort;
 try {
   must("docker", ["run", "--rm", "-d", "--name", container, "-e", `POSTGRES_PASSWORD=${password}`, "-p", "127.0.0.1::5432", image]);
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (exec("docker", ["exec", container, "pg_isready", "-U", "postgres"]).status === 0) break;
+    // The image's temporary initialization server accepts Unix sockets only.
+    // Wait for the final TCP listener so its shutdown cannot race our first SQL.
+    if (exec("docker", ["exec", container, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]).status === 0) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
     if (attempt === 59) throw new Error("PostgreSQL test container did not become ready");
   }
