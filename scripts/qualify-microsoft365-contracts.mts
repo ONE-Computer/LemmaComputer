@@ -117,6 +117,14 @@ const control = Object.fromEntries(names.map((name) => {
       controlProperties,
       "the workspace-local upload extension must be the only bridge/Control field difference",
     );
+  } else if (name === "download-bytes") {
+    assert.deepEqual(
+      bridgeProperties,
+      [...controlProperties, "localFilePath"].sort(),
+      "the workspace-local download destination must be the only bridge/Control field difference",
+    );
+    assert.ok(bridgeSchema.required?.includes("localFilePath"),
+      "downloads must require a workspace-local destination instead of returning bytes to the model");
   } else if (name === "delete-onedrive-file") {
     assert.deepEqual(
       bridgeProperties.filter((field) => field !== "resourceName"),
@@ -131,6 +139,7 @@ const control = Object.fromEntries(names.map((name) => {
     .sort();
   const bridgeRequired = (bridgeSchema.required ?? [])
     .filter((field: string) => name !== "upload-file-content" || field !== "localFilePath")
+    .filter((field: string) => name !== "download-bytes" || field !== "localFilePath")
     .filter((field: string) => name !== "delete-onedrive-file" || field !== "resourceName")
     .sort();
   assert.deepEqual(

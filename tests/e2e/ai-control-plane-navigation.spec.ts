@@ -80,7 +80,7 @@ test("provider setup shows configured deployments and selects more than one rout
 
   const dialog = page.getByRole("dialog", { name: "Manage Anthropic" });
   await expect(dialog.getByRole("combobox", { name: "Estimated serving grid for emissions" })).toHaveText(/United States/);
-  await expect(dialog.getByText(/does not control the provider's inference location/)).toBeVisible();
+  await expect(dialog.getByText("Accounting assumption only; this does not control inference location.")).toBeVisible();
   const sonnet = dialog.getByRole("checkbox", { name: /Anthropic Claude Sonnet 4.6/ });
   const opus = dialog.getByRole("checkbox", { name: /Anthropic Claude Opus 4.8/ });
   await expect(sonnet).toBeChecked();

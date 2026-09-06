@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "contractVersion": 1,
   "toolCount": 43,
-  "evaluationFixtureHash": "41c6cc6c76424c20785a4520cc493b0d64708674e78578ad22250e035f086bd4",
+  "evaluationFixtureHash": "813f5635dddf1ab20b37694c9dc1cb433f12be24b4175f23b5e00066ddc3765c",
   "upstream": {
     "package": "@softeria/ms-365-mcp-server",
     "version": "0.146.1",
@@ -55,8 +55,8 @@
     }
   },
   "effective": {
-    "bridgeHash": "98d559e6ffbbf362a9a46f2f68cc9f1d618cb18295fb051c7f733de1e8e0822b",
+    "bridgeHash": "15fb4acd18eb51f0187bcd2c7493ba4f716218b1ee3427ddeb3d5a3652003100",
     "controlHash": "ebb39078f8676eb2789af484baeabe94a66827b0b4092302c41f93d32071ff70",
-    "combinedHash": "16a3ed2535abdc21072e08273931bb739b0de5b6143ec20218f0b208c46c68ff"
+    "combinedHash": "7bbb60e479b0b16c43cc7250b52d65146801c228efe3aa46ae2a8aba7caa88dd"
   }
 }
