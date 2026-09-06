@@ -801,3 +801,95 @@ test("late stop cleanup is limited to the abandoned generation", async (t) => {
   assert.equal(gateway.revokedGenerations.at(-1), original?.accessGeneration);
   assert.ok(gateway.revokedGenerations.every((generation) => generation !== undefined && generation < replacement!.accessGeneration));
 });
+
+test("host recovery replaces an unhealthy runtime with freshly issued grants and preserves workspace identity", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  let grants = 0;
+  const service = new WorkspaceService(store, controller, undefined, {
+    baseUrl: "http://control", issue: () => `fresh-grant-${++grants}`,
+  });
+  const created = await service.create(alex, policy, "personal", "recovery-create", "recovery");
+  const original = (await store.getOwned(alex, created.id))!;
+  const originalToken = controller.lastAgentBridge?.token;
+  controller.status = async (_id, providerId) => ({ providerId, state: "failed", failureCode: "WORKSPACE_HEALTHCHECK_FAILED" });
+  await service.recover(original, alex, policy);
+  const recovered = (await store.getOwned(alex, created.id))!;
+  assert.equal(recovered.id, original.id);
+  assert.equal(recovered.desiredState, "running");
+  assert.equal(recovered.state, "ready");
+  assert.equal(recovered.accessGeneration, original.accessGeneration + 1);
+  assert.equal(recovered.operationToken, null);
+  assert.equal(controller.destroys, 1);
+  assert.equal(controller.purges, 0, "recovery must preserve persistent home");
+  assert.notEqual(controller.lastAgentBridge?.token, originalToken);
+});
+
+test("a stopped provider retains running intent and recovers without a logged-in caller", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const service = new WorkspaceService(store, controller);
+  const created = await service.create(alex, policy, "personal", "recovery-missing", "recovery");
+  controller.status = async (_id, providerId) => ({ providerId, state: "stopped", failureCode: null });
+  await service.current(alex, policy);
+  const stopped = (await store.getOwned(alex, created.id))!;
+  assert.equal(stopped.state, "stopped");
+  assert.equal(stopped.desiredState, "running", "a status observation cannot change user intent");
+  await service.recover(stopped, alex, policy);
+  assert.equal((await store.getOwned(alex, created.id))?.state, "ready");
+  assert.equal(controller.creates, 2);
+});
+
+test("a delayed recovery health check cannot undo Stop or race another recovery", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const service = new WorkspaceService(store, controller);
+  const created = await service.create(alex, policy, "personal", "recovery-stop-race", "recovery");
+  const original = (await store.getOwned(alex, created.id))!;
+  let observed!: () => void;
+  const entered = new Promise<void>((resolve) => { observed = resolve; });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  controller.status = async (_id, providerId) => {
+    observed(); await blocked;
+    return { providerId, state: "failed", failureCode: "WORKSPACE_HEALTHCHECK_FAILED" };
+  };
+  const recovering = service.recover(original, alex, policy);
+  await entered;
+  await service.stop(alex, policy, created.id);
+  release();
+  await assert.rejects(recovering, (error: unknown) => error instanceof LemmaComputerError && error.code === "WORKSPACE_BUSY");
+  const stopped = (await store.getOwned(alex, created.id))!;
+  await service.recover(stopped, alex, policy);
+  assert.equal(controller.creates, 1);
+  assert.equal(stopped.desiredState, "stopped");
+  assert.deepEqual(await store.listRecoveryCandidates(), []);
+
+  await service.create(alex, policy, "personal", "recovery-restart", "recovery");
+  const running = (await store.getOwned(alex, created.id))!;
+  const rounds = await Promise.allSettled([service.recover(running, alex, policy), service.recover(running, alex, policy)]);
+  assert.equal(rounds.filter((r) => r.status === "fulfilled").length, 1);
+  assert.equal(controller.creates, 3, "only one replacement may be created");
+});
+
+test("recovery waits for dependencies and bounds retries after a failed restart", async () => {
+  const store = new MemoryWorkspaceStore();
+  const controller = new FakeController();
+  const service = new WorkspaceService(store, controller);
+  const created = await service.create(alex, policy, "personal", "recovery-outage", "recovery");
+  const original = (await store.getOwned(alex, created.id))!;
+  controller.status = async () => { throw new Error("node unavailable"); };
+  await assert.rejects(service.recover(original, alex, policy));
+  assert.equal(controller.destroys, 0, "an unreachable node must not trigger destructive recovery");
+  controller.status = async (_id, providerId) => ({ providerId, state: "failed", failureCode: "WORKSPACE_HEALTHCHECK_FAILED" });
+  controller.create = async () => { controller.creates++; throw new Error("dependency unavailable"); };
+  await assert.rejects(service.recover(original, alex, policy));
+  const failed = (await store.getOwned(alex, created.id))!;
+  await service.recover(failed, alex, policy);
+  assert.equal(controller.creates, 2, "do not immediately retry a failed replacement");
+  const clock = Date.now;
+  Date.now = () => failed.updatedAt.getTime() + 60_001;
+  try { await assert.rejects(service.recover(failed, alex, policy)); }
+  finally { Date.now = clock; }
+  assert.equal(controller.creates, 3);
+});

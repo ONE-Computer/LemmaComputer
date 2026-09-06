@@ -863,3 +863,26 @@ reconciler marks an expired upload abandoned only after both the staging object
 and any promoted final object have been deleted. Alert on staging rows that
 remain in `finalizing` or `failed`: object-store deletion errors deliberately
 leave those rows retryable rather than hiding leaked bytes.
+
+### Workspace recovery after an unexpected outage
+
+Control records running/stopped intent separately from observed runtime health.
+After Control starts listening, a background scan checks up to 20 workspaces per
+15-second tick across tenants. It resolves each owner's current active principal,
+workspace-use permission, policy and saved selection before recovery. No browser
+session is required. An unreachable node is retried without deleting its runtime;
+a stopped or unhealthy runtime is replaced through the normal start path with
+fresh grants and the same persistent home. Failed replacements wait at least one
+minute before retrying. Interrupted lifecycle operations retain the five-minute
+ownership timeout. Intentionally stopped workspaces, including failed Stop
+operations, are not automatically started.
+
+The additive `workspace_running_intent` migration adds a nullable, checked text
+column without a backfill, validation scan or index build. A lifecycle-claim
+trigger also records Start/Stop from older Control replicas during a rolling
+deployment. The migration takes the normal brief ALTER TABLE lock under the
+migration runner's lock timeout. Legacy active or startup-health
+failure records infer running intent; ambiguous older failures remain manual
+recovery. Apply migrations explicitly before deploying Control. Both hosted and
+customer-managed profiles use this path; split-node or EC2 outage qualification
+still requires the corresponding infrastructure.

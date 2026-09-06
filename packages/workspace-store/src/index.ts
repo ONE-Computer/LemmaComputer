@@ -30,6 +30,7 @@ export type WorkspaceRecord = {
   subjectId: string;
   grantId: string;
   state: WorkspaceState;
+  desiredState: "running" | "stopped";
   providerId: string | null;
   failureCode: string | null;
   operationToken: string | null;
@@ -466,6 +467,8 @@ export interface WorkspaceStore {
   getCurrent(identity: IdentityContext, grantId: string): Promise<WorkspaceRecord | null>;
   listCurrent(identity: IdentityContext): Promise<WorkspaceRecord[]>;
   listTenantCurrent(tenantId: string): Promise<WorkspaceRecord[]>;
+  /** System recovery queue; callers must reauthorize each tenant-scoped owner. */
+  listRecoveryCandidates(afterId?: string, limit?: number): Promise<WorkspaceRecord[]>;
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
   authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates?: WorkspaceState[]): Promise<boolean>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
@@ -506,8 +509,22 @@ export interface WorkspaceStore {
   lastWorkspaceActivityAt(identity: IdentityContext, workspaceId: string): Promise<Date | null>;
 }
 
+// Old versions leave intent NULL. Never infer running from an ambiguous failed stop.
+const legacyRunningStates = ["ready", "open", "provisioning", "restarting"];
+const legacyRunningFailures = ["WORKSPACE_HEALTHCHECK_FAILED", "WORKSPACE_STARTUP_FAILED", "WORKSPACE_STARTUP_TIMEOUT"];
+const legacyDesiredState = (state: string, failure: unknown): "running" | "stopped" =>
+  legacyRunningStates.includes(state) || (state === "failed" && legacyRunningFailures.includes(String(failure))) ? "running" : "stopped";
+const desiredStateSql = `COALESCE(desired_state, CASE
+  WHEN state IN ('ready','open','provisioning','restarting')
+    OR (state='failed' AND failure_code IN ('WORKSPACE_HEALTHCHECK_FAILED','WORKSPACE_STARTUP_FAILED','WORKSPACE_STARTUP_TIMEOUT'))
+  THEN 'running' ELSE 'stopped' END)`;
+const intentForTransition = (state: WorkspaceState | undefined): "running" | "stopped" | undefined =>
+  state && legacyRunningStates.includes(state) ? "running"
+    : state && ["stopping", "stopped", "not_created"].includes(state) ? "stopped" : undefined;
+
 const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   id: String(row.id),
+  desiredState: row.desired_state === "running" || row.desired_state === "stopped" ? row.desired_state : legacyDesiredState(String(row.state), row.failure_code),
   tenantId: String(row.tenant_id),
   subjectId: String(row.subject_id),
   grantId: String(row.grant_id),
@@ -934,6 +951,15 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     return result.rows.map(mapRow);
   }
 
+  async listRecoveryCandidates(afterId?: string, limit = 20) {
+    const result = await this.pool.query(
+      `SELECT * FROM workspaces WHERE deleted_at IS NULL AND ${desiredStateSql}='running'
+       AND ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT $2`,
+      [afterId ?? null, Math.min(100, Math.max(1, limit))],
+    );
+    return result.rows.map(mapRow);
+  }
+
   async getOwned(identity: IdentityContext, workspaceId: string) {
     const result = await this.pool.query(
       "SELECT * FROM workspaces WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND deleted_at IS NULL",
@@ -1035,15 +1061,16 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord) {
     const token = randomUUID();
     const result = await this.pool.query(
-      `UPDATE workspaces SET state=$2, operation_token=$3, failure_code=NULL, updated_at=now()
+      `UPDATE workspaces SET state=$2, desired_state=CASE WHEN $2 IN ('provisioning','restarting') THEN 'running' WHEN $2='stopping' THEN 'stopped' ELSE ${desiredStateSql} END, operation_token=$3, failure_code=NULL, updated_at=now()
        WHERE id=$1 AND state=ANY($4::text[]) AND deleted_at IS NULL
          AND (NOT $5::boolean OR (id=$6 AND tenant_id=$7 AND subject_id=$8
            AND provider_id IS NOT DISTINCT FROM $9 AND access_generation=$10
-           AND state=$11 AND operation_token IS NULL AND $12::uuid IS NULL))
+           AND state=$11 AND operation_token IS NULL AND $12::uuid IS NULL
+           AND ${desiredStateSql}=$13))
        RETURNING *`,
       [workspaceId, next, token, allowed, Boolean(observed), observed?.id ?? null,
         observed?.tenantId ?? null, observed?.subjectId ?? null, observed?.providerId ?? null,
-        observed?.accessGeneration ?? null, observed?.state ?? null, observed?.operationToken ?? null],
+        observed?.accessGeneration ?? null, observed?.state ?? null, observed?.operationToken ?? null, observed?.desiredState ?? null],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
   }
@@ -1059,8 +1086,8 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>) {
     const result = await this.pool.query(
-      "UPDATE workspaces SET state=COALESCE($2,state), provider_id=CASE WHEN $4 THEN $3 ELSE provider_id END, failure_code=$5, updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING *",
-      [workspaceId, patch.state ?? null, patch.providerId ?? null, Object.hasOwn(patch, "providerId"), patch.failureCode ?? null],
+      `UPDATE workspaces SET state=COALESCE($2,state), desired_state=COALESCE($6,${desiredStateSql}), provider_id=CASE WHEN $4 THEN $3 ELSE provider_id END, failure_code=$5, updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING *`,
+      [workspaceId, patch.state ?? null, patch.providerId ?? null, Object.hasOwn(patch, "providerId"), patch.failureCode ?? null, intentForTransition(patch.state) ?? null],
     );
     if (!result.rowCount) throw new Error("Workspace not found");
     return mapRow(result.rows[0]);
@@ -1077,7 +1104,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
       observed.accessGeneration, observed.state];
     const result = await this.pool.query(
       unchanged ? `SELECT * FROM workspaces ${fence}`
-        : `UPDATE workspaces SET state=$7,provider_id=$8,failure_code=$9,updated_at=now() ${fence} RETURNING *`,
+        : `UPDATE workspaces SET desired_state=${desiredStateSql},state=$7,provider_id=$8,failure_code=$9,updated_at=now() ${fence} RETURNING *`,
       unchanged ? values : [...values, patch.state, patch.providerId, patch.failureCode],
     );
     return result.rowCount ? mapRow(result.rows[0]) : null;
@@ -1086,7 +1113,7 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   async expireOperation(observed: WorkspaceRecord, expiredBefore: Date) {
     if (!observed.operationToken) return null;
     const result = await this.pool.query(
-      `UPDATE workspaces SET state='failed',failure_code='WORKSPACE_OPERATION_INTERRUPTED',
+      `UPDATE workspaces SET desired_state=${desiredStateSql},state='failed',failure_code='WORKSPACE_OPERATION_INTERRUPTED',
          operation_token=NULL,access_generation=access_generation+1,updated_at=now()
        WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND operation_token=$4
          AND access_generation=$5 AND provider_id IS NOT DISTINCT FROM $6 AND state=$7
@@ -2536,6 +2563,11 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       .filter((item) => item.tenantId === tenantId && item.deletedAt === null)
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
+  async listRecoveryCandidates(afterId?: string, limit = 20) {
+    return [...this.records.values()]
+      .filter((record) => record.deletedAt === null && record.desiredState === "running" && (!afterId || record.id > afterId))
+      .sort((a, b) => a.id.localeCompare(b.id)).slice(0, Math.min(100, Math.max(1, limit)));
+  }
   async getSandboxSettings(identity: IdentityContext, grantId: string) {
     const record = this.sandboxSettings.get(`${identity.tenantId}\0${identity.subjectId}\0${grantId}`);
     return record ? {
@@ -2592,7 +2624,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
       });
     }
     const now = new Date();
-    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, deletedAt: null, deletionContentDisposition: null, createdAt: now, updatedAt: now };
+    const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", desiredState: "stopped", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, deletedAt: null, deletionContentDisposition: null, createdAt: now, updatedAt: now };
     this.records.set(record.id, record);
     return record;
   }
@@ -2602,8 +2634,9 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     if (observed && (record.id !== observed.id || record.tenantId !== observed.tenantId
       || record.subjectId !== observed.subjectId || record.providerId !== observed.providerId
       || record.accessGeneration !== observed.accessGeneration || record.state !== observed.state
-      || record.operationToken !== null || observed.operationToken !== null)) return null;
-    const claimed = { ...record, state: next, failureCode: null, operationToken: randomUUID(), updatedAt: new Date() };
+      || record.operationToken !== null || observed.operationToken !== null
+      || record.desiredState !== observed.desiredState)) return null;
+    const claimed = { ...record, state: next, desiredState: intentForTransition(next) ?? record.desiredState, failureCode: null, operationToken: randomUUID(), updatedAt: new Date() };
     this.records.set(workspaceId, claimed);
     return claimed;
   }
@@ -2615,7 +2648,7 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
   async update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>) {
     const record = this.records.get(workspaceId);
     if (!record) throw new Error("Workspace not found");
-    return this.save(record, patch);
+    return this.save(record, { ...patch, desiredState: intentForTransition(patch.state) ?? record.desiredState });
   }
   async reconcile(observed: WorkspaceRecord, patch: Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">) {
     const record = this.records.get(observed.id);
