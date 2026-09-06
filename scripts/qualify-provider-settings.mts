@@ -148,7 +148,8 @@ const main = async () => {
     credentialSecret: providerProbeCredentialSecret,
     requestTimeoutMs: 30_000,
     adminFetch: async (url, init) => {
-      if (new URL(String(url)).pathname === "/model/new" && typeof init?.body === "string") {
+      const path = new URL(String(url)).pathname;
+      if ((path === "/model/new" || /^\/model\/[^/]+\/update$/.test(path)) && typeof init?.body === "string") {
         const body = JSON.parse(init.body);
         // Redirect only the upstream host; retain the adapter's provider and
         // API version so the production callback and Azure transport execute.
@@ -291,6 +292,13 @@ const main = async () => {
       modelMetadata: { "gemini-2.5-flash-lite": { displayName: "Gemini Flash Lite", source: "litellm", capabilities: { tools: true, streaming: true } } },
     });
     assert.ok(googleCallbackRoute.modelIds.length > 0, "Google API-key probes must pass the production callback, streaming, and function calls");
+    const googleReconnected = await callbackProviderAdministration.configureManagedProvider({
+      tenantId: `tenant-google-key-probe-${runId}`, provider: "vertex", apiKey: googleKey,
+      modelIds: ["gemini-2.5-flash-lite"], existingModelIds: [],
+      vertex: { authMethod: "api-key", location: "global" },
+    });
+    assert.deepEqual(googleReconnected.modelIds, googleCallbackRoute.modelIds,
+      "Reconnect after a settings-store failure must reuse the existing tenant credential and stable routes");
 
     const migrationStore = PostgresWorkspaceStore.fromConnectionString(controlDatabaseUrl);
     try {

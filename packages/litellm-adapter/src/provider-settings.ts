@@ -583,8 +583,10 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       let stableCredentialCreated = false;
       const createdModelIds: string[] = [];
       try {
-        await this.createCredential(credentialName, input, apiKey);
-        stableCredentialCreated = true;
+        // A prior gateway success followed by a settings-store failure can
+        // leave this tenant's stable credential behind. Candidate validation
+        // has already succeeded, so reconnect can safely update that record.
+        stableCredentialCreated = await this.replaceCredential(credentialName, input, apiKey, true);
         for (const deployment of targetDeployments) {
           const updated = await this.upsertModel(deployment);
           if (updated.id !== deployment.id) {
@@ -755,10 +757,10 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     if (!result.ok) throw this.providerFailure(result.status, "route", input.provider, result.payload);
   }
 
-  private async replaceCredential(name: string, input: ManagedProviderConfiguration, apiKey: string) {
+  private async replaceCredential(name: string, input: ManagedProviderConfiguration, apiKey: string, allowMissing = false) {
     const result = await this.call(`/credentials/${encodeURIComponent(name)}`, { method: "PATCH", body: this.credentialDocument(name, input, apiKey) });
     if (result.ok) return false;
-    if (result.status !== 404 || result.embeddedError) throw this.providerFailure(result.status, "route", input.provider, result.payload);
+    if (result.status !== 404 || (result.embeddedError && !allowMissing)) throw this.providerFailure(result.status, "route", input.provider, result.payload);
     await this.createCredential(name, input, apiKey);
     return true;
   }

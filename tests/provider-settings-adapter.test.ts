@@ -194,7 +194,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
     const credentials = requests.filter((request) => request.url === "/credentials");
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === alphaKey));
     assert.ok(credentials.some((request) => (request.body.credential_values as Record<string, unknown>).api_key === betaKey));
-    assert.equal(requests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 0, "First-use provider setup must create its stable credential instead of PATCHing a missing record");
+    assert.equal(requests.filter((request) => request.method === "PATCH" && request.url.startsWith("/credentials/")).length, 4, "First-use setup must check for a stable credential left by a prior settings-store failure");
     assert.equal(credentials.filter((request) => !String(request.body.credential_name).includes("-candidate-")).length, 4, "First-use provider setup must create one stable credential per tenant");
     const grants = requests.filter((request) => request.url === "/key/generate");
     assert.equal(grants.length, 8);

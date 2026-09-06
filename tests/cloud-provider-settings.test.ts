@@ -48,7 +48,7 @@ test("Vertex credentials go only to encrypted credential intake, with project/lo
   assert.equal(route.deployments.length, 2);
   assert.equal(route.deployments[0]?.region, "global");
   for (const request of requests) {
-    if (request.path === "/credentials") {
+    if (request.path.startsWith("/credentials") && request.body.credential_values) {
       assert.deepEqual(request.body.credential_values, { vertex_credentials: serviceAccountJson });
     } else assert.equal(JSON.stringify(request.body).includes("fixture-not-real"), false);
   }
@@ -67,7 +67,7 @@ test("Google API keys use the fixed Cloud Gemini endpoint and remain outside rou
   const input = { tenantId: "alpha", provider: "vertex" as const, apiKey: "google-api-key-fixture-secret", modelIds: ["gemini-2.5-flash"], vertex: configuration, existingModelIds: [] };
   const route = await gateway.configureManagedProvider(input);
   for (const request of requests) {
-    if (request.path === "/credentials") assert.deepEqual(request.body.credential_values, { api_key: input.apiKey });
+    if (request.path.startsWith("/credentials") && request.body.credential_values) assert.deepEqual(request.body.credential_values, { api_key: input.apiKey });
     else assert.equal(JSON.stringify(request.body).includes(input.apiKey), false);
   }
   const params = requests.find((r) => r.path === "/model/new")!.body.litellm_params;
