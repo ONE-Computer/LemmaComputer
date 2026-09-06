@@ -323,7 +323,7 @@ const templatesFor = (
         primary: index === 0, legacyAlias: false,
         model: {
           alias, vision: profile.vision, modelCapabilities: profile.modelCapabilities,
-          model: provider === "foundry" ? `${configuration.foundry!.protocols?.[id] === "anthropic" ? "anthropic" : "openai"}/${configuration.foundry!.deployments[id]}` : profile.model,
+          model: provider === "foundry" ? `${configuration.foundry!.protocols?.[id] === "anthropic" ? "anthropic" : "azure"}/${configuration.foundry!.deployments[id]}` : profile.model,
           metadata: configuration.modelMetadata?.[id],
           baseModel: provider === "foundry" ? `foundry/${id}` : profile.model,
           ...(provider === "foundry" ? { foundry: { ...configuration.foundry!, endpoint: configuration.foundry!.protocols?.[id] === "anthropic" ? configuration.foundry!.endpoint.replace(/\/openai\/v1\/?$/, "/anthropic") : configuration.foundry!.endpoint } } : { vertex: configuration.vertex }),
@@ -786,7 +786,13 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       litellm_params: {
         model: deployment.model.model,
         litellm_credential_name: deployment.credentialName,
-        ...(deployment.model.foundry ? { api_base: deployment.model.foundry.endpoint } : {}),
+        // Azure v1 uses LiteLLM's Azure transport. Labeling this as OpenAI
+        // incorrectly opts Azure into the gateway's OpenAI-only Responses
+        // bridge, whose nested probe has no authenticated key identity.
+        ...(deployment.model.foundry ? deployment.model.model.startsWith("azure/") ? {
+          api_base: deployment.model.foundry.endpoint.replace(/\/openai\/v1\/?$/, ""),
+          api_version: "v1",
+        } : { api_base: deployment.model.foundry.endpoint } : {}),
         ...(deployment.model.vertex ? {
           vertex_project: deployment.model.vertex.projectId,
           vertex_location: deployment.model.vertex.location,

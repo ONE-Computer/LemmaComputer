@@ -147,6 +147,18 @@ const main = async () => {
     masterKey: providerProbeMasterKey,
     credentialSecret: providerProbeCredentialSecret,
     requestTimeoutMs: 30_000,
+    adminFetch: async (url, init) => {
+      if (new URL(String(url)).pathname === "/model/new" && typeof init?.body === "string") {
+        const body = JSON.parse(init.body);
+        // Redirect only the upstream host; retain the adapter's provider and
+        // API version so the production callback and Azure transport execute.
+        if (String(body.litellm_params?.model).startsWith("azure/")) {
+          body.litellm_params.api_base = "http://gateway-fixture:4200";
+          return fetch(url, { ...init, body: JSON.stringify(body) });
+        }
+      }
+      return fetch(url, init);
+    },
   });
   const providerSettingsStore = PostgresProviderSettingsStore.fromConnectionString(controlDatabaseUrl);
   const control = createControlServer(
@@ -255,6 +267,19 @@ const main = async () => {
       managedProviderModels.openai.length,
       "OpenAI Provider Settings must qualify through the production callback and direct Responses entry point",
     );
+    const azureCallbackRoute = await callbackProviderAdministration.configureManagedProvider({
+      tenantId: `tenant-azure-probe-${runId}`,
+      provider: "foundry",
+      apiKey: azureKey,
+      modelIds: ["gpt-4.1-mini"],
+      existingModelIds: [],
+      foundry: {
+        endpoint: "https://example-resource.openai.azure.com/openai/v1/",
+        deployments: { "gpt-4.1-mini": "company-gpt" },
+      },
+    });
+    assert.ok(azureCallbackRoute.modelIds.length > 0,
+      "Azure Provider Settings must qualify through the production callback without entering the OpenAI Responses bridge");
 
     const migrationStore = PostgresWorkspaceStore.fromConnectionString(controlDatabaseUrl);
     try {

@@ -29,10 +29,15 @@ async def fake_token(self, credentials, project_id, custom_llm_provider):
     return "fixture-google-token", project_id
 
 async def main():
+    # Match production: genuine OpenAI routes use Responses, but Azure v1
+    # chat routes must retain their native API and authenticated probe context.
+    litellm.route_all_chat_openai_to_responses = True
     transport = httpx.MockTransport(respond)
     async with httpx.AsyncClient(transport=transport) as http_client:
         azure_client = AsyncOpenAI(api_key="fixture-azure-key", base_url="https://example-resource.openai.azure.com/openai/v1/", http_client=http_client)
-        response = await litellm.acompletion(model="openai/company-gpt", messages=[{"role": "user", "content": "Reply OK"}], api_key="fixture-azure-key", api_base="https://example-resource.openai.azure.com/openai/v1/", client=azure_client)
+        with patch("litellm.llms.azure.common_utils.AsyncOpenAI", return_value=azure_client) as azure_constructor:
+            response = await litellm.acompletion(model="azure/company-gpt", messages=[{"role": "user", "content": "Reply OK"}], api_key="fixture-azure-key", api_base="https://example-resource.openai.azure.com", api_version="v1")
+        assert azure_constructor.call_args.kwargs["base_url"] == "https://example-resource.openai.azure.com/openai/v1/"
         assert response.choices[0].message.content == "OK"
         assert str(requests[-1].url) == "https://example-resource.openai.azure.com/openai/v1/chat/completions"
         assert json.loads(requests[-1].content)["model"] == "company-gpt"

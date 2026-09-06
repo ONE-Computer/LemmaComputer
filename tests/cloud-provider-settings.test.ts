@@ -28,8 +28,9 @@ test("Foundry deploys to the Azure v1 endpoint with a separate base model and te
   const models = requests.filter((r) => r.path === "/model/new");
   assert.equal(models.length, 2);
   for (const { body } of models) {
-    assert.equal(body.litellm_params.model, "openai/company-gpt");
-    assert.equal(body.litellm_params.api_base, foundry.endpoint);
+    assert.equal(body.litellm_params.model, "azure/company-gpt");
+    assert.equal(body.litellm_params.api_base, "https://example-resource.openai.azure.com");
+    assert.equal(body.litellm_params.api_version, "v1");
     assert.equal(body.model_info.lemmacomputer_base_model, "foundry/gpt-4.1");
     assert.equal(JSON.stringify(body).includes("azure-fixture-secret"), false);
     assert.ok(body.litellm_params.litellm_credential_name);

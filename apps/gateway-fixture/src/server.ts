@@ -60,7 +60,7 @@ export function createGatewayFixture() {
     request.headers["x-api-key"],
   ].some((value) => String(value ?? "").includes("provider-qualification-rejected"));
 
-  app.post("/v1/chat/completions", async (request, reply) => {
+  for (const path of ["/v1/chat/completions", "/openai/v1/chat/completions"]) app.post(path, async (request, reply) => {
     counters.model += 1;
     // The Provider Settings qualification submits a generated replacement key
     // with this marker. Reject it locally so the real pinned LiteLLM image
