@@ -97,6 +97,7 @@ export const anthropicReasoningRouteQualificationId = "anthropic-claude-4.6-4.8-
 export const openAiReasoningRouteDiscoveryId = "openai-gpt-5.6-managed-effort-route-discovery-2026-08-13";
 export const openAiReasoningRouteQualificationId = "openai-gpt-5.6-responses-effort-route-2026-08-13";
 export const claudeReasoningAdapterQualificationId = "claude-cli-2.1.215-governed-effort-adapter-2026-08-13";
+export const claudeDesktopReasoningAdapterQualificationId = "claude-desktop-1.22209.3-governed-effort-adapter-2026-09-06";
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const hermesReasoningAdapterQualificationId = "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13";
 export const hermesDesktopReasoningAdapterQualificationId = "hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13";
@@ -130,6 +131,16 @@ const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
 ]);
 
 const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = Object.freeze([
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: claudeDesktopReasoningAdapterQualificationId,
+    agentCatalogId: "claude-desktop",
+    clientVersion: "1.22209.3",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  }),
   Object.freeze({
     reviewStatus: "qualified",
     qualificationId: claudeReasoningAdapterQualificationId,

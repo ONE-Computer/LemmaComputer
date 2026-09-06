@@ -4,6 +4,7 @@ import {
   agentReasoningAdapterReview,
   anthropicReasoningRouteQualificationId,
   claudeReasoningAdapterQualificationId,
+  claudeDesktopReasoningAdapterQualificationId,
   codexReasoningAdapterDiscoveryId,
   hermesDesktopReasoningAdapterQualificationId,
   hermesReasoningAdapterQualificationId,
@@ -118,6 +119,24 @@ test("managed OpenAI reasoning routes use the qualified Responses transport", ()
 });
 
 test("the pinned Claude and Hermes runtimes expose exact qualified adapters", () => {
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "claude-desktop",
+    clientVersion: "1.22209.3",
+  }), {
+    qualificationId: claudeDesktopReasoningAdapterQualificationId,
+    agentCatalogId: "claude-desktop",
+    clientVersion: "1.22209.3",
+    effortLevels: ["low", "medium", "high"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  });
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "claude-desktop", clientVersion: "1.22209.4",
+  }), null);
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "claude-desktop", clientVersion: "2.1.215",
+  }), null, "an embedded CLI pin does not qualify the Desktop runtime");
   assert.deepEqual(qualifiedAgentReasoningAdapter({
     agentCatalogId: "claude-cli",
     clientVersion: "2.1.215",

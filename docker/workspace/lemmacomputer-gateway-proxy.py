@@ -251,12 +251,21 @@ def native_reasoning_effort(request: dict) -> str | None:
     The value is only intent. Control still validates the exact agent adapter,
     route, and organization ceiling before signing it into a task binding.
     """
-    requested = request.get("reasoning_effort")
-    if requested in (None, False, "", "none"):
-        return None
-    if requested not in {"low", "medium", "high"}:
-        raise ValueError("reasoning effort is not assigned; choose low, medium, or high")
-    return requested
+    # Claude Desktop's pinned engine sends output_config.effort, whereas
+    # Hermes uses reasoning_effort. Neither spelling is provider authority:
+    # extract only the bounded intent before normalization removes both.
+    output_config = request.get("output_config")
+    claude_effort = output_config.get("effort") if isinstance(output_config, dict) else None
+    requested = []
+    for value in (request.get("reasoning_effort"), claude_effort):
+        if value in (None, False, "", "none"):
+            continue
+        if not isinstance(value, str) or value not in {"low", "medium", "high"}:
+            raise ValueError("reasoning effort is not assigned; choose low, medium, or high")
+        requested.append(value)
+    if len(set(requested)) > 1:
+        raise ValueError("conflicting native reasoning effort selections")
+    return requested[0] if requested else None
 
 
 def issue_task_binding(

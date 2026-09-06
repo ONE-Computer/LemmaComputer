@@ -197,6 +197,30 @@ test("the broker strips forged thinking controls and projects only the signed ef
   });
 });
 
+test("native effort intent accepts Claude and Hermes spellings but rejects conflicts and malformed levels", () => {
+  const inspect = program.slice(0, program.indexOf("body, requested =")) + String.raw`
+try:
+    print(json.dumps({"effort": module.native_reasoning_effort(json.loads(sys.argv[3]))}))
+except ValueError as error:
+    print(json.dumps({"error": str(error)}))
+`;
+  const effort = (payload: Record<string, unknown>) => JSON.parse(execFileSync("python3", [
+    "-c", inspect, proxyPath, "lemmacomputer-auto", JSON.stringify(payload),
+  ], { encoding: "utf8" }));
+  for (const level of ["low", "medium", "high"]) {
+    assert.deepEqual(effort({ output_config: { effort: level }, thinking: { type: "adaptive" } }), { effort: level });
+    assert.deepEqual(effort({ reasoning_effort: level }), { effort: level });
+    assert.deepEqual(effort({ reasoning_effort: level, output_config: { effort: level } }), { effort: level });
+  }
+  assert.deepEqual(effort({ thinking: { type: "enabled", budget_tokens: 999999 } }), { effort: null });
+  assert.deepEqual(effort({ reasoning_effort: "none" }), { effort: null });
+  for (const value of ["max", "xhigh", 123, ["low"], { effort: "low" }, true]) {
+    assert.match(effort({ output_config: { effort: value } }).error, /reasoning effort is not assigned/);
+    assert.match(effort({ reasoning_effort: value }).error, /reasoning effort is not assigned/);
+  }
+  assert.match(effort({ reasoning_effort: "low", output_config: { effort: "high" } }).error, /conflicting/);
+});
+
 test("the broker preserves only the safe Chat Completions reasoning opt-out", () => {
   const chatDisabled = normalize("lemmacomputer-auto", {
     model: "lemmacomputer-lite",
@@ -417,6 +441,42 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
     });
     assert.equal(proResponse.status, 200, await proResponse.text());
     assert.equal(bindingRequests, 2);
+    // The real Desktop sends adaptive thinking and output_config.effort.
+    // Concurrent first/resumed requests must retain their own signed intent.
+    await Promise.all((["low", "medium", "high"] as const).map(async (effort, index) => {
+      const result = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6-20260101",
+          thinking: { type: "adaptive" },
+          output_config: { effort },
+          metadata: { customer_tag: `desktop-${index}` },
+          messages: [{ role: "user", content: "Use a tool." }],
+          tools: [{ name: "calculate", input_schema: { type: "object" } }],
+          stream: true,
+        }),
+      });
+      assert.equal(result.status, 200, await result.text());
+      const body = received.find((item) => (item.body?.metadata as Record<string, unknown>)?.customer_tag === `desktop-${index}`)?.body;
+      assert.ok(body);
+      assert.equal(body.stream, true);
+      assert.equal("thinking" in body, false);
+      assert.equal("output_config" in body, false);
+      assert.deepEqual(body.metadata, {
+        customer_tag: `desktop-${index}`,
+        lemmacomputer_task_binding: taskBinding("lite", effort),
+        lemmacomputer_requested_service_class: "lite",
+        lemmacomputer_requested_reasoning_effort: effort,
+      });
+    }));
+    assert.equal(bindingRequests, 5);
+    const conflicting = await fetch(`http://127.0.0.1:${brokerPort}/v1/messages`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6-20260101", reasoning_effort: "low", output_config: { effort: "high" } }),
+    });
+    assert.equal(conflicting.status, 400);
+    assert.equal(bindingRequests, 5, "conflicting intent never reaches Control or the provider");
     assert.equal(received[1]?.body?.model, "lemmacomputer-auto");
     assert.equal(received[1]?.body?.reasoning_effort, "none");
     assert.equal("think" in received[1]!.body!, false);
@@ -435,7 +495,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       }),
     });
     assert.equal(balancedResponse.status, 400, "workspace policy rejects an unassigned model before Control routing");
-    assert.equal(bindingRequests, 2);
+    assert.equal(bindingRequests, 5);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.match(stderr, /normalized model "<nonstandard>"/);
     assert.doesNotMatch(stderr, /secret-value/);
@@ -451,7 +511,7 @@ test("the loopback broker forwards only the assigned model, scoped credential, a
       body: JSON.stringify({ model: "client-default", max_tokens: 1, messages: [] }),
     });
     assert.equal(afterEnd.status, 400, "headerless inference fails closed after the process identity ends");
-    assert.equal(bindingRequests, 2);
+    assert.equal(bindingRequests, 5);
   } finally {
     child.kill("SIGTERM");
     await once(child, "exit");
