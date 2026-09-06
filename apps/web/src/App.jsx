@@ -6789,13 +6789,12 @@ export function App() {
   }, [activeNav, session?.user.id, selectedSandboxGrantId, homeWorkspaces.map((item) => `${item.id}:${item.grantId}`).join(",")]);
 
   useEffect(() => {
-    if (!session || !workspace?.id) return undefined;
-    const delay = ["provisioning", "restarting", "stopping"].includes(workspaceState)
+    if (!session || homeWorkspaces.length === 0) return undefined;
+    // Control can recover any workspace without a browser action. A stopped or
+    // failed selection must not freeze the rest of the inventory's status.
+    const delay = homeWorkspaces.some((item) => ["provisioning", "restarting", "stopping"].includes(item.state))
       ? 2000
-      : ["ready", "open"].includes(workspaceState)
-        ? 10000
-        : null;
-    if (!delay) return undefined;
+      : 10000;
     let active = true;
     let refreshing = false;
     const refresh = async () => {
@@ -6805,7 +6804,7 @@ export function App() {
         const value = await workspaceApi.list();
         if (!active) return;
         setHomeWorkspaces((current) => reconcileWorkspaceInventory(current, value.workspaces));
-        const refreshed = value.workspaces.find((item) => item.id === workspace.id);
+        const refreshed = value.workspaces.find((item) => item.id === workspace?.id);
         if (refreshed) applyWorkspace(refreshed);
       } catch (error) {
         if (active) showApiError(error);
@@ -6815,7 +6814,7 @@ export function App() {
     };
     const interval = window.setInterval(() => { void refresh(); }, delay);
     return () => { active = false; window.clearInterval(interval); };
-  }, [session?.user.id, workspace?.id, workspaceState]);
+  }, [session?.user.id, workspace?.id, homeWorkspaces.map((item) => `${item.id}:${item.state}`).join(",")]);
 
   useEffect(() => {
     if (!operation || !["approved", "executing"].includes(operation.state)) return undefined;

@@ -493,3 +493,34 @@ test("workspace configuration distinguishes policy-disabled agents from unqualif
   await expect(codexCli).toContainText("Coming soon");
   await expect(codexCli).toContainText("This client is awaiting governance qualification.");
 });
+
+for (const initial of ["failed", "stopped"] as const) {
+  test(`background recovery updates cards while the selected workspace is ${initial}`, async ({ page }) => {
+    let recovered = false;
+    let requests = 0;
+    await page.route("**/api/v1/workspaces", async (route) => {
+      requests++;
+      const response = await route.fetch();
+      const payload = await response.json();
+      await route.fulfill({ response, json: {
+        ...payload,
+        workspaces: payload.workspaces.map((workspace, index) => ({
+          ...workspace,
+          state: recovered && index === 1 ? "ready" : initial,
+          failureCode: !recovered && initial === "failed" ? "WORKSPACE_HEALTHCHECK_FAILED" : null,
+        })),
+      } });
+    });
+    await page.clock.install();
+    await page.goto("/");
+    const cards = page.locator(".workspace-overview-card");
+    await expect(cards).toHaveCount(3);
+    await expect(cards.nth(1)).toContainText(initial === "failed" ? "Needs attention" : "Stopped");
+    recovered = true;
+    const baseline = requests;
+    await page.clock.fastForward(10_000);
+    await expect.poll(() => requests).toBeGreaterThan(baseline);
+    await expect(cards.nth(1)).toContainText("Ready");
+    await expect(cards.first()).toContainText(initial === "failed" ? "Needs attention" : "Stopped");
+  });
+}
