@@ -1,3 +1,4 @@
+import type { FoundryConfiguration, VertexConfiguration, FoundryProviderModelId, VertexProviderModelId } from "@lemmacomputer/contracts";
 import { LemmaComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@lemmacomputer/contracts";
 import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
@@ -13,6 +14,8 @@ export type ProviderSettingInput =
   | ({ provider: "openai" } & DirectProviderInput<OpenAiProviderModelId>)
   | ({ provider: "anthropic" } & DirectProviderInput<AnthropicProviderModelId>)
   | ({ provider: "glm" } & DirectProviderInput<GlmProviderModelId>)
+  | ({ provider: "foundry"; apiKey: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration } & EmissionsSelection)
+  | ({ provider: "vertex"; apiKey: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration } & EmissionsSelection)
   | ({ provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId } & EmissionsSelection);
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
@@ -28,7 +31,9 @@ export type ProviderSettingView = {
   modelOptions: Array<{ id: ProviderModelId; displayName: string; modelCapabilities?: ManagedProviderModelCapabilities }>;
   selectedModelIds: ProviderModelId[];
   deployments: ManagedProviderDeploymentDescriptor[];
-  region: BedrockApiKeyRegion | null;
+  region: string | null;
+  foundry: FoundryConfiguration | null;
+  vertex: VertexConfiguration | null;
   emissionsRegion: ProviderEmissionsRegion | null;
   modelProfileId: BedrockApiKeyModelProfileId | null;
   lastTestedAt: string | null;
@@ -62,6 +67,7 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
   const providerModel = provider !== "bedrock" && modelId ? managedProviderModel(provider, modelId) : null;
   const needsReconfiguration = record?.state === "active" && (
     provider === "bedrock" ? !selection : selectedModelIds.length === 0
+      || ((provider === "foundry" || provider === "vertex") && !record.configuration[provider])
   );
   const configuration = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
   const deployments = record?.state === "active" && !needsReconfiguration && configuration.success
@@ -76,7 +82,9 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
     fingerprint: record?.credentialFingerprint ?? null,
     modelId,
     modelOptions: provider === "bedrock" ? [] : managedProviderModelOptions(provider),
-    region: selection?.region ?? null,
+    region: selection?.region ?? (configuration.success ? configuration.data.vertex?.location : null) ?? null,
+    foundry: configuration.success ? configuration.data.foundry ?? null : null,
+    vertex: configuration.success ? configuration.data.vertex ?? null : null,
     emissionsRegion: configuration.success ? configuration.data.emissionsRegion ?? null : null,
     selectedModelIds,
     deployments,
@@ -88,6 +96,7 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
 };
 const safeProviderErrorCodes = new Set([
   "PROVIDER_KEY_REQUIRED",
+  "PROVIDER_RECONNECTION_REQUIRED",
   "PROVIDER_ROUTE_INTEGRITY_FAILED",
   "PROVIDER_STATIC_CUTOVER_REQUIRED",
   "PROVIDER_NOT_CONFIGURED",
@@ -115,6 +124,7 @@ const safeProviderErrorCodes = new Set([
 ]);
 
 const safeProviderMessage = (code: string, fallback: string) => ({
+  PROVIDER_RECONNECTION_REQUIRED: "Disconnect and reconnect the provider before changing its endpoint, project, location, or existing deployment names",
   PROVIDER_KEY_REQUIRED: "A provider API key is required",
   PROVIDER_ROUTE_INTEGRITY_FAILED: "The existing provider route cannot be safely rotated",
   PROVIDER_STATIC_CUTOVER_REQUIRED: "Restart the installation with retired provider routes removed before configuring this provider",
@@ -127,7 +137,7 @@ const safeProviderMessage = (code: string, fallback: string) => ({
   PROVIDER_GATEWAY_UNAVAILABLE: "The provider gateway is unavailable",
   PROVIDER_CONFIGURATION_FAILED: "The provider configuration could not be validated",
   PROVIDER_TEST_FAILED: "The provider test could not be completed",
-  PROVIDER_CONFIGURATION_INVALID: "The Bedrock selection metadata is invalid; disable and reconnect the provider",
+  PROVIDER_CONFIGURATION_INVALID: "The provider selection metadata is invalid; disable and reconnect the provider",
   PROVIDER_LIFECYCLE_FENCED: "The provider changed state while this operation was running",
   PROVIDER_LIFECYCLE_RECONCILIATION_REQUIRED: "The provider is disabled, but gateway cleanup needs reconciliation",
   BEDROCK_ROUTE_UNAPPROVED: "The selected Bedrock region or inference profile is not approved",
@@ -248,10 +258,21 @@ export class ProviderSettingsService {
           );
         }
       }
+      if (current?.state === "active" && (input.provider === "foundry" || input.provider === "vertex")) {
+        const previous = providerSettingMetadataSchema.safeParse(current.configuration);
+        const unchanged = previous.success && (input.provider === "vertex"
+          ? previous.data.vertex?.projectId === input.vertex.projectId && previous.data.vertex?.location === input.vertex.location
+          : previous.data.foundry?.endpoint === input.foundry.endpoint
+            && input.modelIds.every((id) => !previous.data.foundry?.deployments[id]
+              || previous.data.foundry.deployments[id] === input.foundry.deployments[id]));
+        if (!unchanged) throw new LemmaComputerError("PROVIDER_RECONNECTION_REQUIRED", "Disconnect and reconnect the provider before changing its endpoint, project, location, or existing deployment names", 409);
+      }
       const existingModelIds = current?.state === "active" ? current.modelIds : [];
       let route;
       try {
-        const gatewayInput: ManagedProviderConfiguration = input.provider === "bedrock"
+        const gatewayInput: ManagedProviderConfiguration = input.provider === "foundry" || input.provider === "vertex"
+          ? { ...input, tenantId: actor.tenantId, existingModelIds, configuration: current?.configuration }
+          : input.provider === "bedrock"
           ? {
             tenantId: actor.tenantId,
             provider: input.provider,
@@ -592,7 +613,7 @@ export class ProviderSettingsService {
     if (selection) return selection;
     throw new LemmaComputerError(
       "PROVIDER_CONFIGURATION_INVALID",
-      "The Bedrock selection metadata is invalid; disable and reconnect the provider",
+      "The provider selection metadata is invalid; disable and reconnect the provider",
       409,
     );
   }

@@ -79,6 +79,12 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
       : provider.modelOptions?.[0]?.id
         ? [provider.modelOptions[0].id]
         : []);
+  const [foundry, setFoundry] = useState(provider.foundry ?? { endpoint: "", deployments: {} });
+  const [vertex, setVertex] = useState(provider.vertex ?? { projectId: "", location: "global" });
+  const cloudValid = provider.provider === "foundry"
+    ? /^https:\/\/[a-z0-9-]+\.(?:openai\.azure\.com|services\.ai\.azure\.com)\/openai\/v1\/?$/.test(foundry.endpoint)
+      && selectedModelIds.every((id) => foundry.deployments[id]?.trim())
+    : provider.provider === "vertex" ? Boolean(vertex.projectId.trim()) : true;
   const [region, setRegion] = useState(provider.region ?? "ap-southeast-1");
   const [emissionsRegion, setEmissionsRegion] = useState(provider.emissionsRegion ?? (provider.provider === "bedrock" ? inferredBedrockEmissionsRegion(provider.region ?? "ap-southeast-1") : ""));
   const [modelProfileId, setModelProfileId] = useState(provider.modelProfileId ?? "claude-sonnet-4-5-global");
@@ -87,15 +93,21 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
     : current.filter((id) => id !== modelId));
   const submit = async () => {
     const key = apiKey.trim();
-    if (!key || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)) return;
-    const input = provider.provider === "bedrock"
+    if (!key || !cloudValid || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)) return;
+    setApiKey("");
+    const input = provider.provider === "foundry"
+      ? { apiKey: key, modelIds: selectedModelIds, emissionsRegion,
+        foundry: { ...foundry, deployments: Object.fromEntries(selectedModelIds.map((id) => [id, foundry.deployments[id].trim()])) } }
+      : provider.provider === "vertex"
+      ? { serviceAccountJson: key, modelIds: selectedModelIds, emissionsRegion, vertex }
+      : provider.provider === "bedrock"
       ? { apiKey: key, region, modelProfileId, emissionsRegion }
       : { apiKey: key, modelIds: selectedModelIds, emissionsRegion };
     if (await onSave(provider.provider, input)) onClose();
   };
   return <ModalDialog
     title={`${provider.state === "active" ? "Manage" : "Connect"} ${providerTitle(provider.provider)}`}
-    description={provider.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key remains write-only." : "One provider account key is shared by every enabled model. Choose the approved models this organization may use."}
+    description={provider.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key remains write-only." : "One provider credential is shared by every enabled model. Choose the approved models this organization may use."}
     eyebrow="Provider account"
     labelledBy="provider-account-editor-title"
     onClose={busy ? () => undefined : onClose}
@@ -108,16 +120,25 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
         <span><strong>{option.displayName}</strong><small>{option.id}</small>{providerModelCapabilityLabels(option.modelCapabilities).length > 0 && <small className="provider-model-capabilities">{providerModelCapabilityLabels(option.modelCapabilities).join(" · ")}</small>}</span>
       </label>)}
     </fieldset>}
+    {provider.state === "active" && ["foundry", "vertex"].includes(provider.provider) && <p>Disconnect this account before changing its resource, project, location, or existing deployment names.</p>}
+    {provider.provider === "foundry" && <>
+      <label className="modal-field"><span>Foundry OpenAI v1 endpoint</span><input type="url" value={foundry.endpoint} placeholder="https://your-resource.openai.azure.com/openai/v1/" disabled={busy || provider.state === "active"} onChange={(event) => setFoundry((current) => ({ ...current, endpoint: event.target.value }))} /></label>
+      {selectedModelIds.map((id) => <label className="modal-field" key={id}><span>{id} deployment name</span><input value={foundry.deployments[id] ?? ""} disabled={busy || Boolean(provider.state === "active" && provider.foundry?.deployments?.[id])} onChange={(event) => setFoundry((current) => ({ ...current, deployments: { ...current.deployments, [id]: event.target.value } }))} /><small>Use the deployment name from your Azure resource.</small></label>)}
+    </>}
+    {provider.provider === "vertex" && <>
+      <label className="modal-field"><span>Google Cloud project ID</span><input value={vertex.projectId} disabled={busy || provider.state === "active"} onChange={(event) => setVertex((current) => ({ ...current, projectId: event.target.value }))} /></label>
+      <label className="modal-field"><span>Vertex AI location</span><SelectMenu value={vertex.location} options={["global", "us-central1", "us-east5", "europe-west1", "europe-west4", "asia-southeast1"].map((value) => ({ value, label: value }))} ariaLabel="Vertex AI location" disabled={busy || provider.state === "active"} onValueChange={(location) => setVertex((current) => ({ ...current, location }))} /><small>Global does not pin inference to a single region. Enable each selected model in this project and location.</small></label>
+    </>}
     {provider.provider === "bedrock" && <>
       <label className="modal-field"><span>Approved region</span><SelectMenu value={region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || provider.state === "active"} onValueChange={setRegion} /></label>
       <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || provider.state === "active"} onValueChange={setModelProfileId} /></label>
     </>}
     <label className="modal-field"><span>Estimated serving grid</span><SelectMenu value={emissionsRegion} options={accountingRegionOptions} ariaLabel="Estimated serving grid for emissions" disabled={busy} onValueChange={setEmissionsRegion} /><small>Accounting assumption only; this does not control the provider's inference location.</small></label>
-    <label className="modal-field"><span>{providerTitle(provider.provider)} API key</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Paste the provider API key" disabled={busy} /></label>
+    <label className="modal-field"><span>{provider.provider === "vertex" ? "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={provider.provider === "vertex" ? "Paste the service account JSON credential" : "Paste the provider API key"} disabled={busy} /></label>
     <div className="modal-actions provider-account-actions">
       {provider.state !== "not-configured" && <button className="secondary-button danger-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Disconnect provider</button>}
       <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
-      <button className="primary-button" type="button" disabled={busy || !apiKey.trim() || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)} onClick={submit}>{busy ? "Validating" : provider.state === "active" ? "Apply changes" : "Connect account"}</button>
+      <button className="primary-button" type="button" disabled={busy || !cloudValid || !apiKey.trim() || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)} onClick={submit}>{busy ? "Validating" : provider.state === "active" ? "Apply changes" : "Connect account"}</button>
     </div>
   </ModalDialog>;
 }
@@ -309,7 +330,7 @@ export function ModelsRoutingAdmin({
       writeRouteDraft(draftScope, next);
     }
     setProviderEditor(null);
-    setNotice(`${providerTitle(provider)} was disconnected. Its API key and organization routes were removed.`);
+    setNotice(`${providerTitle(provider)} was disconnected. Its credential and organization routes were removed.`);
   };
   const saveMappingDraft = () => {
     const next = { revisionNote: mappingEditor.revisionNote.trim(), deployments: mappingEditor.deployments.filter(routeIsAssigned) };
@@ -439,7 +460,7 @@ export function ModelsRoutingAdmin({
               <header>
                 <button className="models-routing-expand" type="button" aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${providerTitle(provider.provider)}`} onClick={() => toggleProvider(provider.provider)}>{isCollapsed ? <ChevronRight16Regular aria-hidden="true" /> : <ChevronDown16Regular aria-hidden="true" />}</button>
                 <span className="models-routing-provider-icon"><Bot24Regular aria-hidden="true" /></span>
-                <div><strong>{providerTitle(provider.provider)}</strong><span className={`models-routing-provider-state ${provider.state}`}>{provider.state === "active" && <CheckmarkCircle20Regular aria-hidden="true" />}{providerStateLabel(provider.state)}</span><small>{provider.state === "active" ? `Last tested ${displayDate(provider.lastTestedAt)}` : "One API key is shared across every enabled model."}</small></div>
+                <div><strong>{providerTitle(provider.provider)}</strong><span className={`models-routing-provider-state ${provider.state}`}>{provider.state === "active" && <CheckmarkCircle20Regular aria-hidden="true" />}{providerStateLabel(provider.state)}</span><small>{provider.state === "active" ? `Last tested ${displayDate(provider.lastTestedAt)}` : "One credential is shared across every enabled model."}</small></div>
                 {canManageProviders && <button className="models-routing-text-action" type="button" disabled={providerBusy || provider.state === "needs-reconfiguration"} onClick={() => setProviderEditor(provider)}>{provider.state === "active" ? "Manage account" : "Connect account"}</button>}
               </header>
               {!isCollapsed && deployments.map((deployment) => {

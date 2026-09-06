@@ -1,0 +1,49 @@
+"""Credential-free wire-format checks against the pinned LiteLLM image.
+
+All HTTP uses MockTransport and the container runs without networking. This
+proves translation, not Azure/GCP account authorization or model availability.
+"""
+import asyncio
+import json
+from unittest.mock import patch
+
+import httpx
+import litellm
+from openai import AsyncOpenAI
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+from litellm.llms.vertex_ai.vertex_llm_base import VertexBase
+
+requests = []
+
+def respond(request):
+    requests.append(request)
+    if request.url.host.endswith("openai.azure.com"):
+        return httpx.Response(200, json={"id": "azure-fixture", "object": "chat.completion", "created": 1, "model": "company-gpt", "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}})
+    return httpx.Response(200, json={"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]}, "finishReason": "STOP", "index": 0}], "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3}})
+
+async def fake_token(self, credentials, project_id, custom_llm_provider):
+    assert credentials == '{"fixture":true}'
+    assert project_id == "example-project"
+    return "fixture-google-token", project_id
+
+async def main():
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        azure_client = AsyncOpenAI(api_key="fixture-azure-key", base_url="https://example-resource.openai.azure.com/openai/v1/", http_client=http_client)
+        response = await litellm.acompletion(model="openai/company-gpt", messages=[{"role": "user", "content": "Reply OK"}], api_key="fixture-azure-key", api_base="https://example-resource.openai.azure.com/openai/v1/", client=azure_client)
+        assert response.choices[0].message.content == "OK"
+        assert str(requests[-1].url) == "https://example-resource.openai.azure.com/openai/v1/chat/completions"
+        assert json.loads(requests[-1].content)["model"] == "company-gpt"
+        assert requests[-1].headers["authorization"] == "Bearer fixture-azure-key"
+        handler = AsyncHTTPHandler()
+        await handler.client.aclose()
+        handler.client = http_client
+        with patch.object(VertexBase, "_ensure_access_token_async", fake_token):
+            response = await litellm.acompletion(model="vertex_ai/gemini-2.5-flash", messages=[{"role": "user", "content": "Reply OK"}], vertex_credentials='{"fixture":true}', vertex_project="example-project", vertex_location="global", client=handler)
+        assert response.choices[0].message.content == "OK"
+        assert str(requests[-1].url) == "https://aiplatform.googleapis.com/v1/projects/example-project/locations/global/publishers/google/models/gemini-2.5-flash:generateContent"
+        assert requests[-1].headers["authorization"] == "Bearer fixture-google-token"
+        assert json.loads(requests[-1].content)["contents"][0]["parts"][0]["text"] == "Reply OK"
+    print("Pinned LiteLLM cloud transports passed: Azure OpenAI v1 deployment and Vertex Gemini project/location/auth wire formats (mocked HTTP).")
+
+asyncio.run(main())

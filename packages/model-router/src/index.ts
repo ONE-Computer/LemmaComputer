@@ -8,7 +8,7 @@ export const internalTaskClasses = ["SIMPLE", "MEDIUM", "COMPLEX", "REASONING"] 
 export type ProductServiceClass = typeof productServiceClasses[number];
 export type RequestedServiceClass = typeof requestedServiceClasses[number];
 export type InternalTaskClass = typeof internalTaskClasses[number];
-export type ManagedRoutingProvider = "foundry" | "openai" | "anthropic" | "glm" | "bedrock";
+export type ManagedRoutingProvider = "foundry" | "openai" | "anthropic" | "glm" | "bedrock" | "vertex";
 export type RoutingSignal =
   | "short_request"
   | "code_request"

@@ -62,7 +62,7 @@ applicable suites below:
 | Internal service mTLS | `npm run qualify:internal-mtls` |
 | Customer-managed or hosted configuration contract | `npm run qualify:deployment-profiles` |
 | Remote workspace node or Claude Cowork | `npm run qualify:remote-workspace-node -- config [--cowork]`, then the manual split-node flow when required |
-| Provider settings and credential custody | `npm run qualify:providers` |
+| Provider settings and credential custody | `npm run qualify:providers` (includes pinned Azure/Vertex wire-format checks with mocked HTTP and cloud credential encryption checks) |
 | OAuth renewal and callback behavior | `npm run qualify:oauth` |
 | Microsoft 365 owned tool contracts | `npm run qualify:microsoft365-contracts` |
 | MCP destination isolation | `npm run qualify:mcp-egress` |

@@ -1,6 +1,9 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   approvedBedrockApiKeyModelProfiles,
+  providerSettingMetadataSchema,
+  type FoundryProviderModelId, type VertexProviderModelId,
+  type FoundryConfiguration, type VertexConfiguration,
   bedrockApiKeyModelProfileIdSchema,
   bedrockApiKeyRegionSchema,
   bedrockApiKeyRouteAlias,
@@ -16,7 +19,7 @@ import {
 } from "@lemmacomputer/contracts";
 import type { FetchLike } from "./mtls-fetch.js";
 
-export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
+export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock", "foundry", "vertex"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
 type SelectableProviderName = Exclude<ManagedProviderName, "bedrock">;
 export type ManagedProviderOperation = {
@@ -32,6 +35,8 @@ export type ManagedProviderConfiguration =
   | (ManagedProviderOperation & { provider: "openai"; apiKey: string } & DirectProviderSelection<OpenAiProviderModelId>)
   | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string } & DirectProviderSelection<AnthropicProviderModelId>)
   | (ManagedProviderOperation & { provider: "glm"; apiKey: string } & DirectProviderSelection<GlmProviderModelId>)
+  | (ManagedProviderOperation & { provider: "foundry"; apiKey: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration })
+  | (ManagedProviderOperation & { provider: "vertex"; apiKey: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration })
   | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
 export type ManagedProviderModelCapabilities = {
   vision: boolean;
@@ -48,7 +53,7 @@ export type ManagedProviderDeploymentDescriptor = {
   aliases: string[];
   providerModel: string;
   providerDeployment: string;
-  region: BedrockApiKeyRegion | null;
+  region: string | null;
   providerServiceTier: "standard";
   accessGroup: string;
   primary: boolean;
@@ -73,6 +78,9 @@ export type ManagedProviderModel = {
   model: string;
   vision: boolean;
   modelCapabilities?: ManagedProviderModelCapabilities;
+  foundry?: FoundryConfiguration;
+  vertex?: VertexConfiguration;
+  baseModel?: string;
   bedrock?: { region: BedrockApiKeyRegion; profile: BedrockApiKeyModelProfile };
 };
 
@@ -102,6 +110,14 @@ const toolCapableTextModelCapabilities: ManagedProviderModelCapabilities = Objec
 });
 
 export const managedProviderModelProfiles = Object.freeze({
+  foundry: Object.freeze([
+    { id: "gpt-4.1", displayName: "Azure GPT-4.1", model: "openai/gpt-4.1", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+    { id: "gpt-4.1-mini", displayName: "Azure GPT-4.1 mini", model: "openai/gpt-4.1-mini", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+  ]),
+  vertex: Object.freeze([
+    { id: "gemini-2.5-flash", displayName: "Vertex AI Gemini 2.5 Flash", model: "vertex_ai/gemini-2.5-flash", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+    { id: "gemini-2.5-pro", displayName: "Vertex AI Gemini 2.5 Pro", model: "vertex_ai/gemini-2.5-pro", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
+  ]),
   openai: Object.freeze([
     { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", model: "openai/gpt-5.6-sol", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
     { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", model: "openai/gpt-5.6-terra", vision: true, modelCapabilities: toolCapableVisionModelCapabilities },
@@ -118,6 +134,8 @@ export const managedProviderModelProfiles = Object.freeze({
 } satisfies Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>) as Readonly<Record<SelectableProviderName, ReadonlyArray<ProviderModelProfile>>>;
 
 export const defaultManagedProviderModelIds = Object.freeze({
+  foundry: "gpt-4.1-mini",
+  vertex: "gemini-2.5-flash",
   openai: "gpt-5.6-luna",
   anthropic: "claude-sonnet-4-6",
   glm: "glm-5",
@@ -134,6 +152,8 @@ export const managedProviderModel = (provider: SelectableProviderName, modelId: 
   managedProviderModelProfiles[provider].find((candidate) => candidate.id === modelId) ?? null;
 
 export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
+  foundry: { primaryAlias: "", upstreamModelDisplayName: "Azure AI Foundry deployments" },
+  vertex: { primaryAlias: "", upstreamModelDisplayName: "Google Vertex AI models" },
   openai: {
     primaryAlias: "lemmacomputer-openai",
     upstreamModelDisplayName: managedProviderModel("openai", defaultManagedProviderModelIds.openai)!.displayName,
@@ -153,6 +173,8 @@ export const managedProviderDisplayMetadata: Record<ManagedProviderName, Managed
 };
 
 export const managedProviderModels: Record<ManagedProviderName, readonly ManagedProviderModel[]> = {
+  foundry: [],
+  vertex: [],
   openai: [
     { alias: "lemmacomputer-assistant", model: "openai/gpt-5.6-luna", vision: true },
     { alias: "lemmacomputer-openai", model: "openai/gpt-5.6-luna", vision: true },
@@ -177,8 +199,28 @@ export const managedProviderModelAlias = (provider: SelectableProviderName, mode
 export const managedProviderForAlias = (alias: string) => managedProviderNames.find((provider) => {
   if (managedProviderModels[provider].some((model) => model.alias === alias)) return true;
   if (provider === "bedrock") return false;
-  return managedProviderModelProfiles[provider].some((profile) => managedProviderModelAlias(provider, profile.id) === alias);
+  return managedProviderModelProfiles[provider].some((profile) => {
+    const base = managedProviderModelAlias(provider, profile.id);
+    return base === alias || ((provider === "foundry" || provider === "vertex")
+      && alias.startsWith(`${base}-`) && /^[a-f0-9]{16}$/.test(alias.slice(base.length + 1)));
+  });
 });
+
+const validatedVertexCredentials = (raw: string): string => {
+  try {
+    if (raw.length > 16384) throw new Error();
+    const value = JSON.parse(raw);
+    const allowed = new Set(["type", "project_id", "private_key_id", "private_key", "client_email", "client_id", "auth_uri", "token_uri", "auth_provider_x509_cert_url", "client_x509_cert_url", "universe_domain"]);
+    if (!value || value.type !== "service_account" || Object.keys(value).some((key) => !allowed.has(key))
+      || typeof value.private_key !== "string" || !value.private_key.startsWith("-----BEGIN PRIVATE KEY-----")
+      || typeof value.client_email !== "string" || !/^[a-zA-Z0-9._-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/.test(value.client_email)
+      || value.token_uri !== "https://oauth2.googleapis.com/token"
+      || (value.universe_domain !== undefined && value.universe_domain !== "googleapis.com")) throw new Error();
+    return JSON.stringify(value);
+  } catch {
+    throw new LemmaComputerError("PROVIDER_CREDENTIAL_REJECTED", "A valid Google service account JSON credential is required", 400);
+  }
+};
 
 const tenantRouteHash = (tenantId: string) => createHash("sha256")
   .update(`lemmacomputer:provider-route:${tenantId}`)
@@ -192,13 +234,20 @@ export const tenantManagedModelAccessGroup = (tenantId: string, alias: string) =
 
 const managedProviderAliases = [
   ...managedProviderNames.flatMap((provider) => managedProviderModels[provider].map(({ alias }) => alias)),
-  ...(["openai", "anthropic", "glm"] as const).flatMap((provider) =>
+  ...(["openai", "anthropic", "glm", "foundry", "vertex"] as const).flatMap((provider) =>
     managedProviderModelProfiles[provider].map(({ id }) => managedProviderModelAlias(provider, id)),
   ),
 ];
 
-export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup: string) =>
-  managedProviderAliases.find((alias) => tenantManagedModelAccessGroup(tenantId, alias) === accessGroup) ?? null;
+export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup: string) => {
+  const known = managedProviderAliases.find((alias) => tenantManagedModelAccessGroup(tenantId, alias) === accessGroup);
+  if (known) return known;
+  const prefix = `ocp-${tenantRouteHash(tenantId)}-`;
+  if (!accessGroup.startsWith(prefix)) return null;
+  const alias = accessGroup.slice(prefix.length);
+  const provider = managedProviderForAlias(alias);
+  return provider === "foundry" || provider === "vertex" ? alias : null;
+};
 
 const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `lemmacomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
 const tenantModelId = (tenantId: string, provider: ManagedProviderName, alias: string) => `lemmacomputer-provider-${tenantRouteHash(tenantId)}-${provider}-${alias}`;
@@ -233,6 +282,30 @@ const templatesFor = (
   provider: ManagedProviderName,
   configuration: ProviderSettingMetadata,
 ): ProviderModelTemplate[] => {
+  if (provider === "foundry" || provider === "vertex") {
+    const parsed = providerSettingMetadataSchema.safeParse(configuration);
+    if (!parsed.success || !configuration[provider]) return [];
+    return managedProviderSelectedModelIds(provider, configuration).map((id, index) => {
+      const profile = managedProviderModel(provider, id)!;
+      // A new cloud target must not inherit an old deployment's pricing or
+      // routing approval even when the base model and credential slot match.
+      const binding = provider === "foundry"
+        ? [configuration.foundry!.endpoint.replace(/\/$/, ""), configuration.foundry!.deployments[id as FoundryProviderModelId]]
+        : [configuration.vertex!.projectId, configuration.vertex!.location];
+      const bindingHash = createHash("sha256").update(JSON.stringify(binding)).digest("hex").slice(0, 16);
+      const alias = `${managedProviderModelAlias(provider, id)}-${bindingHash}`;
+      return {
+        alias, upstreamModelId: id, displayName: profile.displayName,
+        primary: index === 0, legacyAlias: false,
+        model: {
+          alias, vision: profile.vision, modelCapabilities: profile.modelCapabilities,
+          model: provider === "foundry" ? `openai/${configuration.foundry!.deployments[id as FoundryProviderModelId]}` : profile.model,
+          baseModel: provider === "foundry" ? `foundry/${id}` : profile.model,
+          ...(provider === "foundry" ? { foundry: configuration.foundry } : { vertex: configuration.vertex }),
+        },
+      };
+    });
+  }
   if (provider === "bedrock") {
     const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => (
       candidate.id === configuration.modelProfileId
@@ -310,10 +383,10 @@ export const managedProviderDeploymentDescriptors = (
       modelId: template.upstreamModelId,
       displayName: template.displayName,
       aliases: [...new Set([template.alias, ...compatibilityAliases])],
-      providerModel: template.model.model,
+      providerModel: template.model.baseModel ?? template.model.model,
       providerDeployment: accessGroup,
       ...(configuration.modelLimits?.[accessGroup] ? { modelLimits: configuration.modelLimits[accessGroup] } : {}),
-      region: template.model.bedrock?.region ?? null,
+      region: template.model.bedrock?.region ?? template.model.vertex?.location ?? null,
       providerServiceTier: "standard",
       accessGroup,
       primary: template.primary,
@@ -355,7 +428,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
-    const apiKey = input.apiKey.trim();
+    const apiKey = input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey.trim();
     if (!apiKey) throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
     const configuration = this.configurationFor(input);
     const models = templatesFor(input.provider, configuration);
@@ -407,7 +480,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         deployment.credentialName = candidateCredentialName;
         candidates.push({ id: await this.createModel(deployment), alias: deployment.alias });
       }
-      await this.probe(candidates[0]!.alias, undefined, input.provider);
+      for (const candidate of (input.provider === "foundry" || input.provider === "vertex" ? candidates : candidates.slice(0, 1))) await this.probe(candidate.alias, undefined, input.provider);
 
       if (existing.length > 0) {
         await this.replaceCredential(credentialName, input, apiKey);
@@ -500,6 +573,14 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   private configurationFor(input: ManagedProviderConfiguration): ProviderSettingMetadata {
+    if (input.provider === "foundry" || input.provider === "vertex") {
+      const parsed = providerSettingMetadataSchema.safeParse({
+        modelIds: input.modelIds,
+        ...(input.provider === "foundry" ? { foundry: input.foundry } : { vertex: input.vertex }),
+      });
+      if (!parsed.success) throw new LemmaComputerError("PROVIDER_CONFIGURATION_INVALID", "The provider configuration is invalid", 400);
+      return parsed.data;
+    }
     if (input.provider !== "bedrock") {
       if (input.modelIds) {
         return { modelIds: managedProviderSelectedModelIds(input.provider, { modelIds: input.modelIds }) };
@@ -609,7 +690,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     return {
       credential_name: name,
       credential_info: { provider: input.provider, managed_by: "lemmacomputer", ...bedrock },
-      credential_values: { api_key: apiKey },
+      credential_values: input.provider === "vertex" ? { vertex_credentials: apiKey } : { api_key: apiKey },
     };
   }
 
@@ -625,6 +706,11 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       litellm_params: {
         model: deployment.model.model,
         litellm_credential_name: deployment.credentialName,
+        ...(deployment.model.foundry ? { api_base: deployment.model.foundry.endpoint } : {}),
+        ...(deployment.model.vertex ? {
+          vertex_project: deployment.model.vertex.projectId,
+          vertex_location: deployment.model.vertex.location,
+        } : {}),
         ...(bedrock ? {
           aws_region_name: bedrock.region,
           timeout: 60,
@@ -636,10 +722,10 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         id: deployment.id,
         lemmacomputer_provider: deployment.provider,
         lemmacomputer_provider_account_id: deployment.credentialName,
-        lemmacomputer_base_model: deployment.model.model,
+        lemmacomputer_base_model: deployment.model.baseModel ?? deployment.model.model,
         lemmacomputer_deployment_id: deployment.accessGroups[0],
         lemmacomputer_provider_service_tier: "standard",
-        ...(bedrock ? { lemmacomputer_region: bedrock.region } : {}),
+        ...(bedrock ? { lemmacomputer_region: bedrock.region } : deployment.model.vertex ? { lemmacomputer_region: deployment.model.vertex.location } : {}),
         ...(deployment.upstreamModelId ? { lemmacomputer_upstream_model_id: deployment.upstreamModelId } : {}),
         lemmacomputer_primary_deployment: deployment.primary,
         lemmacomputer_legacy_alias: deployment.legacyAlias,

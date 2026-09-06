@@ -98,6 +98,13 @@ Governed service-class workspace keys receive `lemmacomputer-auto`; Control's
 signed decision selects the Bedrock deployment only when its region, profile,
 rate card, Team policy, health, and budget are eligible.
 
+### Azure AI Foundry and Google Vertex AI
+
+The `foundry` and `vertex` managed providers use the same tenant-scoped dynamic
+credential/model lifecycle. See [Cloud model providers](cloud-model-providers.md)
+for supported models, configuration fields, current API formats, and the boundary
+between mocked compatibility checks and live cloud qualification.
+
 ## Add an MCP connector
 
 An MCP connector crosses identity, OAuth, tool-schema, and side-effect

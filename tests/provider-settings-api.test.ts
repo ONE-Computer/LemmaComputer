@@ -107,7 +107,9 @@ class FakeProviderAdministration implements ProviderAdministrationGateway {
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
     if (this.failure) throw this.failure;
     this.configured.push(input);
-    const configuration = input.provider === "bedrock"
+    const configuration = input.provider === "foundry" ? { modelIds: input.modelIds, foundry: input.foundry }
+      : input.provider === "vertex" ? { modelIds: input.modelIds, vertex: input.vertex }
+      : input.provider === "bedrock"
       ? { region: input.region, modelProfileId: input.modelProfileId }
       : input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId };
     const additionalModelIds = input.provider !== "bedrock" && input.modelIds
@@ -317,7 +319,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
       url: "/v1/admin/provider-settings",
       headers: testHeaders,
     });
-    assert.deepEqual(listed.json().providers.map((provider: { provider: string }) => provider.provider), ["openai", "anthropic", "glm", "bedrock"]);
+    assert.deepEqual(listed.json().providers.map((provider: { provider: string }) => provider.provider), ["openai", "anthropic", "glm", "bedrock", "foundry", "vertex"]);
     assert.deepEqual(
       listed.json().providers.map((provider: {
         provider: string;
@@ -333,6 +335,8 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
         { provider: "anthropic", primaryAlias: "lemmacomputer-claude", upstreamModelDisplayName: "Anthropic Claude Sonnet 4.6" },
         { provider: "glm", primaryAlias: "lemmacomputer-glm", upstreamModelDisplayName: "Z.ai GLM-5" },
         { provider: "bedrock", primaryAlias: "lemmacomputer-bedrock", upstreamModelDisplayName: "Amazon Bedrock Claude Sonnet 4.5" },
+        { provider: "foundry", primaryAlias: "", upstreamModelDisplayName: "Azure AI Foundry deployments" },
+        { provider: "vertex", primaryAlias: "", upstreamModelDisplayName: "Google Vertex AI models" },
       ],
     );
     const listedGlm = listed.json().providers.find((provider: { provider: string }) => provider.provider === "glm");
@@ -973,4 +977,40 @@ test("provider settings accept model sets and expose concrete deployment descrip
   } finally {
     await app.close();
   }
+});
+
+test("cloud provider API preserves cloud configuration, masks credentials, and fences target changes", async () => {
+  const store = new MemoryProviderSettingsStore();
+  const gateway = new FakeProviderAdministration();
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    customerProductAuthentication: authentication(administrator),
+    agentBridgeSecret: "cloud-provider-test-agent-bridge-secret-at-least-32-characters",
+    providerSettingsStore: store, providerAdministration: gateway,
+  });
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=admin" };
+  try {
+    for (const provider of ["foundry", "vertex"] as const) {
+      const payload = provider === "foundry"
+        ? { apiKey: "azure-fixture-write-only", modelIds: ["gpt-4.1"], foundry: { endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" } } }
+        : { serviceAccountJson: "google-fixture-write-only", modelIds: ["gemini-2.5-flash"], vertex: { projectId: "example-project", location: "global" } };
+      const response = await app.inject({ method: "PUT", url: `/v1/admin/provider-settings/${provider}`, headers, payload });
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().provider.state, "active");
+      assert.equal(response.json().provider.deployments.length, 1);
+      assert.deepEqual(response.json().provider[provider], payload[provider]);
+      assert.equal(response.body.includes("fixture-write-only"), false);
+      assert.equal(JSON.stringify(await store.getProviderSetting(administrator.tenantId, provider)).includes("fixture-write-only"), false);
+      assert.equal(await store.getProviderSetting("other-organization", provider), null);
+      const changed = provider === "foundry"
+        ? { ...payload, foundry: { ...payload.foundry, endpoint: "https://other-resource.openai.azure.com/openai/v1/" } }
+        : { ...payload, vertex: { ...payload.vertex, projectId: "other-project" } };
+      const rejected = await app.inject({ method: "PUT", url: `/v1/admin/provider-settings/${provider}`, headers, payload: changed });
+      assert.equal(rejected.statusCode, 409);
+      assert.equal(rejected.json().error.code, "PROVIDER_RECONNECTION_REQUIRED");
+      const rotated = await app.inject({ method: "PUT", url: `/v1/admin/provider-settings/${provider}`, headers, payload });
+      assert.equal(rotated.statusCode, 200);
+      const unsafe = await app.inject({ method: "PUT", url: `/v1/admin/provider-settings/${provider}`, headers, payload: { ...payload, tenantId: "other-organization" } });
+      assert.equal(unsafe.statusCode, 400);
+    }
+  } finally { await app.close(); }
 });

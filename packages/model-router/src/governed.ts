@@ -18,7 +18,7 @@ export type RequestedServiceClass = (typeof requestedServiceClasses)[number];
 export type InternalTaskClass = (typeof internalTaskClasses)[number];
 export type RoutingMode = (typeof routingModes)[number];
 export type ManagedRoutingProvider =
-  "foundry" | "openai" | "anthropic" | "glm" | "bedrock";
+  "foundry" | "openai" | "anthropic" | "glm" | "bedrock" | "vertex";
 export const productReasoningEfforts = ["auto", "low", "medium", "high"] as const;
 export const resolvedReasoningEfforts = ["low", "medium", "high"] as const;
 export type ProductReasoningEffort = (typeof productReasoningEfforts)[number];

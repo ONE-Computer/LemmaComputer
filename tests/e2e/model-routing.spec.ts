@@ -265,3 +265,47 @@ test("legacy model-route URLs resolve to the unified maintenance surface", async
   await expect(page.getByRole("heading", { name: "Models & routing", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "AI control plane" }).getByRole("button", { name: "Models & routing" })).toHaveAttribute("aria-current", "page");
 });
+
+for (const providerName of ["foundry", "vertex"] as const) {
+  test(`administrator connects ${providerName} with its cloud configuration and write-only credential`, async ({ page }) => {
+    const displayName = providerName === "foundry" ? "Azure AI Foundry" : "Google Vertex AI";
+    const modelId = providerName === "foundry" ? "gpt-4.1" : "gemini-2.5-flash";
+    const provider = { provider: providerName, state: "not-configured", selectedModelIds: [], deployments: [], modelOptions: [{ id: modelId, displayName: modelId }], emissionsRegion: "sg" };
+    let submitted: Record<string, any> | undefined;
+    await page.route("**/api/v1/admin/provider-settings", (route) => route.fulfill({ json: { providers: [provider] } }));
+    await page.route(`**/api/v1/admin/provider-settings/${providerName}`, async (route) => {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({ json: { provider: { ...provider, state: "active", selectedModelIds: [modelId] } } });
+    });
+    await page.goto("/?view=ai-control-plane&section=models-providers");
+    await page.getByRole("button", { name: "Connect account" }).click();
+    const dialog = page.getByRole("dialog", { name: `Connect ${displayName}` });
+    await expect(dialog.getByRole("button", { name: "Connect account" })).toBeDisabled();
+    const secret = providerName === "foundry" ? "azure-browser-fixture-key" : '{"type":"service_account","private_key":"browser-fixture-only"}';
+    if (providerName === "foundry") {
+      await dialog.getByLabel("Foundry OpenAI v1 endpoint").fill("https://example-resource.openai.azure.com/openai/v1/");
+      await dialog.getByLabel("gpt-4.1 deployment name").fill("company-gpt");
+      await dialog.getByLabel("Azure AI Foundry API key").fill(secret);
+    } else {
+      await dialog.getByLabel("Google Cloud project ID").fill("example-project");
+      await dialog.getByLabel("Google service account JSON").fill(secret);
+      await expect(dialog).toContainText("Global does not pin inference to a single region");
+    }
+    await expect(dialog.locator('input[type="password"]')).toHaveValue(secret);
+    await page.screenshot({ path: `/tmp/${providerName}-provider-editor.png`, fullPage: true });
+    await dialog.getByRole("button", { name: "Connect account" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect.poll(() => submitted?.modelIds).toEqual([modelId]);
+    if (providerName === "foundry") {
+      expect(submitted?.foundry).toEqual({ endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" } });
+      expect(submitted?.apiKey).toBe(secret);
+    } else {
+      expect(submitted?.vertex).toEqual({ projectId: "example-project", location: "global" });
+      expect(submitted?.serviceAccountJson).toBe(secret);
+      expect(submitted?.apiKey).toBeUndefined();
+    }
+    await expect(page.locator("body")).not.toContainText(secret);
+    await page.getByRole("button", { name: "Manage account" }).click();
+    await expect(page.getByRole("dialog").locator('input[type="password"]')).toHaveValue("");
+  });
+}

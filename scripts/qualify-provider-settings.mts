@@ -6,6 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
 import { defaultManagedProviderModelIds, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore, PostgresProviderSettingsStore, PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
+import { resolve } from "node:path";
+import { ProviderSettingsService } from "../apps/control-api/src/provider-settings.js";
 import { createControlServer } from "../apps/control-api/src/server.js";
 
 type JsonObject = Record<string, unknown>;
@@ -52,6 +54,11 @@ const asObject = (value: unknown): JsonObject => value && typeof value === "obje
 const stringified = (value: unknown) => JSON.stringify(value);
 
 const main = async () => {
+  const transport = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "python",
+    "--mount", `type=bind,src=${resolve("scripts/qualify-cloud-provider-transports.py")},dst=/qualification.py,readonly`,
+    "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True",
+    "ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e", "/qualification.py"], { stdio: "inherit" });
+  if (transport.status !== 0) throw new Error("Pinned cloud provider wire-format qualification failed");
   const runId = randomBytes(8).toString("hex");
   const [litellmPort, providerProbePort, fixturePort, controlPostgresPort] = await Promise.all([
     availablePort(), availablePort(), availablePort(), availablePort(),
@@ -78,7 +85,10 @@ const main = async () => {
   const bedrockRotatedKey = "bedrock-provider-qualification-alpha-rotated-" + randomBytes(18).toString("hex");
   const bedrockReconfiguredKey = "bedrock-provider-qualification-alpha-reconfigured-" + randomBytes(18).toString("hex");
   const rejectedBedrockKey = "bedrock-provider-qualification-rejected-" + randomBytes(18).toString("hex");
-  const sentinels = [
+  const azureKey = "azure-qualification-" + randomBytes(18).toString("hex");
+  const googleKey = "google-qualification-" + randomBytes(18).toString("hex");
+  const googleJson = JSON.stringify({ type: "service_account", client_email: "fixture@example-project.iam.gserviceaccount.com", private_key: `-----BEGIN PRIVATE KEY-----\n${googleKey}\n-----END PRIVATE KEY-----`, token_uri: "https://oauth2.googleapis.com/token" });
+  const sentinels = [azureKey, googleKey,
     alphaKey, alphaRotatedKey, alphaReconfiguredKey, betaKey, rejectedKey, providerProbeKey,
     bedrockKey, bedrockRotatedKey, bedrockReconfiguredKey, rejectedBedrockKey,
   ];
@@ -201,7 +211,7 @@ const main = async () => {
     assert.equal(generated.response.ok, true, "LiteLLM must issue a group-scoped virtual key");
     return key;
   };
-  const modelCall = async (key: string, model = "lemmacomputer-assistant") => json(`${litellmUrl}/chat/completions`, {
+  const modelCall = async (key: string, model: string) => json(`${litellmUrl}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -256,6 +266,20 @@ const main = async () => {
       }));
     } finally {
       await controlPool.end();
+    }
+
+    // Cloud custody uses real pinned LiteLLM credential/model administration
+    // and PostgreSQL encryption. Inference probes are mocked: wire translation
+    // is checked independently above and real cloud authorization is not claimed.
+    const cloudAdministration = new LiteLLMProviderAdministration({ adminUrl: litellmUrl, masterKey, credentialSecret, requestTimeoutMs: 30000,
+      adminFetch: async (url, init) => new URL(String(url)).pathname === "/chat/completions"
+        ? Response.json({ choices: [{ message: { content: "OK" } }] }) : fetch(url, init),
+    });
+    const cloudService = new ProviderSettingsService(providerSettingsStore, cloudAdministration);
+    for (const tenantId of [alphaTenant, betaTenant]) {
+      const actor = { tenantId, userId: "administrator", roles: ["admin" as const], email: "admin@example.test", displayName: "Qualification", tenantDisplayName: "Qualification", tenantKind: "organization" as const, identity: { tenantId, subjectId: "administrator", audience: "lemmacomputer-control" } };
+      await cloudService.configure(actor, { provider: "foundry", apiKey: azureKey, modelIds: ["gpt-4.1"], foundry: { endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" } } });
+      await cloudService.configure(actor, { provider: "vertex", apiKey: googleJson, modelIds: ["gemini-2.5-flash"], vertex: { projectId: "example-project", location: "global" } });
     }
 
     const alphaConfigured = await configure(alphaTenant, alphaKey, "alpha-configure");
@@ -315,18 +339,19 @@ const main = async () => {
     }
     const alphaBedrockRoutes = routes.filter((route) => alphaBedrockRecord.modelIds.includes(String(asObject(route.model_info).id)));
     assert.equal(alphaBedrockRoutes.length, managedProviderModels.bedrock.length, "Pinned LiteLLM must hold the tenant Bedrock route");
-    assert.equal(alphaBedrockRoutes[0]!.model_name, "lemmacomputer-bedrock");
+    assert.equal(alphaBedrockRoutes[0]!.model_name, alphaBedrockGroup);
     assert.deepEqual(asObject(alphaBedrockRoutes[0]!.model_info).access_groups, [alphaBedrockGroup]);
 
     const alphaVirtualKey = await issueScopedKey(alphaGroup, "alpha");
     const betaVirtualKey = await issueScopedKey(betaGroup, "beta");
     const alphaBedrockVirtualKey = await issueScopedKey(alphaBedrockGroup, "bedrock-alpha");
-    assert.equal((await modelCall(alphaVirtualKey)).response.ok, true, "An alpha scoped virtual key must reach alpha dynamic model route");
-    assert.equal((await modelCall(betaVirtualKey)).response.ok, true, "A beta scoped virtual key must reach beta dynamic model route");
+    assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, true, "An alpha scoped virtual key must reach alpha dynamic model route");
+    assert.equal((await modelCall(betaVirtualKey, betaGroup)).response.ok, true, "A beta scoped virtual key must reach beta dynamic model route");
+    assert.equal((await modelCall(alphaVirtualKey, betaGroup)).response.ok, false, "An alpha scoped key must not address beta tenant route");
     assert.equal((await modelCall(alphaVirtualKey, betaRecord.modelIds[0]!)).response.ok, false, "An alpha scoped key must not address beta internal model identifier");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "A Bedrock scoped virtual key must reach only its tenant Bedrock route");
-    assert.equal((await modelCall(alphaVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "An OpenAI scoped key must not reach the Bedrock route");
-    assert.equal((await modelCall(alphaBedrockVirtualKey)).response.ok, false, "A Bedrock scoped key must not reach an OpenAI route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, alphaBedrockGroup)).response.ok, true, "A Bedrock scoped virtual key must reach only its tenant Bedrock route");
+    assert.equal((await modelCall(alphaVirtualKey, alphaBedrockGroup)).response.ok, false, "An OpenAI scoped key must not reach the Bedrock route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, alphaGroup)).response.ok, false, "A Bedrock scoped key must not reach an OpenAI route");
 
     const beforeRejectedRotation = processSignature();
     const rejected = await configure(alphaTenant, rejectedKey, "alpha-rejected-rotation");
@@ -335,7 +360,7 @@ const main = async () => {
     assert.equal(processSignature(), beforeRejectedRotation, "Rejected rotation must not restart the pinned LiteLLM process");
     const alphaAfterRejectedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "openai");
     assert.deepEqual(alphaAfterRejectedRotation?.modelIds, alphaRecord.modelIds, "Rejected rotation must preserve the prior active route metadata");
-    assert.equal((await modelCall(alphaVirtualKey)).response.ok, true, "Rejected rotation must preserve the prior working scoped route");
+    assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, true, "Rejected rotation must preserve the prior working scoped route");
 
     const beforeAcceptedRotation = processSignature();
     const acceptedRotation = await configure(alphaTenant, alphaRotatedKey, "alpha-accepted-rotation");
@@ -344,7 +369,7 @@ const main = async () => {
     assert.equal(processSignature(), beforeAcceptedRotation, "Accepted rotation must not restart the pinned LiteLLM process");
     const alphaAfterAcceptedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "openai");
     assert.deepEqual(alphaAfterAcceptedRotation?.modelIds, alphaRecord.modelIds, "Accepted rotation must preserve the tenant's stable public model identifiers");
-    assert.equal((await modelCall(alphaVirtualKey)).response.ok, true, "Accepted rotation must preserve the existing scoped virtual key route");
+    assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, true, "Accepted rotation must preserve the existing scoped virtual key route");
 
     const disabled = await control.inject({
       method: "POST",
@@ -352,20 +377,20 @@ const main = async () => {
       headers: headersFor(alphaTenant, "alpha-disable"),
     });
     assert.equal(disabled.statusCode, 200, "Control must disable an active provider route without restart");
-    assert.equal((await modelCall(alphaVirtualKey)).response.ok, false, "A disabled provider must fail the old scoped virtual key closed");
-    assert.equal((await modelCall(betaVirtualKey)).response.ok, true, "Disabling alpha must not affect beta's isolated provider route");
+    assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, false, "A disabled provider must fail the old scoped virtual key closed");
+    assert.equal((await modelCall(betaVirtualKey, betaGroup)).response.ok, true, "Disabling alpha must not affect beta's isolated provider route");
 
     const alphaReconfigured = await configure(alphaTenant, alphaReconfiguredKey, "alpha-reconfigure");
     assert.equal(alphaReconfigured.statusCode, 200, "Control must reconfigure a disabled provider route without restart");
     const alphaReconfiguredVirtualKey = await issueScopedKey(alphaGroup, "alpha-reconfigured");
-    assert.equal((await modelCall(alphaReconfiguredVirtualKey)).response.ok, true, "A reconfigured provider must issue a working scoped route");
+    assert.equal((await modelCall(alphaReconfiguredVirtualKey, alphaGroup)).response.ok, true, "A reconfigured provider must issue a working scoped route");
     const deleted = await control.inject({
       method: "DELETE",
       url: "/v1/admin/provider-settings/openai",
       headers: headersFor(alphaTenant, "alpha-delete"),
     });
     assert.equal(deleted.statusCode, 200, "Control must delete an active provider route without restart");
-    assert.equal((await modelCall(alphaReconfiguredVirtualKey)).response.ok, false, "A deleted provider must fail the scoped virtual key closed");
+    assert.equal((await modelCall(alphaReconfiguredVirtualKey, alphaGroup)).response.ok, false, "A deleted provider must fail the scoped virtual key closed");
 
     const beforeRejectedBedrockRotation = processSignature();
     const rejectedBedrock = await configureBedrock(alphaTenant, rejectedBedrockKey, "bedrock-alpha-rejected-rotation");
@@ -376,7 +401,7 @@ const main = async () => {
     const alphaBedrockAfterRejectedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "bedrock");
     assert.deepEqual(alphaBedrockAfterRejectedRotation?.modelIds, alphaBedrockRecord.modelIds, "Rejected Bedrock rotation must preserve the prior active route metadata");
     assert.deepEqual(alphaBedrockAfterRejectedRotation?.configuration, alphaBedrockRecord.configuration, "Rejected Bedrock rotation must preserve its approved selection");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "Rejected Bedrock rotation must preserve the prior scoped route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, alphaBedrockGroup)).response.ok, true, "Rejected Bedrock rotation must preserve the prior scoped route");
 
     const beforeAcceptedBedrockRotation = processSignature();
     const acceptedBedrockRotation = await configureBedrock(alphaTenant, bedrockRotatedKey, "bedrock-alpha-accepted-rotation");
@@ -386,7 +411,7 @@ const main = async () => {
     const alphaBedrockAfterAcceptedRotation = await providerSettingsStore.getProviderSetting(alphaTenant, "bedrock");
     assert.deepEqual(alphaBedrockAfterAcceptedRotation?.modelIds, alphaBedrockRecord.modelIds, "Accepted Bedrock rotation must preserve stable model identifiers");
     assert.deepEqual(alphaBedrockAfterAcceptedRotation?.configuration, bedrockSelection, "Accepted Bedrock rotation must preserve the approved selection");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "Accepted Bedrock rotation must preserve the scoped virtual key route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, alphaBedrockGroup)).response.ok, true, "Accepted Bedrock rotation must preserve the scoped virtual key route");
 
     const bedrockDisabled = await control.inject({
       method: "POST",
@@ -394,20 +419,20 @@ const main = async () => {
       headers: headersFor(alphaTenant, "bedrock-alpha-disable"),
     });
     assert.equal(bedrockDisabled.statusCode, 200, "Control must disable an active Bedrock route without restart");
-    assert.equal((await modelCall(alphaBedrockVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "A disabled Bedrock provider must fail the old scoped virtual key closed");
-    assert.equal((await modelCall(betaVirtualKey)).response.ok, true, "Disabling Bedrock must not affect another tenant provider route");
+    assert.equal((await modelCall(alphaBedrockVirtualKey, alphaBedrockGroup)).response.ok, false, "A disabled Bedrock provider must fail the old scoped virtual key closed");
+    assert.equal((await modelCall(betaVirtualKey, betaGroup)).response.ok, true, "Disabling Bedrock must not affect another tenant provider route");
 
     const alphaBedrockReconfigured = await configureBedrock(alphaTenant, bedrockReconfiguredKey, "bedrock-alpha-reconfigure");
     assert.equal(alphaBedrockReconfigured.statusCode, 200, "Control must reconfigure a disabled Bedrock provider route without restart");
     const alphaBedrockReconfiguredVirtualKey = await issueScopedKey(alphaBedrockGroup, "bedrock-alpha-reconfigured");
-    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "lemmacomputer-bedrock")).response.ok, true, "A reconfigured Bedrock provider must issue a working scoped route");
+    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, alphaBedrockGroup)).response.ok, true, "A reconfigured Bedrock provider must issue a working scoped route");
     const bedrockDeleted = await control.inject({
       method: "DELETE",
       url: "/v1/admin/provider-settings/bedrock",
       headers: headersFor(alphaTenant, "bedrock-alpha-delete"),
     });
     assert.equal(bedrockDeleted.statusCode, 200, "Control must delete an active Bedrock route without restart");
-    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, "lemmacomputer-bedrock")).response.ok, false, "A deleted Bedrock provider must fail the scoped virtual key closed");
+    assert.equal((await modelCall(alphaBedrockReconfiguredVirtualKey, alphaBedrockGroup)).response.ok, false, "A deleted Bedrock provider must fail the scoped virtual key closed");
 
     const reads = [
       alphaConfigured.payload,

@@ -184,7 +184,32 @@ export const glmProviderModelIds = ["glm-5", "glm-5.2"] as const;
 export const glmProviderModelIdSchema = z.enum(glmProviderModelIds);
 export type GlmProviderModelId = z.infer<typeof glmProviderModelIdSchema>;
 
+export const foundryProviderModelIds = ["gpt-4.1", "gpt-4.1-mini"] as const;
+export const foundryProviderModelIdSchema = z.enum(foundryProviderModelIds);
+export type FoundryProviderModelId = z.infer<typeof foundryProviderModelIdSchema>;
+export const vertexProviderModelIds = ["gemini-2.5-flash", "gemini-2.5-pro"] as const;
+export const vertexProviderModelIdSchema = z.enum(vertexProviderModelIds);
+export type VertexProviderModelId = z.infer<typeof vertexProviderModelIdSchema>;
+
+// Resource endpoints only: never accept an arbitrary gateway, project API,
+// credential-bearing URL, or inference path supplied by an administrator.
+export const foundryEndpointSchema = z.string().trim().regex(
+  /^https:\/\/[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)\/openai\/v1\/?$/,
+);
+export const foundryConfigurationSchema = z.strictObject({
+  endpoint: foundryEndpointSchema,
+  deployments: z.partialRecord(foundryProviderModelIdSchema, z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/)),
+});
+export const vertexConfigurationSchema = z.strictObject({
+  projectId: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
+  location: z.enum(["global", "us-central1", "us-east5", "europe-west1", "europe-west4", "asia-southeast1"]),
+});
+export type FoundryConfiguration = z.infer<typeof foundryConfigurationSchema>;
+export type VertexConfiguration = z.infer<typeof vertexConfigurationSchema>;
+
 export const providerModelIds = [
+  ...foundryProviderModelIds,
+  ...vertexProviderModelIds,
   ...openAiProviderModelIds,
   ...anthropicProviderModelIds,
   ...glmProviderModelIds,
@@ -214,6 +239,8 @@ export const modelLimitsSchema = z.strictObject({
   path: ["outputTokens"],
 });
 export const providerSettingMetadataSchema = z.strictObject({
+  foundry: foundryConfigurationSchema.optional(),
+  vertex: vertexConfigurationSchema.optional(),
   modelLimits: z.record(z.string().min(1).max(300), modelLimitsSchema).optional(),
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
@@ -222,6 +249,15 @@ export const providerSettingMetadataSchema = z.strictObject({
   emissionsRegion: providerEmissionsRegionSchema.optional(),
 }).refine(
   (value) => {
+    if (value.foundry && value.vertex) return false;
+    if (value.foundry || value.vertex) {
+      if (value.region || value.modelProfileId || value.modelId || !value.modelIds?.length) return false;
+      const allowed = value.foundry ? foundryProviderModelIds : vertexProviderModelIds;
+      if (!value.modelIds.every((id) => (allowed as readonly string[]).includes(id))) return false;
+      if (value.foundry && (Object.keys(value.foundry.deployments).length !== value.modelIds.length
+        || !value.modelIds.every((id) => value.foundry!.deployments[id as FoundryProviderModelId]))) return false;
+      return true;
+    }
     const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;
     return hasBedrockSelection
       ? value.region !== undefined && value.modelProfileId !== undefined

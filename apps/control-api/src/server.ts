@@ -1,3 +1,4 @@
+import { foundryConfigurationSchema, vertexConfigurationSchema, foundryProviderModelIdSchema, vertexProviderModelIdSchema } from "@lemmacomputer/contracts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
@@ -459,7 +460,7 @@ const createConnectorSchema = z.strictObject({
 const connectorIconSchema = z.strictObject({
   iconDataUrl: z.string().max(350000).nullable(),
 });
-const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock"]);
+const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock", "foundry", "vertex"]);
 const saveProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
   emissionsRegion: providerEmissionsRegionSchema.optional(),
@@ -486,6 +487,16 @@ const saveGlmProviderApiKeySchema = z.union([
       .refine(uniqueModelIds, "Provider model selections must be unique"),
   }),
 ]);
+const saveFoundryProviderSchema = saveProviderApiKeySchema.extend({
+  modelIds: z.array(foundryProviderModelIdSchema).min(1).max(2).refine(uniqueModelIds),
+  foundry: foundryConfigurationSchema,
+});
+const saveVertexProviderSchema = z.strictObject({
+  serviceAccountJson: z.string().trim().min(1).max(16384),
+  modelIds: z.array(vertexProviderModelIdSchema).min(1).max(2).refine(uniqueModelIds),
+  vertex: vertexConfigurationSchema,
+  emissionsRegion: providerEmissionsRegionSchema.optional(),
+}).transform(({ serviceAccountJson, ...value }) => ({ ...value, apiKey: serviceAccountJson }));
 const saveBedrockProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096),
   region: bedrockApiKeyRegionSchema,
@@ -4416,7 +4427,11 @@ export function createControlServer(
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
-    const input = provider === "bedrock"
+    const input = provider === "foundry"
+      ? { provider, ...saveFoundryProviderSchema.parse(request.body ?? {}) }
+      : provider === "vertex"
+      ? { provider, ...saveVertexProviderSchema.parse(request.body ?? {}) }
+      : provider === "bedrock"
       ? { provider, ...saveBedrockProviderApiKeySchema.parse(request.body ?? {}) }
       : provider === "openai"
       ? { provider, ...saveOpenAiProviderApiKeySchema.parse(request.body ?? {}) }

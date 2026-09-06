@@ -272,3 +272,32 @@ test("PostgreSQL disable epoch blocks a configure from another Control instance 
     await Promise.all([firstStore.close(), secondStore.close(), pool.end()]);
   }
 });
+
+test("PostgreSQL cloud provider settings enforce read-safe metadata and retain tenant ownership", { skip: !connectionString }, async () => {
+  const tenantId = `cloud-provider-test-${randomUUID()}`;
+  const pool = new pg.Pool({ connectionString });
+  const store = PostgresProviderSettingsStore.fromConnectionString(connectionString!);
+  try {
+    await pool.query("INSERT INTO tenants(id,external_tenant_id,display_name) VALUES($1,$1,'Cloud provider test')", [tenantId]);
+    for (const provider of ["foundry", "vertex"] as const) {
+      const configuration = provider === "foundry"
+        ? { modelIds: ["gpt-4.1" as const], foundry: { endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "my-deployment" } } }
+        : { modelIds: ["gemini-2.5-flash" as const], vertex: { projectId: "example-project", location: "global" as const } };
+      await store.saveProviderSetting({ tenantId, provider, modelIds: [`deployment-${provider}`], configuration, state: "active", credentialFingerprint: "fp_cloudtest", lastTestedAt: new Date(), lastErrorCode: null, updatedBy: "admin" });
+      assert.deepEqual((await store.getProviderSetting(tenantId, provider))?.configuration, configuration);
+      assert.equal(await store.getProviderSetting(`${tenantId}-other`, provider), null);
+      for (const unsafe of [
+        { ...configuration, apiKey: "plaintext-secret" },
+        { ...configuration, [provider]: { ...configuration[provider], credentials: "plaintext-secret" } },
+        { ...configuration, [provider]: {} },
+        { ...configuration, modelIds: ["gpt-4.1", "gemini-2.5-flash"] },
+        { ...configuration, modelIds: [configuration.modelIds[0], configuration.modelIds[0]] },
+      ]) {
+        await assert.rejects(pool.query("UPDATE provider_settings SET configuration=$3::jsonb WHERE tenant_id=$1 AND provider=$2", [tenantId, provider, JSON.stringify(unsafe)]), /provider_settings_configuration_safe_check/);
+      }
+    }
+  } finally {
+    await pool.query("DELETE FROM tenants WHERE id=$1", [tenantId]);
+    await Promise.all([store.close(), pool.end()]);
+  }
+});

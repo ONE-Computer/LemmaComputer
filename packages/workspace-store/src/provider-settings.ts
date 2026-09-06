@@ -1,7 +1,7 @@
 import { providerSettingMetadataSchema, type ProviderSettingMetadata } from "@lemmacomputer/contracts";
 import pg from "pg";
 
-export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock"] as const;
+export const managedProviderNames = ["openai", "anthropic", "glm", "bedrock", "foundry", "vertex"] as const;
 export type ManagedProviderName = typeof managedProviderNames[number];
 export type ProviderSettingState = "active" | "disabled";
 export type ProviderLifecycleDesiredState = "active" | "disabled" | "deleted";

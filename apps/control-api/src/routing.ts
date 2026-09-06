@@ -21,6 +21,7 @@ import { UsageTaskBindingAuthority } from "./usage-ledger.js";
 const serviceClass = z.enum(["lite", "balanced", "pro"]);
 const managedProvider = z.enum([
   "foundry",
+  "vertex",
   "openai",
   "anthropic",
   "glm",
