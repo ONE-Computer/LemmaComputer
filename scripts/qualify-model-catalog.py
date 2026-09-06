@@ -16,9 +16,10 @@ async def main():
     proxy.master_key = "catalog-qualification-master"
     headers = {"Authorization": "Bearer " + proxy.master_key}
     source = {"vertex_ai/claude-sonnet-5": {"mode": "chat", "supports_function_calling": True, "max_input_tokens": 200000},
-              "openai/gpt-future": {"mode": "chat", "input_cost_per_token": 0.000002},
+              "openai/gpt-future": {"mode": "chat", "input_cost_per_token": 0.0000002},
               "azure_ai/claude-opus-5": {"mode": "chat", "supports_function_calling": True, "max_input_tokens": 200000}}
     catalog.PUBLIC_CATALOG = source
+    assert catalog.metadata("openai", "gpt-future")["inputUsdPerMillion"] == 0.2
     azure = catalog.metadata("foundry", "claude-opus-5")
     assert azure["source"] == "litellm" and azure["capabilities"]["tools"] is True and azure["contextTokens"] == 200000
     async def no_refresh():

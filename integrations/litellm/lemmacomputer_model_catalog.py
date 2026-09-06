@@ -12,6 +12,7 @@ import re
 import secrets
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 
 MODEL_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,179}$")
 AZURE_ENDPOINT = re.compile(r"^https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1/?$")
@@ -76,7 +77,7 @@ def metadata(provider, model_id, raw=None):
     for key, source in (("inputUsdPerMillion", "input_cost_per_token"), ("outputUsdPerMillion", "output_cost_per_token")):
         value = info.get(source)
         if isinstance(value, (int, float)) and 0 <= value < 1000:
-            result[key] = value * 1000000
+            result[key] = float(Decimal(str(value)) * 1000000)
     return result
 
 
