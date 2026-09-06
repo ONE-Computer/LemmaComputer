@@ -17,6 +17,13 @@ requests = []
 
 def respond(request):
     requests.append(request)
+    if request.url.host == "aiplatform.googleapis.com" and "/projects/" not in request.url.path:
+        body = json.loads(request.content)
+        part = {"functionCall": {"name": "record_ok", "args": {}}} if body.get("tools") else {"text": "OK"}
+        payload = {"candidates": [{"content": {"role": "model", "parts": [part]}, "finishReason": "STOP", "index": 0}], "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 1, "totalTokenCount": 3}}
+        if "streamGenerateContent" in request.url.path:
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, text="data: " + json.dumps(payload) + "\n\n")
+        return httpx.Response(200, json=payload)
     if "/anthropic" in request.url.path or "publishers/anthropic/" in request.url.path:
         return httpx.Response(200, json={"id": "claude-fixture", "type": "message", "role": "assistant", "model": "company-primary", "content": [{"type": "text", "text": "OK"}], "stop_reason": "end_turn", "usage": {"input_tokens": 2, "output_tokens": 1}})
     if request.url.host.endswith("openai.azure.com") or "endpoints/openapi" in request.url.path:
@@ -45,6 +52,20 @@ async def main():
         handler = AsyncHTTPHandler()
         await handler.client.aclose()
         handler.client = http_client
+        google_key_params = dict(model="gemini/gemini-2.5-flash", api_key="fixture-google-api-key",
+                                 api_base="https://aiplatform.googleapis.com/v1/publishers/google",
+                                 messages=[{"role": "user", "content": "Reply OK"}], client=handler)
+        with patch.object(VertexBase, "get_access_token_async", side_effect=AssertionError("API keys must not use ambient OAuth")):
+            response = await litellm.acompletion(**google_key_params)
+            assert response.choices[0].message.content == "OK"
+            assert str(requests[-1].url) == "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent"
+            assert requests[-1].headers["x-goog-api-key"] == "fixture-google-api-key"
+            assert "authorization" not in requests[-1].headers
+            response = await litellm.acompletion(**google_key_params, stream=True, tools=[{"type": "function", "function": {"name": "record_ok", "parameters": {"type": "object", "properties": {}}}}], tool_choice="required")
+            chunks = [chunk async for chunk in response]
+            assert any(chunk.choices and chunk.choices[0].delta.tool_calls for chunk in chunks)
+            assert str(requests[-1].url) == "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
+            assert requests[-1].headers["x-goog-api-key"] == "fixture-google-api-key"
         with patch.object(VertexBase, "_ensure_access_token_async", fake_token), patch.object(VertexBase, "_ensure_access_token", return_value=("fixture-google-token", "example-project")):
             response = await litellm.acompletion(model="vertex_ai/gemini-2.5-flash", messages=[{"role": "user", "content": "Reply OK"}], vertex_credentials='{"fixture":true}', vertex_project="example-project", vertex_location="global", client=handler)
         assert response.choices[0].message.content == "OK"

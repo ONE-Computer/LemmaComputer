@@ -156,6 +156,10 @@ const main = async () => {
           body.litellm_params.api_base = "http://gateway-fixture:4200";
           return fetch(url, { ...init, body: JSON.stringify(body) });
         }
+        if (String(body.litellm_params?.model).startsWith("gemini/")) {
+          body.litellm_params.api_base = "http://gateway-fixture:4200/v1/publishers/google";
+          return fetch(url, { ...init, body: JSON.stringify(body) });
+        }
       }
       return fetch(url, init);
     },
@@ -280,6 +284,13 @@ const main = async () => {
     });
     assert.ok(azureCallbackRoute.modelIds.length > 0,
       "Azure Provider Settings must qualify through the production callback without entering the OpenAI Responses bridge");
+    const googleCallbackRoute = await callbackProviderAdministration.configureManagedProvider({
+      tenantId: `tenant-google-key-probe-${runId}`, provider: "vertex", apiKey: googleKey,
+      modelIds: ["gemini-2.5-flash-lite"], existingModelIds: [],
+      vertex: { authMethod: "api-key", location: "global" },
+      modelMetadata: { "gemini-2.5-flash-lite": { displayName: "Gemini Flash Lite", source: "litellm", capabilities: { tools: true, streaming: true } } },
+    });
+    assert.ok(googleCallbackRoute.modelIds.length > 0, "Google API-key probes must pass the production callback, streaming, and function calls");
 
     const migrationStore = PostgresWorkspaceStore.fromConnectionString(controlDatabaseUrl);
     try {

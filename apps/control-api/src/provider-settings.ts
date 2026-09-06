@@ -293,6 +293,7 @@ export class ProviderSettingsService {
         const previous = providerSettingMetadataSchema.safeParse(current.configuration);
         const unchanged = previous.success && (input.provider === "vertex"
           ? previous.data.vertex?.projectId === input.vertex.projectId && previous.data.vertex?.location === input.vertex.location
+            && (previous.data.vertex?.authMethod ?? "service-account") === (input.vertex.authMethod ?? "service-account")
           : previous.data.foundry?.endpoint === input.foundry.endpoint
             && input.modelIds.every((id) => !previous.data.foundry?.deployments[id]
               || previous.data.foundry.deployments[id] === input.foundry.deployments[id]

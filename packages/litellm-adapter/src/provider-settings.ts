@@ -315,7 +315,7 @@ const templatesFor = (
       // routing approval even when the base model and credential slot match.
       const binding = provider === "foundry"
         ? [configuration.foundry!.endpoint.replace(/\/$/, ""), configuration.foundry!.deployments[id as FoundryProviderModelId], ...(configuration.foundry!.protocols?.[id] === "anthropic" ? ["anthropic"] : [])]
-        : [configuration.vertex!.projectId, configuration.vertex!.location];
+        : [configuration.vertex!.projectId, configuration.vertex!.location, ...(configuration.vertex!.authMethod === "api-key" ? ["api-key"] : [])];
       const bindingHash = createHash("sha256").update(JSON.stringify(binding)).digest("hex").slice(0, 16);
       const alias = `${managedProviderModelAlias(provider, id)}-${bindingHash}`;
       return {
@@ -323,7 +323,8 @@ const templatesFor = (
         primary: index === 0, legacyAlias: false,
         model: {
           alias, vision: profile.vision, modelCapabilities: profile.modelCapabilities,
-          model: provider === "foundry" ? `${configuration.foundry!.protocols?.[id] === "anthropic" ? "anthropic" : "azure"}/${configuration.foundry!.deployments[id]}` : profile.model,
+          model: provider === "foundry" ? `${configuration.foundry!.protocols?.[id] === "anthropic" ? "anthropic" : "azure"}/${configuration.foundry!.deployments[id]}`
+            : configuration.vertex!.authMethod === "api-key" ? `gemini/${id}` : profile.model,
           metadata: configuration.modelMetadata?.[id],
           baseModel: provider === "foundry" ? `foundry/${id}` : profile.model,
           ...(provider === "foundry" ? { foundry: { ...configuration.foundry!, endpoint: configuration.foundry!.protocols?.[id] === "anthropic" ? configuration.foundry!.endpoint.replace(/\/openai\/v1\/?$/, "/anthropic") : configuration.foundry!.endpoint } } : { vertex: configuration.vertex }),
@@ -471,7 +472,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   async discoverModels(input: ManagedProviderOperation & { apiKey?: string; modelIds?: string[] }): Promise<ProviderModelCatalog> {
-    const apiKey = input.apiKey && input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey;
+    const apiKey = input.apiKey && input.provider === "vertex" && input.configuration?.vertex?.authMethod !== "api-key" ? validatedVertexCredentials(input.apiKey) : input.apiKey;
     const result = await this.call("/lemmacomputer/model-catalog", { method: "POST", body: {
       tenantId: input.tenantId, provider: input.provider, configuration: { ...(input.configuration?.foundry ? { foundry: { endpoint: input.configuration.foundry.endpoint } } : {}), ...(input.configuration?.vertex ? { vertex: input.configuration.vertex } : {}), ...(input.configuration?.region ? { region: input.configuration.region } : {}) }, useSavedCredential: input.useSavedCredential === true,
       ...(apiKey ? { apiKey } : {}), ...(input.modelIds ? { modelIds: input.modelIds } : {}),
@@ -482,7 +483,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
   }
 
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
-    const apiKey = input.apiKey ? (input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey.trim()) : "";
+    const apiKey = input.apiKey ? (input.provider === "vertex" && input.vertex.authMethod !== "api-key" ? validatedVertexCredentials(input.apiKey) : input.apiKey.trim()) : "";
     if (!apiKey && (!input.existingModelIds.length || !input.credentialFingerprint)) throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
     const configuration = this.configurationFor(input);
     if (input.modelMetadata) configuration.modelMetadata = input.modelMetadata;
@@ -684,7 +685,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     return { id: await this.createModel(deployment), created: true };
   }
 
-  private async probe(model: string, accessGroup: string | undefined, provider: ManagedProviderName, capabilities?: ManagedProviderModelCapabilities) {
+  private async probeRequest(model: string, accessGroup: string | undefined, provider: ManagedProviderName, path: string, body: JsonObject) {
     const credential = `sk-ocp-${randomBytes(24).toString("base64url")}`;
     try {
       const grant = await this.call("/key/generate", {
@@ -706,27 +707,31 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         },
       });
       if (!grant.ok) throw this.providerFailure(grant.status, "route", provider, grant.payload);
-      const result = await this.call(provider === "openai" ? "/responses" : "/chat/completions", {
-        method: "POST",
-        credential,
-        body: provider === "openai"
-          ? { model, input: "Reply with OK." }
-          : { model, messages: [{ role: "user", content: "Reply with OK." }] },
-      });
-      if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
-      if (capabilities?.tools || capabilities?.streaming) {
-        const features = await this.call("/chat/completions", { method: "POST", credential, body: {
-          model, stream: true, messages: [{ role: "user", content: capabilities.tools ? "Call record_ok once with an empty object." : "Reply with OK." }],
-          ...(capabilities.tools ? { tools: [{ type: "function", function: { name: "record_ok", description: "Record a successful connection check", parameters: { type: "object", properties: {}, additionalProperties: false } } }], tool_choice: "required" } : {}),
-        } });
-        const events = asObject(features.payload).events;
-        const choices = Array.isArray(events) ? events.flatMap((event) => Array.isArray(asObject(event).choices) ? asObject(event).choices as unknown[] : []) : [];
-        const completed = choices.some((choice) => typeof asObject(choice).finish_reason === "string");
-        const toolCalled = choices.some((choice) => (asObject(asObject(choice).delta).tool_calls as unknown[] | undefined)?.some((call) => asObject(asObject(call).function).name === "record_ok"));
-        if (!features.ok || !completed || (capabilities.tools && !toolCalled)) throw new LemmaComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The model did not pass its streaming or tool-call compatibility check", 422);
-      }
+      return await this.call(path, { method: "POST", credential, body });
     } finally {
       await this.call("/key/delete", { method: "POST", body: { keys: [credential] } }).catch(() => undefined);
+    }
+  }
+
+  private async probe(model: string, accessGroup: string | undefined, provider: ManagedProviderName, capabilities?: ManagedProviderModelCapabilities) {
+    const result = await this.probeRequest(model, accessGroup, provider, provider === "openai" ? "/responses" : "/chat/completions",
+      provider === "openai" ? { model, input: "Reply with OK." }
+        : { model, messages: [{ role: "user", content: "Reply with OK." }] });
+    if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
+    if (capabilities?.tools || capabilities?.streaming) {
+      // LiteLLM releases concurrency asynchronously after returning a response.
+      // Each check owns a separate bounded key so consecutive requests cannot
+      // collide with the previous check's still-pending accounting callback.
+      const features = await this.probeRequest(model, accessGroup, provider, "/chat/completions", {
+        model, stream: true, messages: [{ role: "user", content: capabilities.tools ? "Call record_ok once with an empty object." : "Reply with OK." }],
+        ...(capabilities.tools ? { tools: [{ type: "function", function: { name: "record_ok", description: "Record a successful connection check", parameters: { type: "object", properties: {}, additionalProperties: false } } }], tool_choice: "required" } : {}),
+      });
+      if (!features.ok) throw this.providerFailure(features.status, "credential", provider, features.payload);
+      const events = asObject(features.payload).events;
+      const choices = Array.isArray(events) ? events.flatMap((event) => Array.isArray(asObject(event).choices) ? asObject(event).choices as unknown[] : []) : [];
+      const completed = choices.some((choice) => typeof asObject(choice).finish_reason === "string");
+      const toolCalled = choices.some((choice) => (asObject(asObject(choice).delta).tool_calls as unknown[] | undefined)?.some((call) => asObject(asObject(call).function).name === "record_ok"));
+      if (!completed || (capabilities.tools && !toolCalled)) throw new LemmaComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The model did not pass its streaming or tool-call compatibility check", 422);
     }
   }
 
@@ -770,7 +775,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     return {
       credential_name: name,
       credential_info: { provider: input.provider, managed_by: "lemmacomputer", ...bedrock },
-      credential_values: input.provider === "vertex" ? { vertex_credentials: apiKey } : { api_key: apiKey },
+      credential_values: input.provider === "vertex" && input.vertex.authMethod !== "api-key" ? { vertex_credentials: apiKey } : { api_key: apiKey },
     };
   }
 
@@ -793,7 +798,11 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           api_base: deployment.model.foundry.endpoint.replace(/\/openai\/v1\/?$/, ""),
           api_version: "v1",
         } : { api_base: deployment.model.foundry.endpoint } : {}),
-        ...(deployment.model.vertex ? {
+        ...(deployment.model.vertex?.authMethod === "api-key" ? {
+          // Use Gemini's API-key transport with a fixed Google Cloud endpoint,
+          // never the Google AI Studio default or an administrator-supplied URL.
+          api_base: "https://aiplatform.googleapis.com/v1/publishers/google",
+        } : deployment.model.vertex ? {
           vertex_project: deployment.model.vertex.projectId,
           vertex_location: deployment.model.vertex.location,
         } : {}),

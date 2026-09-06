@@ -75,7 +75,9 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
   const [apiKey, setApiKey] = useState("");
   const [selectedModelIds, setSelectedModelIds] = useState(provider.selectedModelIds?.length ? provider.selectedModelIds : provider.modelId ? [provider.modelId] : []);
   const [foundry, setFoundry] = useState(provider.foundry ?? { endpoint: "", deployments: {}, protocols: {} });
-  const [vertex, setVertex] = useState(provider.vertex ?? { projectId: "", location: "global" });
+  const [vertex, setVertex] = useState(provider.vertex ?? { authMethod: "api-key", location: "global" });
+  const googleApiKey = provider.provider === "vertex" && vertex.authMethod === "api-key";
+  const credentialField = provider.provider === "vertex" && !googleApiKey ? "serviceAccountJson" : "apiKey";
   const [region, setRegion] = useState(provider.region ?? "ap-southeast-1");
   const [emissionsRegion, setEmissionsRegion] = useState(provider.emissionsRegion ?? (provider.provider === "bedrock" ? inferredBedrockEmissionsRegion(region) : ""));
   const [catalog, setCatalog] = useState(null);
@@ -89,7 +91,8 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
   const cloudValid = provider.provider === "foundry"
     ? /^https:\/\/[a-z0-9-]+\.(?:openai\.azure\.com|services\.ai\.azure\.com)\/openai\/v1\/?$/.test(foundry.endpoint)
       && selectedModelIds.every((id) => foundry.deployments[id]?.trim())
-    : provider.provider === "vertex" ? /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(vertex.projectId) && /^(global|[a-z]{2,12}-[a-z]{2,16}[0-9])$/.test(vertex.location)
+    : provider.provider === "vertex" ? googleApiKey ? selectedModelIds.every((id) => /^gemini-[a-zA-Z0-9._-]+$/.test(id))
+      : /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(vertex.projectId) && /^(global|[a-z]{2,12}-[a-z]{2,16}[0-9])$/.test(vertex.location)
     : provider.provider === "bedrock" ? /^[a-z]{2}-[a-z]+-[0-9]$/.test(region) : true;
   const discover = async (refresh = false, withDraft = false) => {
     const generation = ++discoveryGeneration.current;
@@ -97,9 +100,9 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
     setCatalogError("");
     const input = { refresh };
     if (withDraft) {
-      if (apiKey.trim()) input[provider.provider === "vertex" ? "serviceAccountJson" : "apiKey"] = apiKey.trim();
+      if (apiKey.trim()) input[credentialField] = apiKey.trim();
       if (provider.provider === "foundry" && foundry.endpoint) input.foundry = { endpoint: foundry.endpoint, deployments: {} };
-      if (provider.provider === "vertex" && vertex.projectId) input.vertex = vertex;
+      if (provider.provider === "vertex" && (googleApiKey || vertex.projectId)) input.vertex = vertex;
       if (provider.provider === "bedrock") input.region = region;
     }
     try {
@@ -122,7 +125,7 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
     for (const id of selectedModelIds) if (!all.has(id)) all.set(id, { id, displayName: id, source: "manual", capabilities: {} });
     return [...all.values()].sort((a, b) => Number(selectedModelIds.includes(b.id)) - Number(selectedModelIds.includes(a.id)) || a.displayName.localeCompare(b.displayName));
   }, [catalog, provider.modelOptions, selectedModelIds]);
-  const matching = options.filter((model) => `${model.id} ${model.displayName} ${model.publisher ?? ""}`.toLowerCase().includes(search.toLowerCase()) && (capabilityFilter === "all" || (model.capabilities ?? model.modelCapabilities)?.[capabilityFilter] === true));
+  const matching = options.filter((model) => (!googleApiKey || /^gemini-[a-zA-Z0-9._-]+$/.test(model.id)) && `${model.id} ${model.displayName} ${model.publisher ?? ""}`.toLowerCase().includes(search.toLowerCase()) && (capabilityFilter === "all" || (model.capabilities ?? model.modelCapabilities)?.[capabilityFilter] === true));
   const toggleModel = (id, selected) => {
     setSelectedModelIds((current) => selected ? [...new Set([...current, id])].slice(0, 64) : current.filter((item) => item !== id));
     if (selected && provider.provider === "foundry") setFoundry((current) => ({ ...current,
@@ -130,10 +133,10 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
       protocols: { ...current.protocols, [id]: current.protocols?.[id] ?? (id.startsWith("claude-") ? "anthropic" : "openai") },
     }));
   };
-  const validCustomId = /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,179}$/.test(customId.trim()) && !customId.includes("..") && !customId.includes("//") && !["__proto__", "constructor", "prototype"].includes(customId.trim());
+  const validCustomId = /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,179}$/.test(customId.trim()) && !customId.includes("..") && !customId.includes("//") && !["__proto__", "constructor", "prototype"].includes(customId.trim()) && (!googleApiKey || /^gemini-[a-zA-Z0-9._-]+$/.test(customId.trim()));
   const submit = async () => {
     if ((!apiKey.trim() && !active) || !cloudValid || !emissionsRegion || !selectedModelIds.length) return;
-    const credential = apiKey.trim() ? { [provider.provider === "vertex" ? "serviceAccountJson" : "apiKey"]: apiKey.trim() } : {};
+    const credential = apiKey.trim() ? { [credentialField]: apiKey.trim() } : {};
     const input = { ...credential, modelIds: selectedModelIds, emissionsRegion };
     if (provider.provider === "foundry") input.foundry = { endpoint: foundry.endpoint,
       deployments: Object.fromEntries(selectedModelIds.map((id) => [id, foundry.deployments[id].trim()])),
@@ -148,11 +151,18 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
     eyebrow="Provider account" labelledBy="provider-account-editor-title" onClose={busy ? () => undefined : onClose}>
     {provider.provider === "foundry" && <label className="modal-field"><span>Foundry OpenAI v1 endpoint</span><input type="url" value={foundry.endpoint} placeholder="https://your-resource.openai.azure.com/openai/v1/" disabled={busy || active} onChange={(event) => setFoundry((current) => ({ ...current, endpoint: event.target.value }))} /><small>Claude deployments use the Anthropic endpoint on this resource.</small></label>}
     {provider.provider === "vertex" && <>
-      <label className="modal-field"><span>Google Cloud project ID</span><input value={vertex.projectId} disabled={busy || active} onChange={(event) => setVertex((current) => ({ ...current, projectId: event.target.value }))} /></label>
-      <label className="modal-field"><span>Vertex AI location</span><input value={vertex.location} disabled={busy || active} placeholder="global or us-east5" onChange={(event) => setVertex((current) => ({ ...current, location: event.target.value }))} /><small>Enter a supported location for your selected models. Global does not pin inference to one region.</small></label>
+      <label className="modal-field"><span>Authentication method</span><SelectMenu ariaLabel="Google authentication method" value={vertex.authMethod ?? "service-account"} disabled={busy || active} options={[{ value: "api-key", label: "API key" }, { value: "service-account", label: "Service-account JSON" }]} onValueChange={(authMethod) => {
+        setVertex(authMethod === "api-key" ? { authMethod, location: "global" } : { authMethod, projectId: "", location: "global" });
+        setApiKey(""); setSelectedModelIds([]); setCustomId("");
+        discoveryGeneration.current += 1; setCatalogBusy(false); setCatalogError("");
+      }} /></label>
+      {googleApiKey ? <p>Use a Google Cloud Agent Platform API key. This connection supports Gemini through the global endpoint; the key determines the billing project. Partner models require service-account authentication.</p> : <>
+        <label className="modal-field"><span>Google Cloud project ID</span><input value={vertex.projectId ?? ""} disabled={busy || active} onChange={(event) => setVertex((current) => ({ ...current, projectId: event.target.value }))} /></label>
+        <label className="modal-field"><span>Google Cloud location</span><input value={vertex.location} disabled={busy || active} placeholder="global or us-east5" onChange={(event) => setVertex((current) => ({ ...current, location: event.target.value }))} /><small>Enter a supported location for your selected models. Global does not pin inference to one region.</small></label>
+      </>}
     </>}
     {provider.provider === "bedrock" && <label className="modal-field"><span>Bedrock region</span><input value={region} disabled={busy || active} placeholder="ap-southeast-1" onChange={(event) => setRegion(event.target.value)} /><small>Use a model ID or inference profile ID supported by Bedrock Converse in this region.</small></label>}
-    <label className="modal-field"><span>{provider.provider === "vertex" ? "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={active ? "Leave blank to keep the saved credential" : "Paste the provider credential"} disabled={busy} /></label>
+    <label className="modal-field"><span>{provider.provider === "vertex" ? googleApiKey ? "Google Cloud API key" : "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={active ? "Leave blank to keep the saved credential" : "Paste the provider credential"} disabled={busy} /></label>
     <div className="provider-catalog-toolbar provider-catalog-controls">
       <label className="modal-field"><span>Search models</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search model name or publisher" /></label>
       <label className="modal-field"><span>Reported capabilities</span><SelectMenu value={capabilityFilter} options={[{ value: "all", label: "All models" }, { value: "tools", label: "Function tools" }, { value: "vision", label: "Vision" }, { value: "streaming", label: "Streaming" }]} ariaLabel="Filter models by capability" onValueChange={setCapabilityFilter} /></label>

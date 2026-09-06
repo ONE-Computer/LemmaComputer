@@ -108,6 +108,19 @@ export function createGatewayFixture() {
     };
   });
 
+  app.post("/v1/publishers/google/models/:action", async (request, reply) => {
+    counters.model += 1;
+    if (String(request.headers["x-goog-api-key"] ?? "").includes("provider-qualification-rejected")) {
+      return reply.code(403).send({ error: { message: "fixture rejected Google API key" } });
+    }
+    const body = request.body as Record<string, unknown>;
+    const part = body.tools ? { functionCall: { name: "record_ok", args: {} } } : { text: "OK" };
+    const payload = { candidates: [{ content: { role: "model", parts: [part] }, finishReason: "STOP", index: 0 }],
+      usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 } };
+    if (request.url.includes(":streamGenerateContent")) return reply.type("text/event-stream").send(`data: ${JSON.stringify(payload)}\n\n`);
+    return payload;
+  });
+
   app.post("/model/:modelId/invoke", async (request, reply) => {
     counters.model += 1;
     counters.bedrockModel += 1;

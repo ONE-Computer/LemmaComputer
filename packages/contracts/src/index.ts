@@ -228,9 +228,12 @@ export const foundryConfigurationSchema = z.strictObject({
   deployments: z.record(foundryProviderModelIdSchema, z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/)),
 });
 export const vertexConfigurationSchema = z.strictObject({
-  projectId: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
+  authMethod: z.enum(["service-account", "api-key"]).optional(),
+  projectId: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/).optional(),
   location: z.string().regex(/^(global|[a-z]{2,12}-[a-z]{2,16}[0-9])$/),
-});
+}).refine((value) => value.authMethod === "api-key"
+  ? value.location === "global" && value.projectId === undefined
+  : Boolean(value.projectId), "API keys use the global endpoint; service accounts require a project ID");
 export type FoundryConfiguration = z.infer<typeof foundryConfigurationSchema>;
 export type VertexConfiguration = z.infer<typeof vertexConfigurationSchema>;
 
@@ -279,6 +282,7 @@ export const providerSettingMetadataSchema = z.strictObject({
   (value) => {
     if (value.foundry && value.vertex) return false;
     if (value.foundry || value.vertex) {
+      if (value.vertex?.authMethod === "api-key" && !value.modelIds?.every((id) => /^gemini-[a-zA-Z0-9._-]+$/.test(id))) return false;
       if (value.region || value.modelProfileId || value.modelId || !value.modelIds?.length) return false;
       if (value.foundry?.protocols && !Object.keys(value.foundry.protocols).every((id) => value.modelIds!.includes(id))) return false;
       if (value.foundry && (Object.keys(value.foundry.deployments).length !== value.modelIds.length

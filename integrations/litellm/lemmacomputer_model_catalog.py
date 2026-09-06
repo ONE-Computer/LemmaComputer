@@ -126,6 +126,14 @@ async def discover(provider, config, credentials, model_ids=None):
     import httpx
     await refresh_metadata()
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if provider == "vertex" and config.get("vertex", {}).get("authMethod") == "api-key":
+        # The API-key endpoint has no account model-list API. Do not exchange
+        # this key for OAuth credentials or send it to publisher discovery.
+        ids = model_ids if model_ids is not None else registry_models(provider)
+        models = [dict(metadata(provider, mid), observedAt=now) for mid in ids
+                  if re.fullmatch(r"gemini-[a-zA-Z0-9._-]+", mid)]
+        return {"models": models, "fetchedAt": now, "source": "litellm",
+                "warning": "Showing Gemini catalog metadata. API-key access is checked when you apply your selection."}
     if model_ids is not None:
         return {"models": [dict(metadata(provider, mid), observedAt=now) for mid in model_ids], "fetchedAt": now, "source": "litellm"}
     models = {mid: metadata(provider, mid) for mid in registry_models(provider)}
@@ -220,7 +228,8 @@ def register(proxy):
             if data.get("apiKey"):
                 if not isinstance(data["apiKey"], str) or len(data["apiKey"]) > 16384:
                     raise ValueError()
-                credentials = {"vertex_credentials" if provider == "vertex" else "api_key": data["apiKey"]}
+                google_key = (data.get("configuration") or {}).get("vertex", {}).get("authMethod") == "api-key"
+                credentials = {"vertex_credentials" if provider == "vertex" and not google_key else "api_key": data["apiKey"]}
             elif ids is None and data.get("useSavedCredential") is True:
                 # Read the current encrypted row, not a possibly stale worker cache.
                 import base64

@@ -1036,3 +1036,35 @@ test("catalog API requires provider permission and uses server tenant identity",
     assert.equal(calls.length, 1);
   } finally { await app.close(); }
 });
+
+test("Google API-key intake enforces the authentication mode and never persists the key in Control", async () => {
+  const store = new MemoryProviderSettingsStore();
+  const gateway = new FakeProviderAdministration();
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    customerProductAuthentication: authentication(administrator),
+    agentBridgeSecret: "google-api-key-test-agent-bridge-secret-at-least-32-characters",
+    providerSettingsStore: store, providerAdministration: gateway,
+  });
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=admin" };
+  const payload = { apiKey: "google-fixture-write-only", modelIds: ["gemini-2.5-flash"], vertex: { authMethod: "api-key", location: "global" } };
+  try {
+    const url = "/v1/admin/provider-settings/vertex";
+    for (const invalid of [
+      { ...payload, serviceAccountJson: "wrong-credential-kind" },
+      { ...payload, vertex: { projectId: "example-project", location: "global" } },
+      { ...payload, vertex: { ...payload.vertex, location: "us-east5" } },
+    ]) assert.equal((await app.inject({ method: "PUT", url, headers, payload: invalid })).statusCode, 400);
+    const connected = await app.inject({ method: "PUT", url, headers, payload });
+    assert.equal(connected.statusCode, 200, connected.body);
+    assert.deepEqual(connected.json().provider.vertex, payload.vertex);
+    assert.equal(connected.body.includes(payload.apiKey), false);
+    assert.equal(JSON.stringify(await store.getProviderSetting(administrator.tenantId, "vertex")).includes(payload.apiKey), false);
+    const reused = await app.inject({ method: "PUT", url, headers, payload: { modelIds: payload.modelIds, vertex: payload.vertex } });
+    assert.equal(reused.statusCode, 200, reused.body);
+    const changed = await app.inject({ method: "PUT", url, headers, payload: {
+      serviceAccountJson: "fixture-service-account", modelIds: payload.modelIds, vertex: { projectId: "example-project", location: "global" },
+    } });
+    assert.equal(changed.statusCode, 409);
+    assert.equal(changed.json().error.code, "PROVIDER_RECONNECTION_REQUIRED");
+  } finally { await app.close(); }
+});

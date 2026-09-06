@@ -36,8 +36,9 @@ An unavailable discovery API leaves manual entry and existing selections usable.
 | Anthropic | Paginated account `/v1/models`, supplemented with LiteLLM metadata | `anthropic/<model-id>` |
 | Z.ai | Account `/api/paas/v4/models` when supported; LiteLLM fallback | `zai/<model-id>` |
 | Bedrock | LiteLLM catalog; API-key credentials do not grant the IAM control-plane discovery API | `bedrock/converse/<model-or-inference-profile-id>` and configured region |
-| Azure Foundry | Resource `/openai/v1/models` plus LiteLLM catalog; this does not enumerate deployment names | OpenAI: `openai/<deployment-name>` at the resource `/openai/v1/`; Claude: `anthropic/<deployment-name>` at the same resource `/anthropic` |
-| Google Vertex | Model Garden publisher catalog plus LiteLLM catalog | `vertex_ai/<model-id>`; publisher-qualified IDs such as `deepseek-ai/<model-id>` use the partner transport, with project and location |
+| Azure Foundry | Resource `/openai/v1/models` plus LiteLLM catalog; this does not enumerate deployment names | OpenAI: `azure/<deployment-name>` with resource-root `api_base` and `api_version: v1`; Claude: `anthropic/<deployment-name>` at the same resource `/anthropic` |
+| Google Agent Platform (Vertex AI), service account | Model Garden publisher catalog plus LiteLLM catalog | `vertex_ai/<model-id>`; publisher-qualified IDs such as `deepseek-ai/<model-id>` use the partner transport, with project and location |
+| Google Agent Platform (Vertex AI), API key | Gemini-only LiteLLM catalog; no account discovery | `gemini/<gemini-model-id>` with the fixed Cloud base `https://aiplatform.googleapis.com/v1/publishers/google` and `x-goog-api-key`; never the AI Studio default endpoint |
 
 The gateway refreshes public LiteLLM metadata hourly from its official published
 JSON, with the installed version's bundled metadata as an offline fallback.
@@ -80,7 +81,17 @@ Control, Web, a workspace, or a catalog cache. Preview credentials supplied in
 the editor are transient and never enter product persistence or cache keys.
 Disabled accounts and changed preview targets cannot reuse saved credentials.
 
-Google intake accepts service-account JSON with a fixed Google token endpoint;
+Google's authentication selector accepts a Cloud API key for Gemini or
+service-account JSON for project/location and partner-model access. API-key mode
+uses the global endpoint with billing project determined by the key; it rejects
+explicit project IDs, regional endpoints, and partner model IDs. It does not
+create a cloud deployment or configure ADC on the host. Existing configurations
+without `authMethod` retain service-account behavior and their deployment IDs.
+Changing authentication method requires disconnecting the active account.
+The new mode is additive metadata in the existing settings record; no SQL
+migration or deployment-profile-specific behavior is introduced.
+
+Service-account intake uses a fixed Google token endpoint;
 files, ambient credentials, external/executable federation, and arbitrary token
 URLs remain rejected. Provider redirects are not followed. Discovery fetches
 use fixed official provider hosts or a validated Azure resource hostname.

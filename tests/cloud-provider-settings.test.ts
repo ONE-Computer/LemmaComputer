@@ -61,6 +61,30 @@ test("Vertex credentials go only to encrypted credential intake, with project/lo
   assert.notEqual(beta[0]?.providerAccountId, route.deployments[0]?.providerAccountId);
 });
 
+test("Google API keys use the fixed Cloud Gemini endpoint and remain outside route metadata", async () => {
+  const { gateway, requests } = mockGateway();
+  const configuration = { authMethod: "api-key" as const, location: "global" };
+  const input = { tenantId: "alpha", provider: "vertex" as const, apiKey: "google-api-key-fixture-secret", modelIds: ["gemini-2.5-flash"], vertex: configuration, existingModelIds: [] };
+  const route = await gateway.configureManagedProvider(input);
+  for (const request of requests) {
+    if (request.path === "/credentials") assert.deepEqual(request.body.credential_values, { api_key: input.apiKey });
+    else assert.equal(JSON.stringify(request.body).includes(input.apiKey), false);
+  }
+  const params = requests.find((r) => r.path === "/model/new")!.body.litellm_params;
+  assert.equal(params.model, "gemini/gemini-2.5-flash");
+  assert.equal(params.api_base, "https://aiplatform.googleapis.com/v1/publishers/google");
+  assert.equal(params.vertex_project, undefined);
+  assert.equal(params.vertex_credentials, undefined);
+  assert.equal(route.deployments[0]?.providerModel, "vertex_ai/gemini-2.5-flash");
+  assert.equal(JSON.stringify(route).includes(input.apiKey), false);
+  await gateway.configureManagedProvider({ ...input, apiKey: undefined, existingModelIds: route.modelIds, configuration: route.configuration, credentialFingerprint: route.credentialFingerprint });
+  for (const invalid of [
+    { ...input, modelIds: ["claude-sonnet-5"] },
+    { ...input, vertex: { ...configuration, location: "us-east5" } },
+    { ...input, vertex: { ...configuration, projectId: "example-project" } },
+  ]) await assert.rejects(gateway.configureManagedProvider(invalid), { code: "PROVIDER_CONFIGURATION_INVALID" });
+});
+
 test("cloud metadata rejects arbitrary destinations, incomplete selections, and persisted credentials", () => {
   const valid = { modelIds: ["gpt-4.1"], foundry };
   assert.equal(providerSettingMetadataSchema.safeParse(valid).success, true);

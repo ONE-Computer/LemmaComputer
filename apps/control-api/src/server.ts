@@ -493,11 +493,14 @@ const saveFoundryProviderSchema = saveProviderApiKeySchema.extend({
   foundry: foundryConfigurationSchema,
 });
 const saveVertexProviderSchema = z.strictObject({
+  apiKey: z.string().trim().min(8).max(4096).optional(),
   serviceAccountJson: z.string().trim().min(1).max(16384).optional(),
   modelIds: z.array(vertexProviderModelIdSchema).min(1).max(64).refine(uniqueModelIds),
   vertex: vertexConfigurationSchema,
   emissionsRegion: providerEmissionsRegionSchema.optional(),
-}).transform(({ serviceAccountJson, ...value }) => ({ ...value, apiKey: serviceAccountJson }));
+}).refine((value) => value.vertex.authMethod === "api-key" ? !value.serviceAccountJson : !value.apiKey,
+  "Credential must match the Google authentication method")
+  .transform(({ serviceAccountJson, ...value }) => ({ ...value, apiKey: serviceAccountJson ?? value.apiKey }));
 const saveBedrockProviderApiKeySchema = z.strictObject({
   apiKey: z.string().trim().min(8).max(4096).optional(),
   region: bedrockApiKeyRegionSchema,
@@ -4405,7 +4408,7 @@ export function createControlServer(
     }).parse(request.body ?? {});
     if ((input.foundry && provider !== "foundry") || (input.vertex && provider !== "vertex")
       || (input.region && provider !== "bedrock") || (input.serviceAccountJson && provider !== "vertex")
-      || (input.apiKey && provider === "vertex")) throw new LemmaComputerError("INVALID_PROVIDER_CONFIGURATION", "Configuration does not match this provider", 400);
+      || (provider === "vertex" && (input.vertex?.authMethod === "api-key" ? input.serviceAccountJson : input.apiKey))) throw new LemmaComputerError("INVALID_PROVIDER_CONFIGURATION", "Configuration does not match this provider", 400);
     reply.header("cache-control", "no-store");
     return requireProviderSettings().catalog(actor, provider, { ...input, apiKey: input.serviceAccountJson ?? input.apiKey });
   });

@@ -268,7 +268,7 @@ test("legacy model-route URLs resolve to the unified maintenance surface", async
 
 for (const providerName of ["foundry", "vertex"] as const) {
   test(`administrator connects ${providerName} with its cloud configuration and write-only credential`, async ({ page }) => {
-    const displayName = providerName === "foundry" ? "Azure AI Foundry" : "Google Vertex AI";
+    const displayName = providerName === "foundry" ? "Azure AI Foundry" : "Google Agent Platform (Vertex AI)";
     const modelId = providerName === "foundry" ? "gpt-4.1" : "gemini-2.5-flash";
     const provider = { provider: providerName, state: "not-configured", selectedModelIds: [], deployments: [], modelOptions: [{ id: modelId, displayName: modelId }], emissionsRegion: "sg" };
     let submitted: Record<string, any> | undefined;
@@ -282,6 +282,10 @@ for (const providerName of ["foundry", "vertex"] as const) {
     const dialog = page.getByRole("dialog", { name: `Connect ${displayName}` });
     await expect(dialog.getByRole("button", { name: "Connect account" })).toBeDisabled();
     const secret = providerName === "foundry" ? "azure-browser-fixture-key" : '{"type":"service_account","private_key":"browser-fixture-only"}';
+    if (providerName === "vertex") {
+      await dialog.getByRole("combobox", { name: "Google authentication method" }).click();
+      await page.getByRole("option", { name: "Service-account JSON", exact: true }).click();
+    }
     await dialog.getByRole("checkbox").check();
     if (providerName === "foundry") {
       await dialog.getByLabel("Foundry OpenAI v1 endpoint").fill("https://example-resource.openai.azure.com/openai/v1/");
@@ -301,7 +305,7 @@ for (const providerName of ["foundry", "vertex"] as const) {
       expect(submitted?.foundry).toEqual({ endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" }, protocols: { "gpt-4.1": "openai" } });
       expect(submitted?.apiKey).toBe(secret);
     } else {
-      expect(submitted?.vertex).toEqual({ projectId: "example-project", location: "global" });
+      expect(submitted?.vertex).toEqual({ authMethod: "service-account", projectId: "example-project", location: "global" });
       expect(submitted?.serviceAccountJson).toBe(secret);
       expect(submitted?.apiKey).toBeUndefined();
     }
@@ -327,7 +331,7 @@ test("dynamic catalog searches new models, preserves selections on refresh failu
   });
   await page.goto("/?view=ai-control-plane&section=models-providers");
   await page.getByRole("button", { name: "Manage account" }).click();
-  const dialog = page.getByRole("dialog", { name: "Manage Google Vertex AI" });
+  const dialog = page.getByRole("dialog", { name: "Manage Google Agent Platform (Vertex AI)" });
   await expect(dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ })).toHaveAccessibleName(/LiteLLM metadata/);
   const searchBox = await dialog.getByLabel("Search models").boundingBox();
   const filterBox = await dialog.getByRole("combobox", { name: "Filter models by capability" }).boundingBox();
@@ -364,4 +368,45 @@ test("dynamic catalog searches new models, preserves selections on refresh failu
   await expect.poll(() => submitted?.modelIds).toEqual(["gemini-future", "claude-sonnet-5", "deepseek-ai/deepseek-future-maas"]);
   expect(submitted.apiKey).toBeUndefined();
   expect(submitted.serviceAccountJson).toBeUndefined();
+});
+
+
+test("Google API-key setup filters partner models, clears credentials on method changes, and saves without a project", async ({ page }) => {
+  const provider = { provider: "vertex", state: "not-configured", selectedModelIds: [], deployments: [], emissionsRegion: "sg", modelOptions: [] };
+  let submitted: any;
+  let discovery: any;
+  await page.route("**/api/v1/admin/provider-settings", route => route.fulfill({ json: { providers: [provider] } }));
+  await page.route("**/api/v1/admin/provider-settings/vertex/catalog", route => {
+    discovery = route.request().postDataJSON();
+    return route.fulfill({ json: { models: [{ id: "gemini-future", displayName: "Gemini Future" }, { id: "claude-future", displayName: "Claude Future" }], source: "litellm", fetchedAt: new Date().toISOString() } });
+  });
+  await page.route("**/api/v1/admin/provider-settings/vertex", route => {
+    submitted = route.request().postDataJSON();
+    return route.fulfill({ json: { provider: { ...provider, state: "active", vertex: submitted.vertex, selectedModelIds: submitted.modelIds } } });
+  });
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  await page.getByRole("button", { name: "Connect account" }).click();
+  const dialog = page.getByRole("dialog", { name: "Connect Google Agent Platform (Vertex AI)" });
+  await expect(dialog.getByRole("combobox", { name: "Google authentication method" })).toContainText("API key");
+  await expect(dialog.getByLabel("Google Cloud project ID")).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox", { name: /Claude Future/ })).toHaveCount(0);
+  await dialog.getByLabel("Google Cloud API key").fill("fixture-google-key");
+  await dialog.getByRole("combobox", { name: "Google authentication method" }).click();
+  await page.getByRole("option", { name: "Service-account JSON", exact: true }).click();
+  await expect(dialog.getByLabel("Google service account JSON")).toHaveValue("");
+  await expect(dialog.getByLabel("Google Cloud project ID")).toBeVisible();
+  await expect(dialog.getByRole("checkbox", { name: /Claude Future/ })).toBeVisible();
+  await dialog.getByRole("combobox", { name: "Google authentication method" }).click();
+  await page.getByRole("option", { name: "API key", exact: true }).click();
+  await dialog.getByLabel("Google Cloud API key").fill("fixture-google-key");
+  await dialog.getByRole("checkbox", { name: /Gemini Future/ }).check();
+  await dialog.getByRole("button", { name: "Refresh models" }).click();
+  await expect.poll(() => discovery).toEqual({ refresh: true, apiKey: "fixture-google-key", vertex: { authMethod: "api-key", location: "global" } });
+  await page.screenshot({ path: "/tmp/google-api-key-editor.png", fullPage: true });
+  await dialog.getByRole("button", { name: "Connect account" }).click();
+  await expect(dialog).toBeHidden();
+  expect(submitted).toEqual({ apiKey: "fixture-google-key", modelIds: ["gemini-future"], emissionsRegion: "sg", vertex: { authMethod: "api-key", location: "global" } });
+  await page.getByRole("button", { name: "Manage account" }).click();
+  await expect(page.getByLabel("Google Cloud API key")).toHaveValue("");
+  await expect(page.getByRole("combobox", { name: "Google authentication method" })).toBeDisabled();
 });

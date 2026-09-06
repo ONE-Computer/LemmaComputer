@@ -16,6 +16,7 @@ async def main():
     proxy.master_key = "catalog-qualification-master"
     headers = {"Authorization": "Bearer " + proxy.master_key}
     source = {"vertex_ai/claude-sonnet-5": {"mode": "chat", "supports_function_calling": True, "max_input_tokens": 200000},
+              "vertex_ai/gemini-future": {"mode": "chat", "supports_function_calling": True},
               "openai/gpt-future": {"mode": "chat", "input_cost_per_token": 0.0000002},
               "azure_ai/claude-opus-5": {"mode": "chat", "supports_function_calling": True, "max_input_tokens": 200000}}
     catalog.PUBLIC_CATALOG = source
@@ -49,6 +50,10 @@ async def main():
                 return {"data": [{"id": "claude-opus-5", "display_name": "Claude Opus 5"}]}
             return {"data": [{"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5"}], "has_more": True, "last_id": "claude-sonnet-5"}
         with patch.object(catalog, "read_json", read):
+            result = await catalog.discover("vertex", {"vertex": {"authMethod": "api-key", "location": "global"}}, {"api_key": "sentinel-google-key"})
+            assert [model["id"] for model in result["models"]] == ["gemini-future"]
+            assert not requested
+            assert "sentinel-google-key" not in json.dumps(result)
             result = await catalog.discover("anthropic", {}, {"api_key": "sentinel-provider-secret"})
             assert len(requested) == 2
             assert requested[0][0] == "https://api.anthropic.com/v1/models"

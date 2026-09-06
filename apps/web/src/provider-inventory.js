@@ -6,7 +6,7 @@ export const providerTitle = (value) => ({
   foundry: "Azure AI Foundry",
   azure: "Azure AI Foundry",
   google: "Google",
-  vertex: "Google Vertex AI",
+  vertex: "Google Agent Platform (Vertex AI)",
 }[value] ?? value);
 
 const valueOf = (...values) => values.find((value) => typeof value === "string" && value.trim())?.trim() ?? "";
