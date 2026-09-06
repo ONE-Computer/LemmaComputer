@@ -256,6 +256,7 @@ COPY --chmod=0644 docker/workspace/lemmacomputer_work_trace.py /usr/local/libexe
 COPY docker/workspace/lemmacomputer-agent-chat.py /usr/local/libexec/lemmacomputer-agent-chat
 COPY docker/workspace/lemmacomputer-hermes-config.py /usr/local/libexec/lemmacomputer-hermes-config
 COPY docker/workspace/lemmacomputer-claude-config.py /usr/local/libexec/lemmacomputer-claude-config
+COPY --chmod=0755 docker/workspace/lemmacomputer-claude-profile-init.sh /usr/local/libexec/lemmacomputer-claude-profile-init
 COPY --chmod=0755 docker/workspace/lemmacomputer-workspace-home-init.sh /usr/local/libexec/lemmacomputer-workspace-home-init
 COPY docker/workspace/lemmacomputer-kasm-clipboard.js /usr/share/kasmvnc/www/app/lemmacomputer-kasm-clipboard.js
 COPY docker/workspace/lemmacomputer-workspace-entrypoint.sh /usr/local/sbin/lemmacomputer-workspace-entrypoint

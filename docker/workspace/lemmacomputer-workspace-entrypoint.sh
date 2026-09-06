@@ -636,6 +636,9 @@ remove_stale_libreoffice_lock
 # Claude Desktop's Chat runtime uses the exact Claude Code engine embedded in
 # its signed build manifest. Seed that generated cache from the immutable image
 # because the managed workspace has no direct route to Anthropic's CDN.
+if agent_enabled claude-desktop; then
+  /usr/local/libexec/lemmacomputer-claude-profile-init /home/kasm-user/.config/Claude-3p 1000 1000
+fi
 if agent_enabled claude-desktop && { [[ ! -x "$claude_code_binary" ]] \
   || [[ ! -f "$claude_code_marker" ]] \
   || [[ "$(<"$claude_code_marker")" != "$claude_code_checksum" ]]; }; then

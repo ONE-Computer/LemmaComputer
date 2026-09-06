@@ -64,6 +64,16 @@ const electronUserNamespaceSeccompRules: SeccompRule[] = [
       op: "SCMP_CMP_MASKED_EQ",
     }],
   },
+  {
+    names: ["chroot"],
+    action: "SCMP_ACT_ALLOW",
+    // Docker resolves includes.caps against the container's initial caps.
+    // Chromium gains CAP_SYS_CHROOT only inside its own user namespace, so
+    // the base profile's capability-conditional rule does not cover it.
+    // The kernel still checks namespace-local capability; do not add the
+    // capability to the workspace container or disable Chromium's sandbox.
+    comment: "Chromium isolates its filesystem inside its unprivileged user namespace",
+  },
 ];
 
 const workspaceSeccompProfile = (coworkEnabled: boolean, electronSandboxRequired: boolean) => {

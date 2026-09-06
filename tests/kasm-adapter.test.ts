@@ -891,6 +891,9 @@ test("local Kasm creates a hardened internal network and reconciles governed ser
       }>;
     };
     assert.equal(seccomp.defaultAction, "SCMP_ACT_ERRNO");
+    assert.ok(seccomp.syscalls.some((rule) => (
+      rule.names.includes("chroot") && rule.action === "SCMP_ACT_ALLOW" && !rule.includes
+    )), "Chromium must chroot inside its own user namespace without a container SYS_CHROOT grant");
     const electronNamespaceRules = seccomp.syscalls.slice(0, 3);
     assert.deepEqual(
       electronNamespaceRules.map((rule) => ({ names: rule.names, action: rule.action, args: rule.args })),
