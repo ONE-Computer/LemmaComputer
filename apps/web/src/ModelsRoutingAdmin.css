@@ -612,3 +612,26 @@
 .provider-dynamic-models { max-height: 360px; overflow-y: auto; }
 .provider-deployment-fields { border-top: 1px solid #dce4ed; padding-top: 12px; }
 @media (max-width: 600px) { .provider-catalog-toolbar { flex-direction: column; align-items: stretch; } }
+
+.provider-catalog-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, .65fr) 44px;
+  align-items: end;
+}
+.provider-catalog-controls .modal-field .select-menu-trigger { min-height: 44px; }
+.provider-catalog-controls .provider-catalog-refresh {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.provider-catalog-refresh[aria-busy="true"] svg { animation: provider-catalog-refresh-spin 1s linear infinite; }
+@keyframes provider-catalog-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .provider-catalog-refresh[aria-busy="true"] svg { animation: none; } }
+@media (max-width: 480px) {
+  .provider-catalog-controls { grid-template-columns: minmax(0, 1fr) 44px; }
+  .provider-catalog-controls > .modal-field:first-child { grid-column: 1 / -1; }
+}

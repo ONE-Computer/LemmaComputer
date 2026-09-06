@@ -312,6 +312,7 @@ for (const providerName of ["foundry", "vertex"] as const) {
 }
 
 test("dynamic catalog searches new models, preserves selections on refresh failure, and reuses saved credentials", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
   const provider = { provider: "vertex", state: "active", selectedModelIds: ["gemini-future"], deployments: [],
     modelOptions: [{ id: "gemini-future", displayName: "Existing Gemini" }], emissionsRegion: "sg", vertex: { projectId: "example-project", location: "global" } };
   let failRefresh = false;
@@ -327,6 +328,28 @@ test("dynamic catalog searches new models, preserves selections on refresh failu
   await page.goto("/?view=ai-control-plane&section=models-providers");
   await page.getByRole("button", { name: "Manage account" }).click();
   const dialog = page.getByRole("dialog", { name: "Manage Google Vertex AI" });
+  await expect(dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ })).toHaveAccessibleName(/LiteLLM metadata/);
+  const searchBox = await dialog.getByLabel("Search models").boundingBox();
+  const filterBox = await dialog.getByRole("combobox", { name: "Filter models by capability" }).boundingBox();
+  const refresh = dialog.getByRole("button", { name: "Refresh models" });
+  const refreshBox = await refresh.boundingBox();
+  expect(Math.abs(searchBox!.y - filterBox!.y)).toBeLessThan(2);
+  expect(Math.abs(searchBox!.y - refreshBox!.y)).toBeLessThan(2);
+  expect(refreshBox!.width).toBe(44);
+  await expect(refresh).toHaveText("");
+  await dialog.getByRole("combobox", { name: "Filter models by capability" }).click();
+  await page.getByRole("option", { name: "Function tools", exact: true }).click();
+  await expect(dialog.getByRole("checkbox", { name: /Existing Gemini/ })).toHaveCount(0);
+  await dialog.getByRole("combobox", { name: "Filter models by capability" }).click();
+  await page.getByRole("option", { name: "All models", exact: true }).click();
+  await page.screenshot({ path: "/tmp/model-catalog-toolbar-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileDialog = await dialog.boundingBox();
+  const mobileRefresh = await refresh.boundingBox();
+  expect(mobileRefresh!.height).toBe(44);
+  expect(mobileRefresh!.x + mobileRefresh!.width).toBeLessThanOrEqual(mobileDialog!.x + mobileDialog!.width);
+  await page.screenshot({ path: "/tmp/model-catalog-toolbar-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await dialog.getByLabel("Search models").fill("Anthropic");
   await dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ }).check();
   await dialog.getByLabel("Model ID", { exact: true }).fill("deepseek-ai/deepseek-future-maas");

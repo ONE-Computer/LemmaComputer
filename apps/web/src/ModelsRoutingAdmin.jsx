@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowSync20Regular } from "@fluentui/react-icons/svg/arrow-sync";
 import { Bot24Regular } from "@fluentui/react-icons/svg/bot";
 import { CheckmarkCircle20Regular } from "@fluentui/react-icons/svg/checkmark-circle";
 import { ChevronDown16Regular } from "@fluentui/react-icons/svg/chevron-down";
@@ -152,13 +153,13 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
     </>}
     {provider.provider === "bedrock" && <label className="modal-field"><span>Bedrock region</span><input value={region} disabled={busy || active} placeholder="ap-southeast-1" onChange={(event) => setRegion(event.target.value)} /><small>Use a model ID or inference profile ID supported by Bedrock Converse in this region.</small></label>}
     <label className="modal-field"><span>{provider.provider === "vertex" ? "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={active ? "Leave blank to keep the saved credential" : "Paste the provider credential"} disabled={busy} /></label>
-    <div className="provider-catalog-toolbar">
+    <div className="provider-catalog-toolbar provider-catalog-controls">
       <label className="modal-field"><span>Search models</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search model name or publisher" /></label>
-      <button className="secondary-button" type="button" disabled={busy || catalogBusy} onClick={() => void discover(true, true)}>{catalogBusy ? "Discovering…" : "Refresh models"}</button>
+      <label className="modal-field"><span>Reported capabilities</span><SelectMenu value={capabilityFilter} options={[{ value: "all", label: "All models" }, { value: "tools", label: "Function tools" }, { value: "vision", label: "Vision" }, { value: "streaming", label: "Streaming" }]} ariaLabel="Filter models by capability" onValueChange={setCapabilityFilter} /></label>
+      <button className="secondary-button provider-catalog-refresh" type="button" aria-label="Refresh models" title={catalogBusy ? "Refreshing models…" : "Refresh models"} aria-busy={catalogBusy} disabled={busy || catalogBusy} onClick={() => void discover(true, true)}><ArrowSync20Regular aria-hidden="true" /></button>
     </div>
     <p className="provider-catalog-status" role="status">{catalogError || catalog?.warning || (catalogBusy ? "Loading available model information…" : "Catalog visibility does not guarantee account access. Selected models are tested when you apply changes.")}</p>
     {catalog?.fetchedAt && <p className="provider-catalog-status">Updated {displayDate(catalog.fetchedAt)} · Refreshes automatically every hour</p>}
-    <label className="modal-field"><span>Capability filter</span><SelectMenu value={capabilityFilter} options={[{ value: "all", label: "All models" }, { value: "tools", label: "Function tools" }, { value: "vision", label: "Vision" }, { value: "streaming", label: "Streaming" }]} ariaLabel="Filter models by capability" onValueChange={setCapabilityFilter} /></label>
     <fieldset className="provider-model-options provider-dynamic-models">
       <legend>Enabled models ({selectedModelIds.length}/64)</legend>
       {matching.slice(0, 100).map((option) => {
@@ -166,7 +167,7 @@ function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
         return <label key={option.id}>
           <input type="checkbox" checked={selectedModelIds.includes(option.id)} disabled={busy || (!selectedModelIds.includes(option.id) && selectedModelIds.length >= 64)} onChange={(event) => toggleModel(option.id, event.target.checked)} />
           <span><strong>{option.displayName}</strong><small>{option.id}{option.publisher ? ` · ${option.publisher}` : ""}</small>
-            <small>{providerModelCapabilityLabels(capabilities).join(" · ") || "Capabilities unknown"}{option.source ? ` · ${option.source === "litellm" ? "Gateway catalog" : option.source === "manual" ? "Added by ID" : "Provider catalog"}` : ""}</small>
+            <small>{providerModelCapabilityLabels(capabilities).join(" · ") || "Capabilities unknown"}{option.source ? ` · ${option.source === "litellm" ? "LiteLLM metadata" : option.source === "manual" ? "Added by ID" : option.source === "legacy" ? "Legacy profile" : option.source === "admin" ? "Administrator metadata" : "Provider catalog"}` : " · Legacy profile"}</small>
             {(option.contextTokens || option.outputTokens) && <small>{option.contextTokens ? `${option.contextTokens.toLocaleString()} input tokens` : "Input limit unknown"} · {option.outputTokens ? `${option.outputTokens.toLocaleString()} output tokens` : "Output limit unknown"}</small>}
             {(option.inputUsdPerMillion !== undefined || option.outputUsdPerMillion !== undefined) && <small>Reference USD / 1M tokens: {option.inputUsdPerMillion ?? "?"} input · {option.outputUsdPerMillion ?? "?"} output. Review pricing before routing.</small>}
           </span>
