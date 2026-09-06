@@ -16,6 +16,7 @@ import { PostgresSpendObservabilityStore, SpendReadLimitError, spendReportCsv, t
 import { z } from "zod";
 import postgres from "pg";
 import { BudgetUsageAttemptAdmission, PostgresUsageLedgerStore, type RateAmount, type UsageAttemptAdmissionHook } from "@lemmacomputer/workspace-store";
+import { WorkspaceRecoveryWorker } from "./workspace-recovery.js";
 import { FixtureApprovalAuthority, GovernedOperationService } from "./operations.js";
 import { McpConnectionService } from "./connections.js";
 import { MicrosoftSharePointSitePermissionClient, type MicrosoftSharePointSitePermissionGateway } from "./microsoft-sharepoint-site-permissions.js";
@@ -769,6 +770,7 @@ export function createControlServer(
     usageInternalToken?: string;
     usageTaskBindingSecret?: string;
     usageAdmissionHook?: UsageAttemptAdmissionHook;
+    workspaceRecovery?: boolean;
     grantRenewal?: {
       tenantId: string;
       intervalMs: number;
@@ -6422,6 +6424,23 @@ export function createControlServer(
     reply.code(known.statusCode).send({ error: { code: known.code, message: known.message, correlationId: request.id, retryable: known.retryable } });
   });
 
+  if (security.workspaceRecovery && security.identityPolicyStore) {
+    const recovery = new WorkspaceRecoveryWorker(store, service, async (workspace) => {
+      const actor = await security.identityPolicyStore!.getPrincipal(workspace.subjectId);
+      if (!actor || actor.tenantId !== workspace.tenantId
+        || !allowsPermission(actor, "workspace.use", { type: "workspace", resourceId: workspace.id })) return null;
+      const assigned = await security.identityPolicyStore!.getEffectivePolicy(actor.userId);
+      if (!assigned) return null;
+      const { effective } = await effectivePolicyFor(actor, assigned);
+      const { policy } = await policyForGrant(actor, effective, workspace.grantId);
+      return { identity: actor.identity, policy };
+    }, (result) => {
+      if (result.failed || result.denied) app.log.warn({ event: "workspace_recovery", ...result }, "workspace recovery needs attention");
+    });
+    app.addHook("onListen", async () => { recovery.start(); });
+    app.addHook("onClose", async () => { recovery.stop(); });
+  }
+
   let grantRenewalTimer: NodeJS.Timeout | undefined;
   let grantRenewalRunning = false;
   const renewRunningGrants = async () => {
@@ -6885,6 +6904,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       schedulerInternalToken: env.SCHEDULER_INTERNAL_TOKEN,
       schedulePromptSecret: env.SCHEDULE_PROMPT_SECRET,
       workspaceIngress,
+      workspaceRecovery: true,
       grantRenewal: {
         tenantId: env.BOOTSTRAP_TENANT_ID,
         intervalMs: env.GATEWAY_GRANT_RENEWAL_INTERVAL_SECONDS * 1000,

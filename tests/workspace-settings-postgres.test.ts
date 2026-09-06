@@ -55,6 +55,7 @@ for (const backend of ["memory", "postgres"] as const) {
       assert.equal(await store.claim(created.id, ["ready"], "stopping", observed), null);
       const accepted = await store.reconcile(replacement, stopped);
       assert.equal(accepted?.state, "stopped");
+      assert.equal(accepted?.desiredState, "running", "provider state cannot overwrite running intent");
       assert.equal(accepted?.providerId, null);
       assert.equal(accepted?.accessGeneration, replacement.accessGeneration);
       assert.ok(accepted);
@@ -78,6 +79,28 @@ for (const backend of ["memory", "postgres"] as const) {
       await assert.rejects(store.finish(created.id, validClaim.operationToken!, stopped));
       await assert.rejects(store.revokeAccessGrants(created.id, validClaim.operationToken!));
       assert.deepEqual(await store.getOwned(identity, created.id), expired);
+      assert.equal(expired?.desiredState, "running");
+      assert.ok((await store.listRecoveryCandidates()).some((candidate) => candidate.id === created.id));
+      const stopping = await store.claim(created.id, ["failed"], "stopping");
+      assert.ok(stopping);
+      const stopFailed = await store.finish(created.id, stopping.operationToken!, { state: "failed", failureCode: "WORKSPACE_STOP_FAILED" });
+      assert.equal(stopFailed.desiredState, "stopped");
+      assert.ok(!(await store.listRecoveryCandidates()).some((candidate) => candidate.id === created.id), "failed Stop must never auto-start");
+      const start = await store.claim(created.id, ["failed"], "provisioning");
+      assert.equal(start?.desiredState, "running");
+      await store.finish(created.id, start!.operationToken!, { state: "ready" });
+      if (pool) {
+        await pool.query("UPDATE workspaces SET desired_state=NULL WHERE id=$1", [created.id]);
+        const legacy = (await store.getOwned(identity, created.id))!;
+        assert.equal(legacy.desiredState, "running");
+        await store.reconcile(legacy, { state: "failed", providerId: legacy.providerId, failureCode: "WORKSPACE_HEALTHCHECK_FAILED" });
+        assert.equal((await store.getOwned(identity, created.id))?.desiredState, "running");
+        // A previous Control version can Stop during a rolling deployment.
+        await pool.query("UPDATE workspaces SET state='stopping',operation_token=$2 WHERE id=$1", [created.id, randomUUID()]);
+        assert.equal((await store.getOwned(identity, created.id))?.desiredState, "stopped");
+        await pool.query("UPDATE workspaces SET state='failed',operation_token=NULL WHERE id=$1", [created.id]);
+        assert.ok(!(await store.listRecoveryCandidates()).some((candidate) => candidate.id === created.id));
+      }
       await store.update(created.id, stopped);
       await store.tombstone(identity, created.id, "preserve");
       assert.equal(await store.reconcile(accepted, { ...stopped, state: "ready" }), null);

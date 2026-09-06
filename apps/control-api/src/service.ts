@@ -725,9 +725,36 @@ export class WorkspaceService {
     };
   }
 
-  async restart(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, correlationId: string) {
+  /** Control-owned recovery never trusts an old runtime token or a browser session. */
+  async recover(observed: WorkspaceRecord, identity: IdentityContext, policy: RuntimePolicy) {
+    if (observed.tenantId !== identity.tenantId || observed.subjectId !== identity.subjectId
+      || observed.deletedAt !== null || observed.desiredState !== "running") return;
+    if (observed.operationToken) {
+      // Existing operation fencing handles a Control crash halfway through start/restart.
+      await this.current(identity, policy, observed.grantId);
+      return;
+    }
+    // Persisted timestamps bound retries across Control restarts and multiple replicas.
+    if (observed.state === "failed" && Date.now() - observed.updatedAt.getTime() < 60_000) return;
+    if (observed.providerId) {
+      // A temporarily unreachable node is not evidence that its workspace is gone.
+      const sandbox = await this.controller.status(observed.id, observed.providerId);
+      if (sandbox.state === "ready" || sandbox.state === "provisioning") {
+        const current = await this.store.reconcile(observed, {
+          state: sandbox.state === "ready" && observed.state === "open" ? "open" : sandbox.state,
+          providerId: observed.providerId, failureCode: null,
+        });
+        if (current) await this.current(identity, policy, observed.grantId);
+        return;
+      }
+    }
+    // The snapshot fence prevents a delayed health check from undoing a user's Stop.
+    await this.restart(identity, policy, observed.id, `recovery:${observed.id}`, observed);
+  }
+
+  async restart(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, correlationId: string, observed?: WorkspaceRecord) {
     const record = await this.owned(identity, workspaceId);
-    const claimed = await this.store.claim(record.id, ["ready", "open", "stopped", "failed"], "restarting");
+    const claimed = await this.store.claim(record.id, observed ? ["ready", "open", "stopped", "failed", "provisioning", "restarting"] : ["ready", "open", "stopped", "failed"], "restarting", observed);
     if (!claimed) throw new LemmaComputerError("WORKSPACE_BUSY", "A workspace operation is already running", 409, true);
     try {
       const accessRecord = await this.store.revokeAccessGrants(claimed.id, claimed.operationToken!);
