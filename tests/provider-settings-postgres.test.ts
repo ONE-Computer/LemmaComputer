@@ -295,6 +295,24 @@ test("PostgreSQL cloud provider settings enforce read-safe metadata and retain t
       assert.deepEqual(await store.getModelCatalog(tenantId, provider, "target-a"), catalog);
       assert.equal(await store.getModelCatalog(tenantId, provider, "target-b"), null);
       assert.equal(await store.getModelCatalog(`${tenantId}-other`, provider, "target-a"), null);
+      if (provider === "vertex") {
+        const apiKeyConfig = { ...selectedConfig, vertex: { authMethod: "api-key" as const, location: "global" as const } };
+        for (const config of [apiKeyConfig, { ...selectedConfig, vertex: { ...configuration.vertex, authMethod: "service-account" } }]) {
+          await pool.query("UPDATE provider_settings SET configuration=$2::jsonb WHERE tenant_id=$1 AND provider='vertex'", [tenantId, JSON.stringify(config)]);
+          assert.deepEqual((await store.getProviderSetting(tenantId, provider))?.configuration, config);
+        }
+        for (const invalid of [
+          { ...apiKeyConfig, vertex: { ...apiKeyConfig.vertex, projectId: "example-project" } },
+          { ...apiKeyConfig, vertex: { ...apiKeyConfig.vertex, location: "us-central1" } },
+          { ...apiKeyConfig, vertex: { ...apiKeyConfig.vertex, apiKey: "must-not-persist" } },
+          { ...apiKeyConfig, vertex: { ...apiKeyConfig.vertex, authMethod: null } },
+          { ...apiKeyConfig, vertex: { ...apiKeyConfig.vertex, authMethod: "unknown" } },
+          { modelIds: ["claude-sonnet-4"], vertex: apiKeyConfig.vertex },
+          { modelIds: ["gemini-2.5-flash"], vertex: { authMethod: "service-account", location: "global" } },
+        ]) {
+          await assert.rejects(pool.query("UPDATE provider_settings SET configuration=$2::jsonb WHERE tenant_id=$1 AND provider='vertex'", [tenantId, JSON.stringify(invalid)]), /provider_settings_configuration_safe_check/);
+        }
+      }
       for (const unsafe of [
         { ...configuration, apiKey: "plaintext-secret" },
         { ...configuration, [provider]: { ...configuration[provider], credentials: "plaintext-secret" } },

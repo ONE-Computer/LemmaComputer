@@ -88,8 +88,10 @@ explicit project IDs, regional endpoints, and partner model IDs. It does not
 create a cloud deployment or configure ADC on the host. Existing configurations
 without `authMethod` retain service-account behavior and their deployment IDs.
 Changing authentication method requires disconnecting the active account.
-The new mode is additive metadata in the existing settings record; no SQL
-migration or deployment-profile-specific behavior is introduced.
+The new mode is additive metadata in the existing settings record. A forward SQL
+migration updates the database metadata validator to accept both authentication
+modes. It preserves existing service-account records and introduces no
+deployment-profile-specific behavior.
 
 Service-account intake uses a fixed Google token endpoint;
 files, ambient credentials, external/executable federation, and arbitrary token
@@ -117,6 +119,11 @@ metadata constraint and bounded selection/cleanup capacities, and adds
 `provider_model_catalogs` keyed by tenant and provider. It rewrites no existing
 rows. Constraint changes take bounded validation locks. Both customer-managed
 and hosted use this same forward-only migration and tenant-scoped store.
+
+`01M1TPZ7VW1Y83RGPA0KEMHWXY_allow_google_api_key_provider_settings` expands
+the metadata validator for Google's API-key and explicit service-account modes.
+It stores no credentials and rewrites no rows. Apply it before connecting with
+an API key; older application versions cannot interpret that new mode.
 
 Deploy the gateway image and Control/Web together, using explicit migration jobs.
 Older application versions cannot interpret newly selected arbitrary models;
