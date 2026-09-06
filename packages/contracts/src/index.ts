@@ -102,7 +102,7 @@ export type WorkspaceRequestedServiceClass = z.infer<typeof workspaceRequestedSe
 // Converse provider. The supported regions are the demo's explicitly checked
 // global-profile endpoints, including Singapore.
 export const bedrockApiKeyRegions = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"] as const;
-export const bedrockApiKeyRegionSchema = z.enum(bedrockApiKeyRegions);
+export const bedrockApiKeyRegionSchema = z.string().regex(/^[a-z]{2}-[a-z]+-[0-9]$/);
 export type BedrockApiKeyRegion = z.infer<typeof bedrockApiKeyRegionSchema>;
 
 export const bedrockApiKeyModelProfileIds = ["claude-sonnet-4-5-global"] as const;
@@ -172,23 +172,49 @@ export const bedrockApiKeyRouteConfigurationSchema = z.object({
 });
 export type BedrockApiKeyRouteConfiguration = z.infer<typeof bedrockApiKeyRouteConfigurationSchema>;
 
+// Provider IDs are data. Bound their syntax so they cannot inject URLs, paths,
+// gateway parameters or credential references. Preserve case and version tags.
+export const dynamicProviderModelIdSchema = z.string().trim().min(1).max(180)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:@/-]*$/)
+  .refine((id) => !id.includes("..") && !id.includes("//") && !id.includes("://")
+    && !["__proto__", "constructor", "prototype"].includes(id));
+export const providerModelMetadataSchema = z.strictObject({
+  displayName: z.string().min(1).max(200),
+  publisher: z.string().max(100).optional(),
+  source: z.enum(["provider", "litellm", "manual", "legacy", "admin"]),
+  observedAt: z.string().datetime().optional(),
+  mode: z.string().max(40).optional(),
+  capabilities: z.strictObject({ vision: z.boolean().optional(), tools: z.boolean().optional(), streaming: z.boolean().optional() }),
+  contextTokens: z.number().int().positive().max(100_000_000).optional(),
+  outputTokens: z.number().int().positive().max(100_000_000).optional(),
+  inputUsdPerMillion: z.number().finite().nonnegative().optional(),
+  outputUsdPerMillion: z.number().finite().nonnegative().optional(),
+});
+export type ProviderModelMetadata = z.infer<typeof providerModelMetadataSchema>;
+export const providerModelCatalogSchema = z.strictObject({
+  models: z.array(providerModelMetadataSchema.extend({ id: dynamicProviderModelIdSchema })).max(2000),
+  fetchedAt: z.string().datetime(),
+  source: z.enum(["provider", "litellm", "mixed"]),
+  warning: z.string().max(500).optional(),
+});
+export type ProviderModelCatalog = z.infer<typeof providerModelCatalogSchema>;
 export const openAiProviderModelIds = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
-export const openAiProviderModelIdSchema = z.enum(openAiProviderModelIds);
+export const openAiProviderModelIdSchema = dynamicProviderModelIdSchema;
 export type OpenAiProviderModelId = z.infer<typeof openAiProviderModelIdSchema>;
 
 export const anthropicProviderModelIds = ["claude-sonnet-4-6", "claude-opus-4-8"] as const;
-export const anthropicProviderModelIdSchema = z.enum(anthropicProviderModelIds);
+export const anthropicProviderModelIdSchema = dynamicProviderModelIdSchema;
 export type AnthropicProviderModelId = z.infer<typeof anthropicProviderModelIdSchema>;
 
 export const glmProviderModelIds = ["glm-5", "glm-5.2"] as const;
-export const glmProviderModelIdSchema = z.enum(glmProviderModelIds);
+export const glmProviderModelIdSchema = dynamicProviderModelIdSchema;
 export type GlmProviderModelId = z.infer<typeof glmProviderModelIdSchema>;
 
 export const foundryProviderModelIds = ["gpt-4.1", "gpt-4.1-mini"] as const;
-export const foundryProviderModelIdSchema = z.enum(foundryProviderModelIds);
+export const foundryProviderModelIdSchema = dynamicProviderModelIdSchema;
 export type FoundryProviderModelId = z.infer<typeof foundryProviderModelIdSchema>;
 export const vertexProviderModelIds = ["gemini-2.5-flash", "gemini-2.5-pro"] as const;
-export const vertexProviderModelIdSchema = z.enum(vertexProviderModelIds);
+export const vertexProviderModelIdSchema = dynamicProviderModelIdSchema;
 export type VertexProviderModelId = z.infer<typeof vertexProviderModelIdSchema>;
 
 // Resource endpoints only: never accept an arbitrary gateway, project API,
@@ -198,11 +224,12 @@ export const foundryEndpointSchema = z.string().trim().regex(
 );
 export const foundryConfigurationSchema = z.strictObject({
   endpoint: foundryEndpointSchema,
-  deployments: z.partialRecord(foundryProviderModelIdSchema, z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/)),
+  protocols: z.record(dynamicProviderModelIdSchema, z.enum(["openai", "anthropic"])).optional(),
+  deployments: z.record(foundryProviderModelIdSchema, z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/)),
 });
 export const vertexConfigurationSchema = z.strictObject({
   projectId: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
-  location: z.enum(["global", "us-central1", "us-east5", "europe-west1", "europe-west4", "asia-southeast1"]),
+  location: z.string().regex(/^(global|[a-z]{2,12}-[a-z]{2,16}[0-9])$/),
 });
 export type FoundryConfiguration = z.infer<typeof foundryConfigurationSchema>;
 export type VertexConfiguration = z.infer<typeof vertexConfigurationSchema>;
@@ -214,11 +241,11 @@ export const providerModelIds = [
   ...anthropicProviderModelIds,
   ...glmProviderModelIds,
 ] as const;
-export const providerModelIdSchema = z.enum(providerModelIds);
+export const providerModelIdSchema = dynamicProviderModelIdSchema;
 export type ProviderModelId = z.infer<typeof providerModelIdSchema>;
 export const providerModelIdSetSchema = z.array(providerModelIdSchema)
   .min(1)
-  .max(providerModelIds.length)
+  .max(64)
   .refine((modelIds) => new Set(modelIds).size === modelIds.length, "Provider model selections must be unique");
 export type ProviderModelIdSet = z.infer<typeof providerModelIdSetSchema>;
 
@@ -242,6 +269,7 @@ export const providerSettingMetadataSchema = z.strictObject({
   foundry: foundryConfigurationSchema.optional(),
   vertex: vertexConfigurationSchema.optional(),
   modelLimits: z.record(z.string().min(1).max(300), modelLimitsSchema).optional(),
+  modelMetadata: z.record(dynamicProviderModelIdSchema, providerModelMetadataSchema).optional(),
   region: bedrockApiKeyRegionSchema.optional(),
   modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
   modelId: providerModelIdSchema.optional(),
@@ -252,12 +280,12 @@ export const providerSettingMetadataSchema = z.strictObject({
     if (value.foundry && value.vertex) return false;
     if (value.foundry || value.vertex) {
       if (value.region || value.modelProfileId || value.modelId || !value.modelIds?.length) return false;
-      const allowed = value.foundry ? foundryProviderModelIds : vertexProviderModelIds;
-      if (!value.modelIds.every((id) => (allowed as readonly string[]).includes(id))) return false;
+      if (value.foundry?.protocols && !Object.keys(value.foundry.protocols).every((id) => value.modelIds!.includes(id))) return false;
       if (value.foundry && (Object.keys(value.foundry.deployments).length !== value.modelIds.length
         || !value.modelIds.every((id) => value.foundry!.deployments[id as FoundryProviderModelId]))) return false;
       return true;
     }
+    if (value.region && value.modelIds && !value.modelId && !value.modelProfileId) return true;
     const hasBedrockSelection = value.region !== undefined || value.modelProfileId !== undefined;
     return hasBedrockSelection
       ? value.region !== undefined && value.modelProfileId !== undefined

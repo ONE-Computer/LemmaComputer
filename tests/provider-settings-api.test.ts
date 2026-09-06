@@ -307,9 +307,7 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configured.json().provider.modelId, "gpt-5.6-terra");
     assert.equal(configured.json().provider.emissionsRegion, "sg");
     assert.deepEqual(configured.json().provider.modelOptions, [
-      { id: "gpt-5.6-sol", displayName: "OpenAI GPT-5.6 Sol", modelCapabilities: { vision: true, tools: true, streaming: true } },
       { id: "gpt-5.6-terra", displayName: "OpenAI GPT-5.6 Terra", modelCapabilities: { vision: true, tools: true, streaming: true } },
-      { id: "gpt-5.6-luna", displayName: "OpenAI GPT-5.6 Luna", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configured.json()).includes(rawOpenAiKey), false);
     assert.equal(providerAdministration.configured[0]!.apiKey, rawOpenAiKey);
@@ -355,7 +353,6 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredGlm.json().provider.upstreamModelDisplayName, "Z.ai GLM-5.2");
     assert.equal(configuredGlm.json().provider.modelId, "glm-5.2");
     assert.deepEqual(configuredGlm.json().provider.modelOptions, [
-      { id: "glm-5", displayName: "Z.ai GLM-5", modelCapabilities: { vision: false, tools: true, streaming: true } },
       { id: "glm-5.2", displayName: "Z.ai GLM-5.2", modelCapabilities: { vision: false, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredGlm.json()).includes(rawGlmKey), false);
@@ -372,7 +369,6 @@ test("provider administration is write-only, blocks unconfigured workspaces, and
     assert.equal(configuredAnthropic.json().provider.modelId, "claude-opus-4-8");
     assert.equal(configuredAnthropic.json().provider.upstreamModelDisplayName, "Anthropic Claude Opus 4.8");
     assert.deepEqual(configuredAnthropic.json().provider.modelOptions, [
-      { id: "claude-sonnet-4-6", displayName: "Anthropic Claude Sonnet 4.6", modelCapabilities: { vision: true, tools: true, streaming: true } },
       { id: "claude-opus-4-8", displayName: "Anthropic Claude Opus 4.8", modelCapabilities: { vision: true, tools: true, streaming: true } },
     ]);
     assert.equal(JSON.stringify(configuredAnthropic.json()).includes(rawAnthropicKey), false);
@@ -945,12 +941,12 @@ test("provider settings accept model sets and expose concrete deployment descrip
     });
     assert.equal(configured.statusCode, 200);
     const provider = configured.json().provider;
-    assert.equal(provider.modelId, "gpt-5.6-sol");
-    assert.deepEqual(provider.selectedModelIds, ["gpt-5.6-sol", "gpt-5.6-luna"]);
+    assert.equal(provider.modelId, "gpt-5.6-luna");
+    assert.deepEqual(provider.selectedModelIds, ["gpt-5.6-luna", "gpt-5.6-sol"]);
     assert.equal(provider.deployments.length, 2);
     assert.deepEqual(provider.deployments.map((deployment: { modelId: string }) => deployment.modelId), [
-      "gpt-5.6-sol",
       "gpt-5.6-luna",
+      "gpt-5.6-sol",
     ]);
     assert.equal(provider.deployments[0].primary, true);
     assert.ok(provider.deployments[0].aliases.includes("lemmacomputer-openai"));
@@ -962,7 +958,7 @@ test("provider settings accept model sets and expose concrete deployment descrip
       { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol", emissionsRegion: "eu" },
       { apiKey: rawOpenAiKey, modelIds: [] },
       { apiKey: rawOpenAiKey, modelIds: ["gpt-5.6-sol", "gpt-5.6-sol"] },
-      { apiKey: rawOpenAiKey, modelIds: ["claude-opus-4-8"] },
+      { apiKey: rawOpenAiKey, modelIds: ["https://bad.example/model"] },
       { apiKey: rawOpenAiKey, modelId: "gpt-5.6-sol", modelIds: ["gpt-5.6-sol"] },
     ];
     for (const payload of invalidPayloads) {
@@ -1012,5 +1008,31 @@ test("cloud provider API preserves cloud configuration, masks credentials, and f
       const unsafe = await app.inject({ method: "PUT", url: `/v1/admin/provider-settings/${provider}`, headers, payload: { ...payload, tenantId: "other-organization" } });
       assert.equal(unsafe.statusCode, 400);
     }
+  } finally { await app.close(); }
+});
+
+test("catalog API requires provider permission and uses server tenant identity", async () => {
+  const store = new MemoryProviderSettingsStore();
+  const gateway = new FakeProviderAdministration() as FakeProviderAdministration & { discoverModels: NonNullable<ProviderAdministrationGateway["discoverModels"]> };
+  const calls: ManagedProviderOperation[] = [];
+  gateway.discoverModels = async (input) => {
+    calls.push(input);
+    return { models: [{ id: "claude-sonnet-5", displayName: "Claude Sonnet 5", source: "litellm", capabilities: {} }], source: "litellm", fetchedAt: new Date().toISOString() };
+  };
+  let actor = administrator;
+  const app = createControlServer(new MemoryWorkspaceStore(), {} as ControllerClient, proxyToken, undefined, undefined, {}, {
+    customerProductAuthentication: { resolve: async () => ({ status: "authorized", principal: actor }) },
+    agentBridgeSecret: "catalog-test-agent-bridge-secret-at-least-32-characters",
+    providerSettingsStore: store, providerAdministration: gateway,
+  });
+  const headers = { "x-lemmacomputer-proxy-token": proxyToken, cookie: "lemmacomputer_session=admin" };
+  try {
+    const url = "/v1/admin/provider-settings/vertex/catalog";
+    assert.equal((await app.inject({ method: "POST", url, headers, payload: { tenantId: "other" } })).statusCode, 400);
+    assert.equal((await app.inject({ method: "POST", url, headers, payload: {} })).statusCode, 200);
+    assert.equal(calls[0]!.tenantId, administrator.tenantId);
+    actor = { ...administrator, roles: ["employee"] };
+    assert.equal((await app.inject({ method: "POST", url, headers, payload: {} })).statusCode, 403);
+    assert.equal(calls.length, 1);
   } finally { await app.close(); }
 });

@@ -44,12 +44,13 @@ policy versions.
 
 ### Implementation checklist
 
-1. Add the provider and approved model definition to
-   `packages/litellm-adapter/src/provider-settings.ts`, including accurate
-   vision, tool, and streaming capability flags. Define reviewed context,
-   output, residency, evaluation, and price metadata in the governed route
-   mapping and rate card. Add a stable compatibility alias only when a managed
-   client or existing signed policy requires one.
+1. Model IDs are data, not release-owned enums. Existing providers discover
+   their models dynamically and accept exact IDs through the administrator
+   catalog flow. Maintain protocol adapters and bounded model metadata schemas,
+   not per-release model lists. Preserve existing route identities. See
+   [Dynamic model discovery](cloud-model-providers.md) for discovery, metadata
+   provenance, credentials, and feature validation. New provider protocols still
+   require transport qualification and accurate capability/usage behavior.
 2. Add or extend the strict Provider settings schemas and administrator display
    metadata in `apps/control-api/src/provider-settings.ts` and the Web provider
    inventory. Do not expose the provider model as an employee service class.
@@ -81,22 +82,14 @@ policy versions.
 Do not configure cross-provider fallback for a governed alias unless policy and
 audit semantics explicitly represent every possible destination.
 
-### Dynamic Bedrock API-key route
+### Dynamic Bedrock API-key routes
 
-`lemmacomputer-bedrock` is a narrow dynamic route for the reviewed global Claude
-Sonnet 4.5 Bedrock Converse inference profile. It accepts only the approved
-region/profile combinations in `packages/contracts/src/index.ts`; it does not
-accept AWS access-key pairs, IAM role parameters, arbitrary model IDs, or
-arbitrary endpoint URLs.
-
-The raw Bedrock API key is write-only. Control sends it only to LiteLLM's
-private credential API, whose pinned implementation encrypts credential values
-in its database. The LiteLLM model record stores only
-`litellm_credential_name`, region, and reviewed capability/pricing metadata.
-Legacy direct-route workspace keys receive only the stable compatibility alias.
-Governed service-class workspace keys receive `lemmacomputer-auto`; Control's
-signed decision selects the Bedrock deployment only when its region, profile,
-rate card, Team policy, health, and budget are eligible.
+Bedrock accepts exact model/inference-profile IDs and a configured region using
+its API-key credential through LiteLLM Converse. The old global Sonnet profile
+remains readable without changing its persisted alias or accounting identity.
+Catalog metadata is sourced from LiteLLM; account access is checked at inference.
+Keys remain encrypted in the gateway and selection changes reuse the saved key.
+Provider configuration, pricing, model limits, and route publication are separate.
 
 ### Azure AI Foundry and Google Vertex AI
 

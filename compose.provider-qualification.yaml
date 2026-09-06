@@ -98,6 +98,7 @@ services:
       # points the pinned LiteLLM image at the local fixture rather than an
       # external provider.
       OPENAI_API_BASE: http://gateway-fixture:4200/v1
+      PYTHONPATH: /app
       DISABLE_ADMIN_UI: "true"
       PROXY_BASE_URL: http://127.0.0.1:${LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_PORT}
     networks:
@@ -105,6 +106,8 @@ services:
     ports:
       - "127.0.0.1:${LEMMACOMPUTER_PROVIDER_QUALIFICATION_LITELLM_PORT:?set an isolated LiteLLM port}:4000"
     volumes:
+      - ./scripts/provider-catalog-sitecustomize.py:/app/sitecustomize.py:ro
+      - ./integrations/litellm/lemmacomputer_model_catalog.py:/app/lemmacomputer_model_catalog.py:ro
       - ./config/litellm/provider-qualification.yaml:/app/provider-qualification.yaml:ro
     depends_on:
       litellm-postgres:
@@ -145,6 +148,8 @@ services:
     ports:
       - "127.0.0.1:${LEMMACOMPUTER_PROVIDER_PROBE_QUALIFICATION_LITELLM_PORT:?set an isolated provider-probe LiteLLM port}:4000"
     volumes:
+      - ./scripts/provider-catalog-sitecustomize.py:/app/sitecustomize.py:ro
+      - ./integrations/litellm/lemmacomputer_model_catalog.py:/app/lemmacomputer_model_catalog.py:ro
       - ./config/litellm/provider-probe-qualification.yaml:/app/provider-probe-qualification.yaml:ro
       - ./integrations/litellm/lemmacomputer_policy_callback.py:/app/lemmacomputer_policy_callback.py:ro
     depends_on:

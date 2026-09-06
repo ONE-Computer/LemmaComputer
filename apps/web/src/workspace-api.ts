@@ -442,6 +442,7 @@ export const adminApi = {
   removeConnectorCredentials: (connectorId: string) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}/credentials`, mutation("DELETE")),
   deleteConnector: (connectorId: string) => request(`/api/v1/admin/connectors/${encodeURIComponent(connectorId)}`, mutation("DELETE")),
   providerSettings: () => request("/api/v1/admin/provider-settings", { cache: "no-store" }),
+  discoverProviderModels: (provider: string, input: unknown = {}) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/catalog`, mutation("POST", input)),
   saveProviderSetting: (provider: string, input: unknown) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}`, mutation("PUT", input)),
   testProviderSetting: (provider: string) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/test`, mutation()),
   disableProviderSetting: (provider: string) => request(`/api/v1/admin/provider-settings/${encodeURIComponent(provider)}/disable`, mutation()),

@@ -282,6 +282,7 @@ for (const providerName of ["foundry", "vertex"] as const) {
     const dialog = page.getByRole("dialog", { name: `Connect ${displayName}` });
     await expect(dialog.getByRole("button", { name: "Connect account" })).toBeDisabled();
     const secret = providerName === "foundry" ? "azure-browser-fixture-key" : '{"type":"service_account","private_key":"browser-fixture-only"}';
+    await dialog.getByRole("checkbox").check();
     if (providerName === "foundry") {
       await dialog.getByLabel("Foundry OpenAI v1 endpoint").fill("https://example-resource.openai.azure.com/openai/v1/");
       await dialog.getByLabel("gpt-4.1 deployment name").fill("company-gpt");
@@ -289,7 +290,7 @@ for (const providerName of ["foundry", "vertex"] as const) {
     } else {
       await dialog.getByLabel("Google Cloud project ID").fill("example-project");
       await dialog.getByLabel("Google service account JSON").fill(secret);
-      await expect(dialog).toContainText("Global does not pin inference to a single region");
+      await expect(dialog).toContainText("Global does not pin inference to one region");
     }
     await expect(dialog.locator('input[type="password"]')).toHaveValue(secret);
     await page.screenshot({ path: `/tmp/${providerName}-provider-editor.png`, fullPage: true });
@@ -297,7 +298,7 @@ for (const providerName of ["foundry", "vertex"] as const) {
     await expect(dialog).not.toBeVisible();
     await expect.poll(() => submitted?.modelIds).toEqual([modelId]);
     if (providerName === "foundry") {
-      expect(submitted?.foundry).toEqual({ endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" } });
+      expect(submitted?.foundry).toEqual({ endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" }, protocols: { "gpt-4.1": "openai" } });
       expect(submitted?.apiKey).toBe(secret);
     } else {
       expect(submitted?.vertex).toEqual({ projectId: "example-project", location: "global" });
@@ -309,3 +310,35 @@ for (const providerName of ["foundry", "vertex"] as const) {
     await expect(page.getByRole("dialog").locator('input[type="password"]')).toHaveValue("");
   });
 }
+
+test("dynamic catalog searches new models, preserves selections on refresh failure, and reuses saved credentials", async ({ page }) => {
+  const provider = { provider: "vertex", state: "active", selectedModelIds: ["gemini-future"], deployments: [],
+    modelOptions: [{ id: "gemini-future", displayName: "Existing Gemini" }], emissionsRegion: "sg", vertex: { projectId: "example-project", location: "global" } };
+  let failRefresh = false;
+  let submitted: any;
+  await page.route("**/api/v1/admin/provider-settings", (route) => route.fulfill({ json: { providers: [provider] } }));
+  await page.route("**/api/v1/admin/provider-settings/vertex/catalog", (route) => failRefresh
+    ? route.fulfill({ status: 503, json: { error: { message: "Unavailable" } } })
+    : route.fulfill({ json: { models: [{ id: "claude-sonnet-5", displayName: "Claude Sonnet 5", publisher: "Anthropic", source: "litellm", capabilities: { tools: true } }], fetchedAt: new Date().toISOString(), source: "mixed" } }));
+  await page.route("**/api/v1/admin/provider-settings/vertex", async (route) => {
+    submitted = route.request().postDataJSON();
+    await route.fulfill({ json: { provider: { ...provider, selectedModelIds: submitted.modelIds } } });
+  });
+  await page.goto("/?view=ai-control-plane&section=models-providers");
+  await page.getByRole("button", { name: "Manage account" }).click();
+  const dialog = page.getByRole("dialog", { name: "Manage Google Vertex AI" });
+  await dialog.getByLabel("Search models").fill("Anthropic");
+  await dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ }).check();
+  await dialog.getByLabel("Model ID", { exact: true }).fill("deepseek-ai/deepseek-future-maas");
+  await dialog.getByRole("button", { name: "Add by model ID" }).click();
+  await expect(dialog.getByRole("checkbox", { name: /Existing Gemini/ })).toBeChecked();
+  failRefresh = true;
+  await dialog.getByRole("button", { name: "Refresh models" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Your selection is preserved");
+  await expect(dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ })).toBeChecked();
+  await page.screenshot({ path: "/tmp/dynamic-model-catalog-editor.png", fullPage: true });
+  await dialog.getByRole("button", { name: "Apply changes" }).click();
+  await expect.poll(() => submitted?.modelIds).toEqual(["gemini-future", "claude-sonnet-5", "deepseek-ai/deepseek-future-maas"]);
+  expect(submitted.apiKey).toBeUndefined();
+  expect(submitted.serviceAccountJson).toBeUndefined();
+});

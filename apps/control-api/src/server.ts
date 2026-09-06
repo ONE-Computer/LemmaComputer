@@ -1,3 +1,4 @@
+import { approvedBedrockApiKeyModelProfiles, dynamicProviderModelIdSchema, providerModelIdSetSchema } from "@lemmacomputer/contracts";
 import { foundryConfigurationSchema, vertexConfigurationSchema, foundryProviderModelIdSchema, vertexProviderModelIdSchema } from "@lemmacomputer/contracts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
@@ -462,47 +463,48 @@ const connectorIconSchema = z.strictObject({
 });
 const providerNameSchema = z.enum(["openai", "anthropic", "glm", "bedrock", "foundry", "vertex"]);
 const saveProviderApiKeySchema = z.strictObject({
-  apiKey: z.string().trim().min(8).max(4096),
+  apiKey: z.string().trim().min(8).max(4096).optional(),
   emissionsRegion: providerEmissionsRegionSchema.optional(),
 });
 const uniqueModelIds = <T extends string>(modelIds: T[]) => new Set(modelIds).size === modelIds.length;
 const saveOpenAiProviderApiKeySchema = z.union([
   saveProviderApiKeySchema.extend({ modelId: openAiProviderModelIdSchema }),
   saveProviderApiKeySchema.extend({
-    modelIds: z.array(openAiProviderModelIdSchema).min(1).max(3)
+    modelIds: z.array(openAiProviderModelIdSchema).min(1).max(64)
       .refine(uniqueModelIds, "Provider model selections must be unique"),
   }),
 ]);
 const saveAnthropicProviderApiKeySchema = z.union([
   saveProviderApiKeySchema.extend({ modelId: anthropicProviderModelIdSchema }),
   saveProviderApiKeySchema.extend({
-    modelIds: z.array(anthropicProviderModelIdSchema).min(1).max(2)
+    modelIds: z.array(anthropicProviderModelIdSchema).min(1).max(64)
       .refine(uniqueModelIds, "Provider model selections must be unique"),
   }),
 ]);
 const saveGlmProviderApiKeySchema = z.union([
   saveProviderApiKeySchema.extend({ modelId: glmProviderModelIdSchema }),
   saveProviderApiKeySchema.extend({
-    modelIds: z.array(glmProviderModelIdSchema).min(1).max(2)
+    modelIds: z.array(glmProviderModelIdSchema).min(1).max(64)
       .refine(uniqueModelIds, "Provider model selections must be unique"),
   }),
 ]);
 const saveFoundryProviderSchema = saveProviderApiKeySchema.extend({
-  modelIds: z.array(foundryProviderModelIdSchema).min(1).max(2).refine(uniqueModelIds),
+  modelIds: z.array(foundryProviderModelIdSchema).min(1).max(64).refine(uniqueModelIds),
   foundry: foundryConfigurationSchema,
 });
 const saveVertexProviderSchema = z.strictObject({
-  serviceAccountJson: z.string().trim().min(1).max(16384),
-  modelIds: z.array(vertexProviderModelIdSchema).min(1).max(2).refine(uniqueModelIds),
+  serviceAccountJson: z.string().trim().min(1).max(16384).optional(),
+  modelIds: z.array(vertexProviderModelIdSchema).min(1).max(64).refine(uniqueModelIds),
   vertex: vertexConfigurationSchema,
   emissionsRegion: providerEmissionsRegionSchema.optional(),
 }).transform(({ serviceAccountJson, ...value }) => ({ ...value, apiKey: serviceAccountJson }));
 const saveBedrockProviderApiKeySchema = z.strictObject({
-  apiKey: z.string().trim().min(8).max(4096),
+  apiKey: z.string().trim().min(8).max(4096).optional(),
   region: bedrockApiKeyRegionSchema,
-  modelProfileId: bedrockApiKeyModelProfileIdSchema,
+  modelProfileId: bedrockApiKeyModelProfileIdSchema.optional(),
+  modelIds: providerModelIdSetSchema.optional(),
   emissionsRegion: providerEmissionsRegionSchema.optional(),
-});
+}).refine((value) => value.modelIds ? !value.modelProfileId : Boolean(value.modelProfileId && approvedBedrockApiKeyModelProfiles.some((profile) => profile.id === value.modelProfileId && profile.regions.includes(value.region))), "Select models or a valid legacy inference profile");
 
 const envSchema = z.object({
   CONTROL_HOST: z.string().default("127.0.0.1"),
@@ -4394,6 +4396,19 @@ export function createControlServer(
     }));
     return { providers: visible };
   });
+  app.post<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/catalog", async (request, reply) => {
+    const provider = providerNameSchema.parse(request.params.provider);
+    const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
+    const input = z.strictObject({ refresh: z.boolean().optional(), apiKey: z.string().min(1).max(4096).optional(),
+      serviceAccountJson: z.string().min(1).max(16384).optional(), foundry: foundryConfigurationSchema.optional(),
+      vertex: vertexConfigurationSchema.optional(), region: bedrockApiKeyRegionSchema.optional(),
+    }).parse(request.body ?? {});
+    if ((input.foundry && provider !== "foundry") || (input.vertex && provider !== "vertex")
+      || (input.region && provider !== "bedrock") || (input.serviceAccountJson && provider !== "vertex")
+      || (input.apiKey && provider === "vertex")) throw new LemmaComputerError("INVALID_PROVIDER_CONFIGURATION", "Configuration does not match this provider", 400);
+    reply.header("cache-control", "no-store");
+    return requireProviderSettings().catalog(actor, provider, { ...input, apiKey: input.serviceAccountJson ?? input.apiKey });
+  });
   app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider/model-limits", async (request, reply) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
@@ -4424,7 +4439,7 @@ export function createControlServer(
     reply.header("cache-control", "no-store");
     return { provider: saved, mapping, workspaceActivation, activationError };
   });
-  app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
+  app.put<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", { bodyLimit: 128 * 1024 }, async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const input = provider === "foundry"
@@ -4465,7 +4480,7 @@ export function createControlServer(
       restartRequired: reconciled.workspaceGrants.revoked > 0 || reconciled.workspaceGrants.failed > 0,
     };
   });
-  app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", async (request) => {
+  app.delete<{ Params: { provider: string } }>("/v1/admin/provider-settings/:provider", { bodyLimit: 128 * 1024 }, async (request) => {
     const provider = providerNameSchema.parse(request.params.provider);
     const actor = requirePermission(request, "provider.manage", { type: "provider", resourceId: provider });
     const currentMapping = await security.routingStore?.latestMappingVersion(actor.tenantId) ?? null;

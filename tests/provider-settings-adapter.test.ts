@@ -309,11 +309,11 @@ test("managed provider configuration isolates tenants, validates candidates, and
       existingModelIds: switched.modelIds,
       configuration: switched.configuration,
     });
-    assert.deepEqual(modelSet.configuration, { modelIds: ["gpt-5.6-sol", "gpt-5.6-luna"] });
+    assert.deepEqual(modelSet.configuration, { modelIds: ["gpt-5.6-luna", "gpt-5.6-sol"] });
     assert.equal(modelSet.modelIds.length, 5);
     assert.deepEqual(modelSet.deployments.map((deployment) => deployment.modelId), [
-      "gpt-5.6-sol",
       "gpt-5.6-luna",
+      "gpt-5.6-sol",
     ]);
     assert.equal(modelSet.deployments[0]!.primary, true);
     assert.ok(modelSet.deployments[0]!.aliases.includes("lemmacomputer-assistant"));
@@ -325,7 +325,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
     });
     assert.equal(
       managedProviderAliasForAccessGroup("tenant-alpha", modelSet.deployments[0]!.providerDeployment),
-      "lemmacomputer-openai-gpt-5-6-sol",
+      "lemmacomputer-openai-gpt-5-6-luna",
     );
     assert.equal(managedProviderAliasForAccessGroup("tenant-beta", modelSet.deployments[0]!.providerDeployment), null);
     assert.notEqual(modelSet.deployments[0]!.id, modelSet.deployments[1]!.id);
@@ -338,7 +338,7 @@ test("managed provider configuration isolates tenants, validates candidates, and
       modelSetUpdates
         .filter((document) => document.model_info.lemmacomputer_legacy_alias === false)
         .map((document) => document.model_info.lemmacomputer_upstream_model_id),
-      ["gpt-5.6-sol", "gpt-5.6-luna"],
+      ["gpt-5.6-luna", "gpt-5.6-sol"],
     );
     assert.ok(modelSetUpdates
       .filter((document) => document.model_info.lemmacomputer_legacy_alias === false)

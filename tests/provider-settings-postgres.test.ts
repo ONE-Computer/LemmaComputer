@@ -286,11 +286,20 @@ test("PostgreSQL cloud provider settings enforce read-safe metadata and retain t
       await store.saveProviderSetting({ tenantId, provider, modelIds: [`deployment-${provider}`], configuration, state: "active", credentialFingerprint: "fp_cloudtest", lastTestedAt: new Date(), lastErrorCode: null, updatedBy: "admin" });
       assert.deepEqual((await store.getProviderSetting(tenantId, provider))?.configuration, configuration);
       assert.equal(await store.getProviderSetting(`${tenantId}-other`, provider), null);
+      const meta = { displayName: "Discovered model", source: "litellm" as const, capabilities: { tools: true }, contextTokens: 200000, outputTokens: 32000, inputUsdPerMillion: 1.5 };
+      const selectedConfig = { ...configuration, modelMetadata: { [configuration.modelIds[0]!]: meta } };
+      await pool.query("UPDATE provider_settings SET configuration=$3::jsonb WHERE tenant_id=$1 AND provider=$2", [tenantId, provider, JSON.stringify(selectedConfig)]);
+      assert.deepEqual((await store.getProviderSetting(tenantId, provider))?.configuration.modelMetadata?.[configuration.modelIds[0]!], meta);
+      const catalog = { models: [{ id: "future-model", ...meta }], source: "litellm" as const, fetchedAt: new Date().toISOString() };
+      await store.saveModelCatalog(tenantId, provider, "target-a", catalog);
+      assert.deepEqual(await store.getModelCatalog(tenantId, provider, "target-a"), catalog);
+      assert.equal(await store.getModelCatalog(tenantId, provider, "target-b"), null);
+      assert.equal(await store.getModelCatalog(`${tenantId}-other`, provider, "target-a"), null);
       for (const unsafe of [
         { ...configuration, apiKey: "plaintext-secret" },
         { ...configuration, [provider]: { ...configuration[provider], credentials: "plaintext-secret" } },
         { ...configuration, [provider]: {} },
-        { ...configuration, modelIds: ["gpt-4.1", "gemini-2.5-flash"] },
+        { ...configuration, modelIds: ["../credential-file"] },
         { ...configuration, modelIds: [configuration.modelIds[0], configuration.modelIds[0]] },
       ]) {
         await assert.rejects(pool.query("UPDATE provider_settings SET configuration=$3::jsonb WHERE tenant_id=$1 AND provider=$2", [tenantId, provider, JSON.stringify(unsafe)]), /provider_settings_configuration_safe_check/);

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { approvedBedrockApiKeyModelProfiles, type ProviderModelCatalog, type ProviderModelMetadata } from "@lemmacomputer/contracts";
 import type { FoundryConfiguration, VertexConfiguration, FoundryProviderModelId, VertexProviderModelId } from "@lemmacomputer/contracts";
 import { LemmaComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@lemmacomputer/contracts";
 import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
@@ -5,7 +7,7 @@ import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSet
 import { modelLimitsSchema } from "@lemmacomputer/contracts";
 
 type EmissionsSelection = { emissionsRegion?: ProviderEmissionsRegion };
-type DirectProviderInput<T extends ProviderModelId> = { apiKey: string } & EmissionsSelection & (
+type DirectProviderInput<T extends ProviderModelId> = { apiKey?: string } & EmissionsSelection & (
   | { modelId: T; modelIds?: never }
   | { modelId?: never; modelIds: T[] }
 );
@@ -14,9 +16,9 @@ export type ProviderSettingInput =
   | ({ provider: "openai" } & DirectProviderInput<OpenAiProviderModelId>)
   | ({ provider: "anthropic" } & DirectProviderInput<AnthropicProviderModelId>)
   | ({ provider: "glm" } & DirectProviderInput<GlmProviderModelId>)
-  | ({ provider: "foundry"; apiKey: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration } & EmissionsSelection)
-  | ({ provider: "vertex"; apiKey: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration } & EmissionsSelection)
-  | ({ provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId } & EmissionsSelection);
+  | ({ provider: "foundry"; apiKey?: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration } & EmissionsSelection)
+  | ({ provider: "vertex"; apiKey?: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration } & EmissionsSelection)
+  | ({ provider: "bedrock"; apiKey?: string; region: BedrockApiKeyRegion; modelProfileId?: BedrockApiKeyModelProfileId; modelIds?: string[] } & EmissionsSelection);
 
 type BedrockSelection = { region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId };
 
@@ -49,7 +51,7 @@ const bedrockSelection = (provider: ManagedProviderName, record: ProviderSetting
 };
 
 const providerModelSelection = (provider: ManagedProviderName, record: ProviderSettingRecord | null): ProviderModelId[] => {
-  if (provider === "bedrock") return [];
+  if (provider === "bedrock") return record?.configuration.modelIds ?? (record?.configuration.modelProfileId ? [approvedBedrockApiKeyModelProfiles[0]!.litellmModel.replace("bedrock/converse/", "")] : []);
   if (!record) return [];
   const parsed = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
   if (!parsed.success) return [];
@@ -66,7 +68,7 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
   const modelId = selectedModelIds[0] ?? null;
   const providerModel = provider !== "bedrock" && modelId ? managedProviderModel(provider, modelId) : null;
   const needsReconfiguration = record?.state === "active" && (
-    provider === "bedrock" ? !selection : selectedModelIds.length === 0
+    provider === "bedrock" ? !selection && !record.configuration.modelIds?.length : selectedModelIds.length === 0
       || ((provider === "foundry" || provider === "vertex") && !record.configuration[provider])
   );
   const configuration = providerSettingMetadataSchema.safeParse(record?.configuration ?? {});
@@ -81,8 +83,11 @@ const toView = (provider: ManagedProviderName, record: ProviderSettingRecord | n
     state: !record ? "not-configured" : needsReconfiguration ? "needs-reconfiguration" : record.state,
     fingerprint: record?.credentialFingerprint ?? null,
     modelId,
-    modelOptions: provider === "bedrock" ? [] : managedProviderModelOptions(provider),
-    region: selection?.region ?? (configuration.success ? configuration.data.vertex?.location : null) ?? null,
+    modelOptions: selectedModelIds.map((id) => {
+      const model = managedProviderModel(provider, id, configuration.success ? configuration.data.modelMetadata?.[id] : undefined)!;
+      return { id, displayName: model.displayName, modelCapabilities: model.modelCapabilities };
+    }),
+    region: selection?.region ?? (configuration.success ? configuration.data.region ?? configuration.data.vertex?.location : null) ?? null,
     foundry: configuration.success ? configuration.data.foundry ?? null : null,
     vertex: configuration.success ? configuration.data.vertex ?? null : null,
     emissionsRegion: configuration.success ? configuration.data.emissionsRegion ?? null : null,
@@ -197,6 +202,32 @@ export class ProviderSettingsService {
     };
   }
 
+  async catalog(actor: Pick<SessionPrincipal, "tenantId">, provider: ManagedProviderName, input: {
+    refresh?: boolean; apiKey?: string; foundry?: FoundryConfiguration; vertex?: VertexConfiguration; region?: string;
+  } = {}): Promise<ProviderModelCatalog> {
+    const current = await this.store.getProviderSetting(actor.tenantId, provider);
+    const configuration = { ...(current?.configuration ?? {}),
+      ...(input.foundry ? { foundry: input.foundry } : {}), ...(input.vertex ? { vertex: input.vertex } : {}),
+      ...(input.region ? { region: input.region } : {}) };
+    const targetHash = createHash("sha256").update(JSON.stringify([provider, current?.state, current?.credentialFingerprint,
+      configuration.foundry?.endpoint, configuration.vertex, configuration.region])).digest("hex");
+    // Keys supplied for a preview never enter persisted cache keys or records.
+    const cacheable = !input.apiKey && !input.foundry && !input.vertex && !input.region;
+    if (cacheable && !input.refresh) {
+      const cached = await this.store.getModelCatalog(actor.tenantId, provider, targetHash);
+      if (cached && Date.now() - Date.parse(cached.fetchedAt) < 3600_000) return cached;
+    }
+    if (!this.gateway.discoverModels) throw new LemmaComputerError("PROVIDER_CATALOG_UNAVAILABLE", "Model discovery is unavailable; add an exact model ID", 503, true);
+    const useSavedCredential = current?.state === "active" && !input.apiKey
+      && (!input.foundry || input.foundry.endpoint === current.configuration.foundry?.endpoint)
+      && (!input.vertex || JSON.stringify(input.vertex) === JSON.stringify(current.configuration.vertex))
+      && (!input.region || input.region === current.configuration.region);
+    const result = await this.gateway.discoverModels({ tenantId: actor.tenantId, provider, existingModelIds: [], configuration, useSavedCredential,
+      ...(input.apiKey ? { apiKey: input.apiKey } : {}) });
+    if (cacheable) await this.store.saveModelCatalog(actor.tenantId, provider, targetHash, result);
+    return result;
+  }
+
   async saveModelLimits(actor: SessionPrincipal, provider: ManagedProviderName, deploymentId: string, limits: { contextTokens: number; outputTokens: number }) {
     limits = modelLimitsSchema.parse(limits);
     return this.store.withProviderLifecycleLock(actor.tenantId, provider, async () => {
@@ -248,7 +279,7 @@ export class ProviderSettingsService {
         );
       }
       const current = await this.store.getProviderSetting(actor.tenantId, provider);
-      if (input.provider === "bedrock" && current?.state === "active") {
+      if (input.provider === "bedrock" && current?.state === "active" && !input.modelIds) {
         const existing = this.requireBedrockSelection(current);
         if (existing.region !== input.region || existing.modelProfileId !== input.modelProfileId) {
           throw new LemmaComputerError(
@@ -264,50 +295,36 @@ export class ProviderSettingsService {
           ? previous.data.vertex?.projectId === input.vertex.projectId && previous.data.vertex?.location === input.vertex.location
           : previous.data.foundry?.endpoint === input.foundry.endpoint
             && input.modelIds.every((id) => !previous.data.foundry?.deployments[id]
-              || previous.data.foundry.deployments[id] === input.foundry.deployments[id]));
+              || previous.data.foundry.deployments[id] === input.foundry.deployments[id]
+                && (previous.data.foundry.protocols?.[id] ?? "openai") === (input.foundry.protocols?.[id] ?? "openai")));
         if (!unchanged) throw new LemmaComputerError("PROVIDER_RECONNECTION_REQUIRED", "Disconnect and reconnect the provider before changing its endpoint, project, location, or existing deployment names", 409);
       }
+      if (current?.state === "active" && input.provider === "bedrock" && current.configuration.region !== input.region) {
+        throw new LemmaComputerError("PROVIDER_RECONNECTION_REQUIRED", "Disconnect before changing the Bedrock region", 409);
+      }
+      if (!input.apiKey && current?.state !== "active") throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider credential is required", 400);
       const existingModelIds = current?.state === "active" ? current.modelIds : [];
       let route;
       try {
-        const gatewayInput: ManagedProviderConfiguration = input.provider === "foundry" || input.provider === "vertex"
-          ? { ...input, tenantId: actor.tenantId, existingModelIds, configuration: current?.configuration }
-          : input.provider === "bedrock"
-          ? {
-            tenantId: actor.tenantId,
-            provider: input.provider,
-            apiKey: input.apiKey,
-            region: input.region,
-            modelProfileId: input.modelProfileId,
-            existingModelIds,
-            configuration: current?.configuration,
-          }
-          : input.provider === "openai"
-          ? {
-            tenantId: actor.tenantId,
-            provider: input.provider,
-            apiKey: input.apiKey,
-            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-            existingModelIds,
-            configuration: current?.configuration,
-          }
-          : input.provider === "anthropic"
-          ? {
-            tenantId: actor.tenantId,
-            provider: input.provider,
-            apiKey: input.apiKey,
-            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-            existingModelIds,
-            configuration: current?.configuration,
-          }
-          : {
-            tenantId: actor.tenantId,
-            provider: input.provider,
-            apiKey: input.apiKey,
-            ...(input.modelIds ? { modelIds: input.modelIds } : { modelId: input.modelId }),
-            existingModelIds,
-            configuration: current?.configuration,
-          };
+        const selected = input.modelIds ?? ("modelId" in input && input.modelId ? [input.modelId] : []);
+        let discovered: ProviderModelCatalog | undefined;
+        if (selected.length && this.gateway.discoverModels) {
+          discovered = await this.gateway.discoverModels({ tenantId: actor.tenantId, provider, existingModelIds: [], modelIds: selected });
+        }
+        const modelMetadata = Object.fromEntries(selected.flatMap((id) => {
+          // Existing metadata, limits and prices remain stable across refreshes.
+          const prior = current?.configuration.modelMetadata?.[id];
+          const candidate = discovered?.models.find((model) => model.id === id);
+          if (prior) return [[id, prior]];
+          if (!candidate) return [];
+          const { id: _id, ...metadata } = candidate;
+          return [[id, metadata]];
+        })) as Record<string, ProviderModelMetadata>;
+        const gatewayInput: ManagedProviderConfiguration = {
+          ...input, tenantId: actor.tenantId, existingModelIds, configuration: current?.configuration,
+          credentialFingerprint: current?.credentialFingerprint ?? undefined,
+          ...(Object.keys(modelMetadata).length ? { modelMetadata } : {}),
+        };
         route = await this.gateway.configureManagedProvider(gatewayInput);
       } catch (error) {
         await this.recordLifecycleEvent(lifecycle, "configuration-failed", actor.userId, {
@@ -328,7 +345,7 @@ export class ProviderSettingsService {
             modelIds: route.modelIds,
             configuration: {
               ...route.configuration,
-              ...(currentMetadata.success && currentMetadata.data.modelLimits ? { modelLimits: currentMetadata.data.modelLimits } : {}),
+              ...(currentMetadata.success && currentMetadata.data.modelLimits ? { modelLimits: { ...route.configuration.modelLimits, ...currentMetadata.data.modelLimits } } : {}),
               ...(emissionsRegion ? { emissionsRegion } : {}),
             },
             state: "active",
@@ -626,7 +643,7 @@ export class ProviderSettingsService {
     ) {
       throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
-    if (requireValidBedrock && provider === "bedrock") this.requireBedrockSelection(current);
+    if (requireValidBedrock && provider === "bedrock" && !current.configuration.modelIds?.length) this.requireBedrockSelection(current);
     return current;
   }
 }

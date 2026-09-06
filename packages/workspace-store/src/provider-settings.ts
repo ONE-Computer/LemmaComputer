@@ -1,3 +1,4 @@
+import { providerModelCatalogSchema, type ProviderModelCatalog } from "@lemmacomputer/contracts";
 import { providerSettingMetadataSchema, type ProviderSettingMetadata } from "@lemmacomputer/contracts";
 import pg from "pg";
 
@@ -42,6 +43,8 @@ export type ProviderLifecycleFenceResult = {
 };
 
 export interface ProviderSettingsStore {
+  getModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string): Promise<ProviderModelCatalog | null>;
+  saveModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string, catalog: ProviderModelCatalog): Promise<void>;
   listProviderSettings(tenantId: string): Promise<ProviderSettingRecord[]>;
   getProviderSetting(tenantId: string, provider: ManagedProviderName): Promise<ProviderSettingRecord | null>;
   saveProviderSetting(record: SaveProviderSetting): Promise<ProviderSettingRecord>;
@@ -64,7 +67,7 @@ const asStringArray = (value: unknown): string[] => Array.isArray(value)
   ? value.filter((item): item is string => typeof item === "string")
   : [];
 
-const uniqueModelIds = (modelIds: string[]) => [...new Set(modelIds)].slice(0, 16);
+const uniqueModelIds = (modelIds: string[]) => [...new Set(modelIds)].slice(0, 256);
 
 const asConfiguration = (value: unknown): ProviderSettingMetadata => {
   const parsed = providerSettingMetadataSchema.safeParse(value);
@@ -159,6 +162,15 @@ export class PostgresProviderSettingsStore implements ProviderSettingsStore {
       return;
     }
     await Promise.all([this.pool.end(), this.lifecycleLockPool.end()]);
+  }
+
+  async getModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string) {
+    const result = await this.pool.query("SELECT catalog FROM provider_model_catalogs WHERE tenant_id=$1 AND provider=$2 AND target_hash=$3", [tenantId, provider, targetHash]);
+    const parsed = providerModelCatalogSchema.safeParse(result.rows[0]?.catalog);
+    return parsed.success ? parsed.data : null;
+  }
+  async saveModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string, catalog: ProviderModelCatalog) {
+    await this.pool.query("INSERT INTO provider_model_catalogs(tenant_id,provider,target_hash,catalog) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(tenant_id,provider) DO UPDATE SET target_hash=EXCLUDED.target_hash,catalog=EXCLUDED.catalog,updated_at=now()", [tenantId,provider,targetHash,JSON.stringify(providerModelCatalogSchema.parse(catalog))]);
   }
 
   async listProviderSettings(tenantId: string) {
@@ -558,6 +570,14 @@ export class PostgresProviderSettingsStore implements ProviderSettingsStore {
 }
 
 export class MemoryProviderSettingsStore implements ProviderSettingsStore {
+  private readonly catalogs = new Map<string, { targetHash: string; catalog: ProviderModelCatalog }>();
+  async getModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string) {
+    const entry = this.catalogs.get(this.key(tenantId, provider));
+    return entry?.targetHash === targetHash ? structuredClone(entry.catalog) : null;
+  }
+  async saveModelCatalog(tenantId: string, provider: ManagedProviderName, targetHash: string, catalog: ProviderModelCatalog) {
+    this.catalogs.set(this.key(tenantId, provider), { targetHash, catalog: providerModelCatalogSchema.parse(catalog) });
+  }
   private readonly records = new Map<string, ProviderSettingRecord>();
   private readonly lifecycleRecords = new Map<string, ProviderLifecycleRecord>();
   private readonly lifecycleLocks = new Map<string, Promise<void>>();

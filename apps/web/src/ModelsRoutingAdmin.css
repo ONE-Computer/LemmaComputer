@@ -604,3 +604,11 @@
     grid-column: 2;
   }
 }
+
+.provider-catalog-toolbar { display: flex; gap: 12px; align-items: end; margin: 12px 0; }
+.provider-catalog-toolbar .modal-field { flex: 1; margin: 0; min-width: 0; }
+.provider-catalog-toolbar button { flex-shrink: 0; }
+.provider-catalog-status { color: var(--muted, #526174); font-size: 13px; }
+.provider-dynamic-models { max-height: 360px; overflow-y: auto; }
+.provider-deployment-fields { border-top: 1px solid #dce4ed; padding-top: 12px; }
+@media (max-width: 600px) { .provider-catalog-toolbar { flex-direction: column; align-items: stretch; } }

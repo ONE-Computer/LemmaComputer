@@ -59,6 +59,12 @@ const main = async () => {
     "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True",
     "ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e", "/qualification.py"], { stdio: "inherit" });
   if (transport.status !== 0) throw new Error("Pinned cloud provider wire-format qualification failed");
+  const catalogCheck = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "python",
+    "--mount", `type=bind,src=${resolve("scripts/qualify-model-catalog.py")},dst=/qualification.py,readonly`,
+    "--mount", `type=bind,src=${resolve("integrations/litellm")},dst=/catalog,readonly`,
+    "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True",
+    "ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e", "/qualification.py"], { stdio: "inherit" });
+  if (catalogCheck.status !== 0) throw new Error("Pinned model catalog qualification failed");
   const runId = randomBytes(8).toString("hex");
   const [litellmPort, providerProbePort, fixturePort, controlPostgresPort] = await Promise.all([
     availablePort(), availablePort(), availablePort(), availablePort(),

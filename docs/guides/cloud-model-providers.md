@@ -1,103 +1,142 @@
-# Cloud model providers
+# Model providers and dynamic discovery
 
-Azure AI Foundry (`foundry`) and Google Vertex AI (`vertex`) are configured in
-**AI control plane → Models & routing → Connect account**. Both deployment
-profiles use the same tenant-scoped configuration and credential lifecycle.
+Use **AI control plane → Models & routing → Connect account / Manage account**.
+All six providers (OpenAI, Anthropic, Z.ai, Bedrock, Azure Foundry, Google Vertex)
+accept model IDs as data. Releases do not need to enumerate each new model.
+The old model profiles remain only to preserve existing route identities and
+legacy metadata; they are not an allowlist for new selections.
 
-## Supported configuration
+## Select models
 
-| Provider | Initial approved models | Required fields | LiteLLM mapping |
-| --- | --- | --- | --- |
-| Azure AI Foundry | GPT-4.1, GPT-4.1 mini | Azure resource OpenAI v1 endpoint, deployment name for each selected base model, resource API key | `openai/<deployment-name>` with `api_base` ending in `/openai/v1/`; encrypted `api_key` credential |
-| Google Vertex AI | Gemini 2.5 Flash, Gemini 2.5 Pro | Google Cloud project ID, location, service-account JSON credential | `vertex_ai/<model-id>` with `vertex_project`, `vertex_location`; encrypted `vertex_credentials` JSON string |
+1. Connect using the provider's credential and resource/project/region fields.
+2. Search the catalog by name or publisher, optionally filtering by capability.
+3. Select models, or use **Add by model ID** for an exact provider identifier,
+   including its version or inference-profile suffix.
+4. For Azure, supply the actual deployment name and choose OpenAI-compatible or
+   Anthropic (Claude) API format. Model names and deployment names are separate.
+5. Apply changes. Existing connected accounts may leave the credential blank.
+6. Review prices, configured limits, and Lite/Balanced/Pro assignments separately.
 
-Azure accepts public resource endpoints under `openai.azure.com` or
-`services.ai.azure.com`, with the `/openai/v1/` path. The request's model is the
-Azure **deployment name**; the reviewed base model remains separate accounting
-and routing metadata. Sovereign-cloud endpoints and arbitrary gateways are not
-part of this initial implementation.
+Up to 64 selected models per account are supported. Search narrows the first
+100 displayed matches in a bounded catalog of up to 2,000 entries. Model IDs
+are bounded, validated strings, never arbitrary gateway parameters or URLs.
+Provider keys remain write-only; changing selected models does not require
+re-entering a saved key. Disconnect before changing an active cloud target.
 
-Vertex requires the API enabled, appropriate service-account access to the
-selected project, and model availability in the selected location. Supported
-location choices are `global`, `us-central1`, `us-east5`, `europe-west1`,
-`europe-west4`, and `asia-southeast1`; connection validation probes every selected
-model. `global` is not a regional residency guarantee. The emissions grid is a
-separate accounting assumption and does not control inference location.
+Catalogs refresh when opened after their one-hour cache expires, every hour
+while the editor is open, or immediately with **Refresh models**. Refresh does
+not enable models, change existing selections, rewrite rates, or publish routes.
+An unavailable discovery API leaves manual entry and existing selections usable.
 
-The Google credential field accepts service-account JSON only. It rejects
-filenames, ambient application-default credentials, user OAuth credentials,
-external-account/executable federation configurations, non-Google token URLs,
-and unknown fields. This keeps a tenant's configuration from selecting the
-shared gateway's ambient identity or arbitrary credential sources. Managed
-identity and workload identity federation need a separately governed onboarding
-path; they are not enabled by leaving the credential blank.
+## Discovery and metadata sources
 
-Credentials remain write-only and are sent only to LiteLLM's private credential
-API. LiteLLM encrypts them in its database; Control stores validated endpoint,
-project, location, deployment selections, fingerprint, and lifecycle state.
-Model records contain `litellm_credential_name`, never the raw credential.
-Workspaces continue to receive scoped gateway keys and governed service classes.
-This extends the existing credential-custody design; it does not implement the
-separate external-secret Provider Connections work tracked in issue #15.
+| Provider | Discovery | Inference configuration |
+| --- | --- | --- |
+| OpenAI | Account `/v1/models`, supplemented with LiteLLM metadata | `openai/<model-id>` |
+| Anthropic | Paginated account `/v1/models`, supplemented with LiteLLM metadata | `anthropic/<model-id>` |
+| Z.ai | Account `/api/paas/v4/models` when supported; LiteLLM fallback | `zai/<model-id>` |
+| Bedrock | LiteLLM catalog; API-key credentials do not grant the IAM control-plane discovery API | `bedrock/converse/<model-or-inference-profile-id>` and configured region |
+| Azure Foundry | Resource `/openai/v1/models` plus LiteLLM catalog; this does not enumerate deployment names | OpenAI: `openai/<deployment-name>` at the resource `/openai/v1/`; Claude: `anthropic/<deployment-name>` at the same resource `/anthropic` |
+| Google Vertex | Model Garden publisher catalog plus LiteLLM catalog | `vertex_ai/<model-id>`; publisher-qualified IDs such as `deepseek-ai/<model-id>` use the partner transport, with project and location |
 
-Re-enter the credential to rotate it or change enabled models. Disconnect before
-changing the Azure endpoint/existing deployment names or Vertex project/location.
-Cloud target identity participates in deployment IDs, so a different target
-cannot inherit an old target's rate-card match or routing approval. Connection
-success does not publish prices or assign Lite/Balanced/Pro routes: configure
-pricing, model limits, routing approval, and rollout separately.
+The gateway refreshes public LiteLLM metadata hourly from its official published
+JSON, with the installed version's bundled metadata as an offline fallback.
+This feed is discovery metadata only: refreshing it never changes active gateway
+routes, prices, or protocol implementations. Account discovery and the public
+metadata feed can fail independently. The UI distinguishes reference metadata
+from successful access and displays unknown capabilities/limits explicitly.
 
-## API and LiteLLM research
+Capabilities, known token limits, and reference USD prices are projected from
+LiteLLM metadata. Selected metadata is snapshotted in tenant-owned settings.
+Complete valid limits initialize a new deployment's configuration; existing
+limits and published prices remain unchanged. Pricing starts with reference
+amounts where available and still needs explicit review and publication. Public
+catalog prices are not evidence of a customer's negotiated rate or regional SKU.
 
-Checked against official documentation on 2026-09-06:
+Discovery is not entitlement or universal protocol compatibility. Marketplace
+acceptance, regional availability, quota, deployment, model-specific
+authentication, and the installed LiteLLM adapter still determine usability.
+The Vertex publisher catalog can contain deployable models that need dedicated
+compute; this integration does not deploy compute or automatically configure
+custom prediction containers. Azure deployment names remain an administrator
+input unless they match the model identifier. Sovereign Azure clouds and
+arbitrary gateway endpoints are outside the supported endpoint contract.
 
-- Microsoft recommends the [OpenAI v1-compatible route for new Foundry integrations](https://learn.microsoft.com/en-us/azure/foundry/how-to/integrate-with-other-apps).
-  The older `/models` inference route is not the basis for this integration.
-- [Azure deployment documentation](https://learn.microsoft.com/en-ie/azure/ai-foundry/foundry-models/how-to/create-model-deployments?view=foundry)
-  identifies the deployment name as the `model` value. The v1 route does not
-  require the dated `api-version` used by the older Azure OpenAI API.
-- LiteLLM supports [OpenAI-compatible endpoints](https://docs.litellm.ai/docs/providers/openai_compatible),
-  [Azure OpenAI's `azure/` provider](https://docs.litellm.ai/docs/providers/azure/),
-  and the distinct [`azure_ai/` provider](https://docs.litellm.ai/docs/providers/azure_ai).
-  This implementation deliberately uses the OpenAI-compatible v1 format.
-- [Google's Vertex quickstart](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/quickstart)
-  describes project/location/publisher model requests; [LiteLLM Vertex documentation](https://docs.litellm.ai/docs/providers/vertex)
-  documents `vertex_ai/`, project/location configuration, and JSON credentials.
-- Model capability references: [Azure model catalog](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure),
-  [Gemini 2.5 Flash](https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash),
-  [Gemini 2.5 Pro](https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro).
+The reference gateway egress policy permits Azure resource domains, Google's
+token endpoint, Vertex global plus `us-central1`, `us-east5`, `europe-west1`,
+`europe-west4`, and `asia-southeast1`, and Bedrock `us-east-1`, `us-west-2`,
+`eu-west-1`, and `ap-southeast-1`. Other regions also need an operator-approved
+exact regional hostname in the deployment's gateway egress policy. This network
+boundary is independent of model discovery and remains enforced during probes.
 
-Foundry and Model Garden are broader catalogs than this initial approved set.
-[LiteLLM Vertex partner support](https://docs.litellm.ai/docs/providers/vertex_partner)
-includes Claude, Mistral, Llama and other model families with different routes.
-Azure also has distinct endpoint families, including Anthropic-compatible
-Claude. These are compatibility candidates, not automatically qualified product
-models. Adding them requires reviewed capabilities, exact route mapping, and
-transport/usage tests; no generic arbitrary-model or arbitrary-endpoint entry is
-exposed here.
+## Validation and custody
 
-## Verification and deployment
+Control authenticates the administrator, checks `provider.manage` for the exact
+provider, derives the tenant from the session, and calls the private gateway
+catalog endpoint. Only the gateway master credential authorizes that endpoint.
+The gateway derives the tenant credential name itself and reads/decrypts its
+current encrypted database record. No decrypted saved credential returns to
+Control, Web, a workspace, or a catalog cache. Preview credentials supplied in
+the editor are transient and never enter product persistence or cache keys.
+Disabled accounts and changed preview targets cannot reuse saved credentials.
 
-`npm run qualify:providers` uses the repository-pinned LiteLLM **1.93.0** image:
+Google intake accepts service-account JSON with a fixed Google token endpoint;
+files, ambient credentials, external/executable federation, and arbitrary token
+URLs remain rejected. Provider redirects are not followed. Discovery fetches
+use fixed official provider hosts or a validated Azure resource hostname.
 
-- a network-disabled container checks the actual Azure v1 and Vertex Gemini
-  translation using mocked HTTP and Google token acquisition;
-- isolated LiteLLM/PostgreSQL services check tenant-scoped cloud credential and
-  model administration, with cloud inference probes mocked;
-- database dumps, read payloads, and logs are checked for credential sentinels;
-- existing provider lifecycle and scoped gateway-call checks remain in place.
+Applying selections first creates isolated candidate routes. Every selected
+upstream model receives a text-inference check. New model identities that declare
+tool or streaming support additionally receive a streaming check, with a forced
+harmless tool call when tools are declared. Unknown capability metadata remains
+unknown rather than assuming tool/vision support. A text connection check does
+not qualify every model feature or native agent reasoning control.
 
-Run `npm run verify:quick`, `npm run verify:db`, and the focused
-`npm run test:e2e -- tests/e2e/model-routing.spec.ts` for implementation changes.
-The forward-only migration expands provider, lifecycle, and routing constraints
-and validates cloud metadata without rewriting rows. Apply it through the
-explicit migration job before starting updated Control; startup never migrates.
-Older application versions do not understand these provider identifiers and may
-refuse the newer schema. Prefer a forward fix; any rollback needs an explicitly
-compatible application/schema plan or a tested backup restore. Do not reverse
-the migration.
+Only after candidate validation are stable routes changed. Candidate cleanup
+never deletes a reused stable credential. Existing model IDs retain their route
+identities, and new IDs include a collision-resistant hash. Cloud target identity
+also participates in route IDs, so another endpoint, protocol, project, or region
+cannot inherit an old target's price/routing approval. All model registration and
+credential lifecycle operations remain behind the existing tenant lifecycle fence.
 
-These checks do **not** prove a customer's Azure/GCP permissions, quotas, regional
-availability, streaming/tool behavior on live models, or end-to-end agent
-qualification. Those require credentialed cloud testing. Do not label this
-change as a completed production cloud qualification.
+## Migration and deployment
+
+`01M1TBFB6H32N0HXDTRF3SM4XH_dynamic_provider_model_catalog` expands the safe
+metadata constraint and bounded selection/cleanup capacities, and adds
+`provider_model_catalogs` keyed by tenant and provider. It rewrites no existing
+rows. Constraint changes take bounded validation locks. Both customer-managed
+and hosted use this same forward-only migration and tenant-scoped store.
+
+Deploy the gateway image and Control/Web together, using explicit migration jobs.
+Older application versions cannot interpret newly selected arbitrary models;
+application rollback after new selections requires restoring the matching backup
+or reconciling selections to the older release's supported shape. Do not roll
+back migration files or modify their checksums.
+
+## Verification
+
+Required commands:
+
+- `npm run verify:quick`
+- `npm run verify:db`
+- `npm run test:e2e -- tests/e2e/model-routing.spec.ts`
+- `npm run qualify:providers`
+
+Provider qualification uses the pinned LiteLLM 1.93.0 image, disposable databases,
+and fixture credentials. Network-disabled tests check the private catalog's
+master authorization, pagination, metadata projection, redaction, and destination
+boundaries, plus actual Azure OpenAI/Claude and Vertex Gemini/Claude/DeepSeek
+wire translation. Cloud inference/token acquisition is mocked. This is not
+live cloud entitlement, quota, or newest-model availability qualification.
+
+## Integration references
+
+Checked on 2026-09-06:
+
+- [Azure resource models API](https://learn.microsoft.com/en-us/rest/api/aifoundry/azureopenai/models)
+- [Azure project deployments API](https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/aiproject): a separate discovery/authentication surface from the resource API key used here.
+- [Azure Claude Messages API](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-claude): supports the `x-api-key` header and resource Anthropic endpoint.
+- [Google Model Garden listing](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-garden/use-models)
+- [LiteLLM Vertex partner transports](https://docs.litellm.ai/docs/providers/vertex_partner)
+- [LiteLLM model management](https://docs.litellm.ai/docs/proxy/model_management)
+- [LiteLLM published model metadata](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)

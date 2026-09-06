@@ -58,6 +58,7 @@ export const configuredProviderDeployments = (providers = []) => providers
         region,
         providerServiceTier,
         displayName,
+        ...(deployment.metadata ? { metadata: deployment.metadata } : {}),
         ...(deployment.modelLimits ? { modelLimits: deployment.modelLimits } : {}),
         ...(declaredCapabilities ? { modelCapabilities: declaredCapabilities } : {}),
       };

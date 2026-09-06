@@ -6,7 +6,7 @@ import { LiteLLMProviderAdministration, managedProviderDeploymentDescriptors, te
 const foundry = { endpoint: "https://example-resource.openai.azure.com/openai/v1/", deployments: { "gpt-4.1": "company-gpt" } };
 const vertex = { projectId: "example-project", location: "global" as const };
 const serviceAccountJson = JSON.stringify({ type: "service_account", project_id: "example-project", client_email: "model-access@example-project.iam.gserviceaccount.com", private_key: "-----BEGIN PRIVATE KEY-----\nfixture-not-real\n-----END PRIVATE KEY-----", token_uri: "https://oauth2.googleapis.com/token" });
-const mockGateway = (rejectModel?: string) => {
+const mockGateway = (rejectModel?: string, streaming = false) => {
   const requests: Array<{ path: string; body: any }> = [];
   const gateway = new LiteLLMProviderAdministration({ adminUrl: "https://private-gateway.invalid", masterKey: "fixture-master", credentialSecret: "fixture-fingerprint-secret", adminFetch: async (url, options) => {
     const path = new URL(String(url)).pathname;
@@ -16,6 +16,7 @@ const mockGateway = (rejectModel?: string) => {
     if (path === "/model/info") return Response.json({ data: [] });
     if (path === "/model/new") return Response.json({ model_info: { id: body.model_info.id } });
     if (path === "/chat/completions" && rejectModel && body.model.includes(rejectModel)) return Response.json({ error: "rejected fixture secret" }, { status: 401 });
+    if (body.stream && streaming) return new Response('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"record_ok","arguments":"{}"}}]},"finish_reason":null}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
     return Response.json({ choices: [{ message: { content: "OK" } }] });
   } });
   return { gateway, requests };
@@ -93,4 +94,47 @@ test("cloud target changes receive new deployment identities and cannot inherit 
   const google = managedProviderDeploymentDescriptors("alpha", "vertex", { modelIds: ["gemini-2.5-flash"], vertex })[0]!;
   const changedProject = managedProviderDeploymentDescriptors("alpha", "vertex", { modelIds: ["gemini-2.5-flash"], vertex: { ...vertex, projectId: "other-project" } })[0]!;
   assert.notEqual(google.providerDeployment, changedProject.providerDeployment);
+});
+
+test("new Vertex partner models reuse the encrypted credential and prove streaming tool support before activation", async () => {
+  const { gateway, requests } = mockGateway();
+  const configured = await gateway.configureManagedProvider({ tenantId: "alpha", provider: "vertex", apiKey: serviceAccountJson, modelIds: ["gemini-2.5-flash"], vertex, existingModelIds: [] });
+  const before = requests.length;
+  const metadata = { displayName: "Claude future", source: "litellm" as const, capabilities: { tools: true, streaming: true } };
+  // This fixture only answers ordinary JSON. A claimed streaming/tool model
+  // must not become enabled when that feature check fails.
+  await assert.rejects(gateway.configureManagedProvider({ tenantId: "alpha", provider: "vertex", modelIds: ["gemini-2.5-flash", "claude-future"], vertex,
+    existingModelIds: configured.modelIds, configuration: configured.configuration, credentialFingerprint: configured.credentialFingerprint, modelMetadata: { "claude-future": metadata },
+  }), { code: "PROVIDER_TEST_REQUEST_REJECTED" });
+  const additions = requests.slice(before);
+  assert.equal(additions.some((request) => request.path.startsWith("/credentials")), false);
+  assert.equal(additions.some((request) => request.path.endsWith("/update")), false);
+  assert.equal(additions.some((request) => request.body.stream === true && request.body.tools?.[0].function.name === "record_ok"), true);
+});
+
+test("Azure Claude keeps arbitrary deployment names while selecting the Anthropic API protocol", async () => {
+  const { gateway, requests } = mockGateway();
+  await gateway.configureManagedProvider({ tenantId: "alpha", provider: "foundry", apiKey: "azure-fixture-key", modelIds: ["claude-opus-5"], existingModelIds: [],
+    foundry: { endpoint: "https://company-resource.services.ai.azure.com/openai/v1/", deployments: { "claude-opus-5": "company-primary" }, protocols: { "claude-opus-5": "anthropic" } },
+  });
+  const model = requests.find((request) => request.path === "/model/new")!.body;
+  assert.equal(model.litellm_params.model, "anthropic/company-primary");
+  assert.equal(model.litellm_params.api_base, "https://company-resource.services.ai.azure.com/anthropic");
+  assert.equal(model.model_info.lemmacomputer_base_model, "foundry/claude-opus-5");
+});
+
+
+test("a newly tested partner model is enabled with the saved credential after a successful streaming tool call", async () => {
+  const { gateway, requests } = mockGateway(undefined, true);
+  const first = await gateway.configureManagedProvider({ tenantId: "alpha", provider: "vertex", apiKey: serviceAccountJson, modelIds: ["gemini-2.5-flash"], vertex, existingModelIds: [] });
+  const count = requests.length;
+  const next = await gateway.configureManagedProvider({ tenantId: "alpha", provider: "vertex", modelIds: ["gemini-2.5-flash", "claude-future"], vertex,
+    existingModelIds: first.modelIds, configuration: first.configuration, credentialFingerprint: first.credentialFingerprint,
+    modelMetadata: { "claude-future": { displayName: "Claude future", source: "litellm", capabilities: { tools: true, streaming: true }, contextTokens: 200000, outputTokens: 32000 } },
+  });
+  assert.equal(next.deployments.length, 2);
+  assert.equal(next.credentialFingerprint, first.credentialFingerprint);
+  assert.equal(next.deployments[0]!.id, first.deployments[0]!.id);
+  assert.equal(requests.slice(count).some((request) => request.path.startsWith("/credentials")), false);
+  assert.deepEqual(next.configuration.modelLimits?.[next.deployments[1]!.providerDeployment], { contextTokens: 200000, outputTokens: 32000 });
 });

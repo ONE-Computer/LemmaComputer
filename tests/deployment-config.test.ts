@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { compileRuntimeEgressPolicy, decideEgress } from "@lemmacomputer/egress-policy";
 import {
   environmentContract,
   firstPartyImageVariables,
@@ -30,6 +31,17 @@ const assignmentKeys = (contents: string) => (
 );
 
 const registeredKeys = () => new Set(environmentContract.map(({ key }) => key));
+
+test("gateway model discovery and cloud transports use reviewed public egress destinations", () => {
+  const policy = compileRuntimeEgressPolicy(JSON.parse(projectServiceEnvironment()["gateway-egress-proxy"].EGRESS_POLICY_JSON));
+  const decision = (host: string, address = "104.18.0.1", port = 443) => decideEgress(policy, { protocol: "https", host, port, resolvedAddresses: [address] });
+  for (const host of ["api.openai.com", "api.anthropic.com", "api.z.ai", "resource.openai.azure.com", "resource.services.ai.azure.com", "aiplatform.googleapis.com", "us-east5-aiplatform.googleapis.com", "oauth2.googleapis.com", "raw.githubusercontent.com"]) {
+    assert.equal(decision(host).reasonCode, "EGRESS_ALLOWED", host);
+    assert.notEqual(decision(host, "10.0.0.1").reasonCode, "EGRESS_ALLOWED", host);
+    assert.notEqual(decision(host, "104.18.0.1", 8443).reasonCode, "EGRESS_ALLOWED", host);
+  }
+  for (const host of ["example.com", "services.ai.azure.com.evil.test", "aiplatform.googleapis.com.evil.test", "s3.amazonaws.com"]) assert.notEqual(decision(host).reasonCode, "EGRESS_ALLOWED", host);
+});
 
 test("runtime sources do not retain the retired OneComputer namespace", () => {
   const result = spawnSync("git", [

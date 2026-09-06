@@ -72,73 +72,123 @@ const providerStateLabel = (state) => ({
 
 function ProviderEditor({ provider, busy, onClose, onSave, onDelete }) {
   const [apiKey, setApiKey] = useState("");
-  const [selectedModelIds, setSelectedModelIds] = useState(() => provider.selectedModelIds?.length
-    ? provider.selectedModelIds
-    : provider.modelId
-      ? [provider.modelId]
-      : provider.modelOptions?.[0]?.id
-        ? [provider.modelOptions[0].id]
-        : []);
-  const [foundry, setFoundry] = useState(provider.foundry ?? { endpoint: "", deployments: {} });
+  const [selectedModelIds, setSelectedModelIds] = useState(provider.selectedModelIds?.length ? provider.selectedModelIds : provider.modelId ? [provider.modelId] : []);
+  const [foundry, setFoundry] = useState(provider.foundry ?? { endpoint: "", deployments: {}, protocols: {} });
   const [vertex, setVertex] = useState(provider.vertex ?? { projectId: "", location: "global" });
+  const [region, setRegion] = useState(provider.region ?? "ap-southeast-1");
+  const [emissionsRegion, setEmissionsRegion] = useState(provider.emissionsRegion ?? (provider.provider === "bedrock" ? inferredBedrockEmissionsRegion(region) : ""));
+  const [catalog, setCatalog] = useState(null);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const [search, setSearch] = useState("");
+  const [capabilityFilter, setCapabilityFilter] = useState("all");
+  const [customId, setCustomId] = useState("");
+  const discoveryGeneration = useRef(0);
+  const active = provider.state === "active";
   const cloudValid = provider.provider === "foundry"
     ? /^https:\/\/[a-z0-9-]+\.(?:openai\.azure\.com|services\.ai\.azure\.com)\/openai\/v1\/?$/.test(foundry.endpoint)
       && selectedModelIds.every((id) => foundry.deployments[id]?.trim())
-    : provider.provider === "vertex" ? Boolean(vertex.projectId.trim()) : true;
-  const [region, setRegion] = useState(provider.region ?? "ap-southeast-1");
-  const [emissionsRegion, setEmissionsRegion] = useState(provider.emissionsRegion ?? (provider.provider === "bedrock" ? inferredBedrockEmissionsRegion(provider.region ?? "ap-southeast-1") : ""));
-  const [modelProfileId, setModelProfileId] = useState(provider.modelProfileId ?? "claude-sonnet-4-5-global");
-  const toggleModel = (modelId, selected) => setSelectedModelIds((current) => selected
-    ? [...new Set([...current, modelId])]
-    : current.filter((id) => id !== modelId));
+    : provider.provider === "vertex" ? /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(vertex.projectId) && /^(global|[a-z]{2,12}-[a-z]{2,16}[0-9])$/.test(vertex.location)
+    : provider.provider === "bedrock" ? /^[a-z]{2}-[a-z]+-[0-9]$/.test(region) : true;
+  const discover = async (refresh = false, withDraft = false) => {
+    const generation = ++discoveryGeneration.current;
+    setCatalogBusy(true);
+    setCatalogError("");
+    const input = { refresh };
+    if (withDraft) {
+      if (apiKey.trim()) input[provider.provider === "vertex" ? "serviceAccountJson" : "apiKey"] = apiKey.trim();
+      if (provider.provider === "foundry" && foundry.endpoint) input.foundry = { endpoint: foundry.endpoint, deployments: {} };
+      if (provider.provider === "vertex" && vertex.projectId) input.vertex = vertex;
+      if (provider.provider === "bedrock") input.region = region;
+    }
+    try {
+      const result = await adminApi.discoverProviderModels(provider.provider, input);
+      if (generation === discoveryGeneration.current) setCatalog(result);
+    } catch {
+      if (generation === discoveryGeneration.current) setCatalogError("Model discovery is unavailable. Your selection is preserved; you can add an exact model ID or retry.");
+    } finally {
+      if (generation === discoveryGeneration.current) setCatalogBusy(false);
+    }
+  };
+  useEffect(() => {
+    void discover();
+    const timer = setInterval(() => void discover(), 3600_000);
+    return () => { clearInterval(timer); discoveryGeneration.current += 1; };
+  }, [provider.provider]);
+  const options = useMemo(() => {
+    const all = new Map((provider.modelOptions ?? []).map((model) => [model.id, model]));
+    for (const model of catalog?.models ?? []) all.set(model.id, model);
+    for (const id of selectedModelIds) if (!all.has(id)) all.set(id, { id, displayName: id, source: "manual", capabilities: {} });
+    return [...all.values()].sort((a, b) => Number(selectedModelIds.includes(b.id)) - Number(selectedModelIds.includes(a.id)) || a.displayName.localeCompare(b.displayName));
+  }, [catalog, provider.modelOptions, selectedModelIds]);
+  const matching = options.filter((model) => `${model.id} ${model.displayName} ${model.publisher ?? ""}`.toLowerCase().includes(search.toLowerCase()) && (capabilityFilter === "all" || (model.capabilities ?? model.modelCapabilities)?.[capabilityFilter] === true));
+  const toggleModel = (id, selected) => {
+    setSelectedModelIds((current) => selected ? [...new Set([...current, id])].slice(0, 64) : current.filter((item) => item !== id));
+    if (selected && provider.provider === "foundry") setFoundry((current) => ({ ...current,
+      deployments: { ...current.deployments, [id]: current.deployments[id] ?? (id.length <= 64 && !id.includes("/") ? id : "") },
+      protocols: { ...current.protocols, [id]: current.protocols?.[id] ?? (id.startsWith("claude-") ? "anthropic" : "openai") },
+    }));
+  };
+  const validCustomId = /^[a-zA-Z0-9][a-zA-Z0-9._:@/-]{0,179}$/.test(customId.trim()) && !customId.includes("..") && !customId.includes("//") && !["__proto__", "constructor", "prototype"].includes(customId.trim());
   const submit = async () => {
-    const key = apiKey.trim();
-    if (!key || !cloudValid || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)) return;
+    if ((!apiKey.trim() && !active) || !cloudValid || !emissionsRegion || !selectedModelIds.length) return;
+    const credential = apiKey.trim() ? { [provider.provider === "vertex" ? "serviceAccountJson" : "apiKey"]: apiKey.trim() } : {};
+    const input = { ...credential, modelIds: selectedModelIds, emissionsRegion };
+    if (provider.provider === "foundry") input.foundry = { endpoint: foundry.endpoint,
+      deployments: Object.fromEntries(selectedModelIds.map((id) => [id, foundry.deployments[id].trim()])),
+      protocols: Object.fromEntries(selectedModelIds.map((id) => [id, foundry.protocols?.[id] ?? "openai"])) };
+    if (provider.provider === "vertex") input.vertex = vertex;
+    if (provider.provider === "bedrock") input.region = region;
     setApiKey("");
-    const input = provider.provider === "foundry"
-      ? { apiKey: key, modelIds: selectedModelIds, emissionsRegion,
-        foundry: { ...foundry, deployments: Object.fromEntries(selectedModelIds.map((id) => [id, foundry.deployments[id].trim()])) } }
-      : provider.provider === "vertex"
-      ? { serviceAccountJson: key, modelIds: selectedModelIds, emissionsRegion, vertex }
-      : provider.provider === "bedrock"
-      ? { apiKey: key, region, modelProfileId, emissionsRegion }
-      : { apiKey: key, modelIds: selectedModelIds, emissionsRegion };
     if (await onSave(provider.provider, input)) onClose();
   };
-  return <ModalDialog
-    title={`${provider.state === "active" ? "Manage" : "Connect"} ${providerTitle(provider.provider)}`}
-    description={provider.provider === "bedrock" ? "Choose an approved Bedrock region and inference profile. The API key remains write-only." : "One provider credential is shared by every enabled model. Choose the approved models this organization may use."}
-    eyebrow="Provider account"
-    labelledBy="provider-account-editor-title"
-    onClose={busy ? () => undefined : onClose}
-  >
-    {provider.modelOptions?.length > 0 && <fieldset className="provider-model-options">
-      <legend>Enabled models</legend>
-      <span>Enable any approved model now; pricing can be added before it is assigned to a route.</span>
-      {provider.modelOptions.map((option) => <label key={option.id}>
-        <input type="checkbox" checked={selectedModelIds.includes(option.id)} disabled={busy} onChange={(event) => toggleModel(option.id, event.target.checked)} />
-        <span><strong>{option.displayName}</strong><small>{option.id}</small>{providerModelCapabilityLabels(option.modelCapabilities).length > 0 && <small className="provider-model-capabilities">{providerModelCapabilityLabels(option.modelCapabilities).join(" · ")}</small>}</span>
-      </label>)}
-    </fieldset>}
-    {provider.state === "active" && ["foundry", "vertex"].includes(provider.provider) && <p>Disconnect this account before changing its resource, project, location, or existing deployment names.</p>}
-    {provider.provider === "foundry" && <>
-      <label className="modal-field"><span>Foundry OpenAI v1 endpoint</span><input type="url" value={foundry.endpoint} placeholder="https://your-resource.openai.azure.com/openai/v1/" disabled={busy || provider.state === "active"} onChange={(event) => setFoundry((current) => ({ ...current, endpoint: event.target.value }))} /></label>
-      {selectedModelIds.map((id) => <label className="modal-field" key={id}><span>{id} deployment name</span><input value={foundry.deployments[id] ?? ""} disabled={busy || Boolean(provider.state === "active" && provider.foundry?.deployments?.[id])} onChange={(event) => setFoundry((current) => ({ ...current, deployments: { ...current.deployments, [id]: event.target.value } }))} /><small>Use the deployment name from your Azure resource.</small></label>)}
-    </>}
+  return <ModalDialog title={`${active ? "Manage" : "Connect"} ${providerTitle(provider.provider)}`}
+    description="Choose models for your organization. Applying changes tests the selected models; pricing and route assignments are managed separately."
+    eyebrow="Provider account" labelledBy="provider-account-editor-title" onClose={busy ? () => undefined : onClose}>
+    {provider.provider === "foundry" && <label className="modal-field"><span>Foundry OpenAI v1 endpoint</span><input type="url" value={foundry.endpoint} placeholder="https://your-resource.openai.azure.com/openai/v1/" disabled={busy || active} onChange={(event) => setFoundry((current) => ({ ...current, endpoint: event.target.value }))} /><small>Claude deployments use the Anthropic endpoint on this resource.</small></label>}
     {provider.provider === "vertex" && <>
-      <label className="modal-field"><span>Google Cloud project ID</span><input value={vertex.projectId} disabled={busy || provider.state === "active"} onChange={(event) => setVertex((current) => ({ ...current, projectId: event.target.value }))} /></label>
-      <label className="modal-field"><span>Vertex AI location</span><SelectMenu value={vertex.location} options={["global", "us-central1", "us-east5", "europe-west1", "europe-west4", "asia-southeast1"].map((value) => ({ value, label: value }))} ariaLabel="Vertex AI location" disabled={busy || provider.state === "active"} onValueChange={(location) => setVertex((current) => ({ ...current, location }))} /><small>Global does not pin inference to a single region. Enable each selected model in this project and location.</small></label>
+      <label className="modal-field"><span>Google Cloud project ID</span><input value={vertex.projectId} disabled={busy || active} onChange={(event) => setVertex((current) => ({ ...current, projectId: event.target.value }))} /></label>
+      <label className="modal-field"><span>Vertex AI location</span><input value={vertex.location} disabled={busy || active} placeholder="global or us-east5" onChange={(event) => setVertex((current) => ({ ...current, location: event.target.value }))} /><small>Enter a supported location for your selected models. Global does not pin inference to one region.</small></label>
     </>}
-    {provider.provider === "bedrock" && <>
-      <label className="modal-field"><span>Approved region</span><SelectMenu value={region} options={bedrockRegionOptions} ariaLabel="Approved Bedrock region" disabled={busy || provider.state === "active"} onValueChange={setRegion} /></label>
-      <label className="modal-field"><span>Approved inference profile</span><SelectMenu value={modelProfileId} options={bedrockProfileOptions} ariaLabel="Approved Bedrock inference profile" disabled={busy || provider.state === "active"} onValueChange={setModelProfileId} /></label>
-    </>}
-    <label className="modal-field"><span>Estimated serving grid</span><SelectMenu value={emissionsRegion} options={accountingRegionOptions} ariaLabel="Estimated serving grid for emissions" disabled={busy} onValueChange={setEmissionsRegion} /><small>Accounting assumption only; this does not control the provider's inference location.</small></label>
-    <label className="modal-field"><span>{provider.provider === "vertex" ? "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={provider.provider === "vertex" ? "Paste the service account JSON credential" : "Paste the provider API key"} disabled={busy} /></label>
+    {provider.provider === "bedrock" && <label className="modal-field"><span>Bedrock region</span><input value={region} disabled={busy || active} placeholder="ap-southeast-1" onChange={(event) => setRegion(event.target.value)} /><small>Use a model ID or inference profile ID supported by Bedrock Converse in this region.</small></label>}
+    <label className="modal-field"><span>{provider.provider === "vertex" ? "Google service account JSON" : providerTitle(provider.provider) + " API key"}</span><input type="password" autoComplete="new-password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={active ? "Leave blank to keep the saved credential" : "Paste the provider credential"} disabled={busy} /></label>
+    <div className="provider-catalog-toolbar">
+      <label className="modal-field"><span>Search models</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search model name or publisher" /></label>
+      <button className="secondary-button" type="button" disabled={busy || catalogBusy} onClick={() => void discover(true, true)}>{catalogBusy ? "Discovering…" : "Refresh models"}</button>
+    </div>
+    <p className="provider-catalog-status" role="status">{catalogError || catalog?.warning || (catalogBusy ? "Loading available model information…" : "Catalog visibility does not guarantee account access. Selected models are tested when you apply changes.")}</p>
+    {catalog?.fetchedAt && <p className="provider-catalog-status">Updated {displayDate(catalog.fetchedAt)} · Refreshes automatically every hour</p>}
+    <label className="modal-field"><span>Capability filter</span><SelectMenu value={capabilityFilter} options={[{ value: "all", label: "All models" }, { value: "tools", label: "Function tools" }, { value: "vision", label: "Vision" }, { value: "streaming", label: "Streaming" }]} ariaLabel="Filter models by capability" onValueChange={setCapabilityFilter} /></label>
+    <fieldset className="provider-model-options provider-dynamic-models">
+      <legend>Enabled models ({selectedModelIds.length}/64)</legend>
+      {matching.slice(0, 100).map((option) => {
+        const capabilities = option.capabilities ?? option.modelCapabilities;
+        return <label key={option.id}>
+          <input type="checkbox" checked={selectedModelIds.includes(option.id)} disabled={busy || (!selectedModelIds.includes(option.id) && selectedModelIds.length >= 64)} onChange={(event) => toggleModel(option.id, event.target.checked)} />
+          <span><strong>{option.displayName}</strong><small>{option.id}{option.publisher ? ` · ${option.publisher}` : ""}</small>
+            <small>{providerModelCapabilityLabels(capabilities).join(" · ") || "Capabilities unknown"}{option.source ? ` · ${option.source === "litellm" ? "Gateway catalog" : option.source === "manual" ? "Added by ID" : "Provider catalog"}` : ""}</small>
+            {(option.contextTokens || option.outputTokens) && <small>{option.contextTokens ? `${option.contextTokens.toLocaleString()} input tokens` : "Input limit unknown"} · {option.outputTokens ? `${option.outputTokens.toLocaleString()} output tokens` : "Output limit unknown"}</small>}
+            {(option.inputUsdPerMillion !== undefined || option.outputUsdPerMillion !== undefined) && <small>Reference USD / 1M tokens: {option.inputUsdPerMillion ?? "?"} input · {option.outputUsdPerMillion ?? "?"} output. Review pricing before routing.</small>}
+          </span>
+        </label>;
+      })}
+      {!matching.length && <p>No matching models. Add an exact model ID below.</p>}
+      {matching.length > 100 && <p>Showing 100 of {matching.length} matches. Refine your search.</p>}
+    </fieldset>
+    <div className="provider-catalog-toolbar">
+      <label className="modal-field"><span>Model ID</span><input value={customId} maxLength={180} disabled={busy} onChange={(event) => setCustomId(event.target.value)} placeholder="Exact provider model ID, including version" /></label>
+      <button className="secondary-button" type="button" disabled={busy || !validCustomId || selectedModelIds.length >= 64} onClick={() => { toggleModel(customId.trim(), true); setCustomId(""); setSearch(""); }}>Add by model ID</button>
+    </div>
+    {provider.provider === "foundry" && selectedModelIds.map((id) => <div key={id} className="provider-deployment-fields">
+      <label className="modal-field"><span>{id} deployment name</span><input value={foundry.deployments[id] ?? ""} disabled={busy || Boolean(active && provider.foundry?.deployments?.[id])} onChange={(event) => setFoundry((current) => ({ ...current, deployments: { ...current.deployments, [id]: event.target.value } }))} /><small>Use the deployment name from your Azure resource.</small></label>
+      <label className="modal-field"><span>{id} API format</span><SelectMenu value={foundry.protocols?.[id] ?? "openai"} options={[{ value: "openai", label: "OpenAI compatible" }, { value: "anthropic", label: "Anthropic (Claude)" }]} ariaLabel={`${id} API format`} disabled={busy || Boolean(active && provider.foundry?.deployments?.[id])} onValueChange={(protocol) => setFoundry((current) => ({ ...current, protocols: { ...current.protocols, [id]: protocol } }))} /></label>
+    </div>)}
+    {active && ["foundry", "vertex", "bedrock"].includes(provider.provider) && <p>Disconnect before changing the account's resource, project, region, or an existing deployment target.</p>}
+    <label className="modal-field"><span>Estimated serving grid</span><SelectMenu value={emissionsRegion} options={accountingRegionOptions} ariaLabel="Estimated serving grid for emissions" disabled={busy} onValueChange={setEmissionsRegion} /><small>Accounting assumption only; this does not control inference location.</small></label>
     <div className="modal-actions provider-account-actions">
       {provider.state !== "not-configured" && <button className="secondary-button danger-button" type="button" disabled={busy} onClick={() => onDelete(provider.provider)}>Disconnect provider</button>}
       <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
-      <button className="primary-button" type="button" disabled={busy || !cloudValid || !apiKey.trim() || !emissionsRegion || (provider.provider !== "bedrock" && !selectedModelIds.length)} onClick={submit}>{busy ? "Validating" : provider.state === "active" ? "Apply changes" : "Connect account"}</button>
+      <button className="primary-button" type="button" disabled={busy || !cloudValid || (!active && !apiKey.trim()) || !emissionsRegion || !selectedModelIds.length} onClick={submit}>{busy ? "Validating" : active ? "Apply changes" : "Connect account"}</button>
     </div>
   </ModalDialog>;
 }
@@ -394,7 +444,7 @@ export function ModelsRoutingAdmin({
       sourceVersion: `manual-${new Date().toISOString().slice(0, 10)}`,
       effectiveFrom: datetimeLocalValue(),
       overrideReason: "",
-      prices: Object.fromEntries(pricingUnits.map((item) => [item.key, card ? String(Number(card.rates?.find((rate) => rate.unit === item.key)?.amountPerUnit ?? 0) * 1_000_000 / Number(card.rates?.find((rate) => rate.unit === item.key)?.unitScale ?? 1_000_000)) : ""])),
+      prices: Object.fromEntries(pricingUnits.map((item) => [item.key, card ? String(Number(card.rates?.find((rate) => rate.unit === item.key)?.amountPerUnit ?? 0) * 1_000_000 / Number(card.rates?.find((rate) => rate.unit === item.key)?.unitScale ?? 1_000_000)) : item.key === "input_uncached_token" ? String(deployment.metadata?.inputUsdPerMillion ?? "") : item.key === "output_token" ? String(deployment.metadata?.outputUsdPerMillion ?? "") : ""])),
     });
   };
   const createPriceRecord = async () => {

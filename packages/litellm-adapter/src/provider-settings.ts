@@ -1,3 +1,4 @@
+import { dynamicProviderModelIdSchema, providerModelCatalogSchema, type ProviderModelCatalog, type ProviderModelMetadata } from "@lemmacomputer/contracts";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   approvedBedrockApiKeyModelProfiles,
@@ -27,17 +28,20 @@ export type ManagedProviderOperation = {
   provider: ManagedProviderName;
   existingModelIds: string[];
   configuration?: ProviderSettingMetadata;
+  credentialFingerprint?: string;
+  useSavedCredential?: boolean;
+  modelMetadata?: Record<string, ProviderModelMetadata>;
 };
 type DirectProviderSelection<T extends ProviderModelId> =
   | { modelId: T; modelIds?: never }
   | { modelId?: never; modelIds: T[] };
 export type ManagedProviderConfiguration =
-  | (ManagedProviderOperation & { provider: "openai"; apiKey: string } & DirectProviderSelection<OpenAiProviderModelId>)
-  | (ManagedProviderOperation & { provider: "anthropic"; apiKey: string } & DirectProviderSelection<AnthropicProviderModelId>)
-  | (ManagedProviderOperation & { provider: "glm"; apiKey: string } & DirectProviderSelection<GlmProviderModelId>)
-  | (ManagedProviderOperation & { provider: "foundry"; apiKey: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration })
-  | (ManagedProviderOperation & { provider: "vertex"; apiKey: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration })
-  | (ManagedProviderOperation & { provider: "bedrock"; apiKey: string; region: BedrockApiKeyRegion; modelProfileId: BedrockApiKeyModelProfileId });
+  | (ManagedProviderOperation & { provider: "openai"; apiKey?: string } & DirectProviderSelection<OpenAiProviderModelId>)
+  | (ManagedProviderOperation & { provider: "anthropic"; apiKey?: string } & DirectProviderSelection<AnthropicProviderModelId>)
+  | (ManagedProviderOperation & { provider: "glm"; apiKey?: string } & DirectProviderSelection<GlmProviderModelId>)
+  | (ManagedProviderOperation & { provider: "foundry"; apiKey?: string; modelIds: FoundryProviderModelId[]; foundry: FoundryConfiguration })
+  | (ManagedProviderOperation & { provider: "vertex"; apiKey?: string; modelIds: VertexProviderModelId[]; vertex: VertexConfiguration })
+  | (ManagedProviderOperation & { provider: "bedrock"; apiKey?: string; region: BedrockApiKeyRegion; modelProfileId?: BedrockApiKeyModelProfileId; modelIds?: string[] });
 export type ManagedProviderModelCapabilities = {
   vision: boolean;
   tools: boolean;
@@ -45,6 +49,7 @@ export type ManagedProviderModelCapabilities = {
 };
 export type ManagedProviderDeploymentDescriptor = {
   modelLimits?: { contextTokens: number; outputTokens: number };
+  metadata?: ProviderModelMetadata;
   id: string;
   provider: ManagedProviderName;
   providerAccountId: string;
@@ -68,6 +73,7 @@ export type ManagedProviderRoute = {
   configuration: ProviderSettingMetadata;
 };
 export interface ProviderAdministrationGateway {
+  discoverModels?(input: ManagedProviderOperation & { apiKey?: string; modelIds?: string[] }): Promise<ProviderModelCatalog>;
   configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute>;
   testManagedProvider(input: ManagedProviderOperation): Promise<void>;
   deleteManagedProvider(input: ManagedProviderOperation): Promise<void>;
@@ -81,6 +87,8 @@ export type ManagedProviderModel = {
   foundry?: FoundryConfiguration;
   vertex?: VertexConfiguration;
   baseModel?: string;
+  bedrockRegion?: string;
+  metadata?: ProviderModelMetadata;
   bedrock?: { region: BedrockApiKeyRegion; profile: BedrockApiKeyModelProfile };
 };
 
@@ -148,8 +156,20 @@ export const managedProviderModelOptions = (provider: SelectableProviderName) =>
     ...(modelCapabilities ? { modelCapabilities } : {}),
   }));
 
-export const managedProviderModel = (provider: SelectableProviderName, modelId: unknown) =>
-  managedProviderModelProfiles[provider].find((candidate) => candidate.id === modelId) ?? null;
+export const managedProviderModel = (provider: ManagedProviderName, modelId: unknown, metadata?: ProviderModelMetadata): ProviderModelProfile | null => {
+  if (!dynamicProviderModelIdSchema.safeParse(modelId).success) return null;
+  const id = modelId as string;
+  const legacy = provider === "bedrock" ? undefined : managedProviderModelProfiles[provider].find((candidate) => candidate.id === id);
+  if (legacy && !metadata) return legacy;
+  const prefix = ({ glm: "zai", vertex: "vertex_ai", foundry: "openai", bedrock: "bedrock/converse" } as Record<string, string>)[provider] ?? provider;
+  return { id, displayName: metadata?.displayName ?? legacy?.displayName ?? id, model: `${prefix}/${id}`,
+    vision: metadata?.capabilities.vision ?? legacy?.vision ?? false,
+    modelCapabilities: {
+      vision: metadata?.capabilities.vision ?? legacy?.vision ?? false,
+      tools: metadata?.capabilities.tools ?? legacy?.modelCapabilities?.tools ?? false,
+      streaming: metadata?.capabilities.streaming ?? legacy?.modelCapabilities?.streaming ?? false,
+    } };
+};
 
 export const managedProviderDisplayMetadata: Record<ManagedProviderName, ManagedProviderDisplayMetadata> = {
   foundry: { primaryAlias: "", upstreamModelDisplayName: "Azure AI Foundry deployments" },
@@ -193,11 +213,15 @@ export const managedProviderModels: Record<ManagedProviderName, readonly Managed
   ],
 };
 
-export const managedProviderModelAlias = (provider: SelectableProviderName, modelId: ProviderModelId) =>
-  `lemmacomputer-${provider}-${modelId.replaceAll(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}`;
+export const managedProviderModelAlias = (provider: ManagedProviderName, modelId: ProviderModelId) => {
+  const legacy = provider !== "bedrock" && managedProviderModelProfiles[provider].some((model) => model.id === modelId);
+  const slug = modelId.replaceAll(/[^a-zA-Z0-9]+/g, "-").toLowerCase().slice(0, 80);
+  return `lemmacomputer-${provider}-${slug}${legacy ? "" : `-${createHash("sha256").update(modelId).digest("hex").slice(0, 16)}`}`;
+};
 
 export const managedProviderForAlias = (alias: string) => managedProviderNames.find((provider) => {
   if (managedProviderModels[provider].some((model) => model.alias === alias)) return true;
+  if (alias.startsWith(`lemmacomputer-${provider}-`) && /^[a-z0-9-]+-[a-f0-9]{16}$/.test(alias.slice(`lemmacomputer-${provider}-`.length))) return true;
   if (provider === "bedrock") return false;
   return managedProviderModelProfiles[provider].some((profile) => {
     const base = managedProviderModelAlias(provider, profile.id);
@@ -246,7 +270,7 @@ export const managedProviderAliasForAccessGroup = (tenantId: string, accessGroup
   if (!accessGroup.startsWith(prefix)) return null;
   const alias = accessGroup.slice(prefix.length);
   const provider = managedProviderForAlias(alias);
-  return provider === "foundry" || provider === "vertex" ? alias : null;
+  return provider ? alias : null;
 };
 
 const tenantCredentialName = (tenantId: string, provider: ManagedProviderName) => `lemmacomputer-provider-${tenantRouteHash(tenantId)}-${provider}`;
@@ -270,12 +294,12 @@ export const managedProviderSelectedModelIds = (
 ): ProviderModelId[] => {
   const requested = configuration.modelIds
     ?? (configuration.modelId ? [configuration.modelId] : [defaultManagedProviderModelIds[provider]]);
-  const requestedSet = new Set(requested);
-  const selected = managedProviderModelProfiles[provider].filter((profile) => requestedSet.has(profile.id));
-  if (selected.length !== requested.length || selected.length !== requestedSet.size || selected.length === 0) {
-    throw new LemmaComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
+  if (requested.length < 1 || requested.length > 64 || new Set(requested).size !== requested.length
+    || requested.some((id) => !dynamicProviderModelIdSchema.safeParse(id).success)) {
+    throw new LemmaComputerError("PROVIDER_MODEL_UNAPPROVED", "Invalid provider model selection", 400);
   }
-  return selected.map((profile) => profile.id);
+  return requested;
+
 };
 
 const templatesFor = (
@@ -286,11 +310,11 @@ const templatesFor = (
     const parsed = providerSettingMetadataSchema.safeParse(configuration);
     if (!parsed.success || !configuration[provider]) return [];
     return managedProviderSelectedModelIds(provider, configuration).map((id, index) => {
-      const profile = managedProviderModel(provider, id)!;
+      const profile = managedProviderModel(provider, id, configuration.modelMetadata?.[id])!;
       // A new cloud target must not inherit an old deployment's pricing or
       // routing approval even when the base model and credential slot match.
       const binding = provider === "foundry"
-        ? [configuration.foundry!.endpoint.replace(/\/$/, ""), configuration.foundry!.deployments[id as FoundryProviderModelId]]
+        ? [configuration.foundry!.endpoint.replace(/\/$/, ""), configuration.foundry!.deployments[id as FoundryProviderModelId], ...(configuration.foundry!.protocols?.[id] === "anthropic" ? ["anthropic"] : [])]
         : [configuration.vertex!.projectId, configuration.vertex!.location];
       const bindingHash = createHash("sha256").update(JSON.stringify(binding)).digest("hex").slice(0, 16);
       const alias = `${managedProviderModelAlias(provider, id)}-${bindingHash}`;
@@ -299,12 +323,30 @@ const templatesFor = (
         primary: index === 0, legacyAlias: false,
         model: {
           alias, vision: profile.vision, modelCapabilities: profile.modelCapabilities,
-          model: provider === "foundry" ? `openai/${configuration.foundry!.deployments[id as FoundryProviderModelId]}` : profile.model,
+          model: provider === "foundry" ? `${configuration.foundry!.protocols?.[id] === "anthropic" ? "anthropic" : "openai"}/${configuration.foundry!.deployments[id]}` : profile.model,
+          metadata: configuration.modelMetadata?.[id],
           baseModel: provider === "foundry" ? `foundry/${id}` : profile.model,
-          ...(provider === "foundry" ? { foundry: configuration.foundry } : { vertex: configuration.vertex }),
+          ...(provider === "foundry" ? { foundry: { ...configuration.foundry!, endpoint: configuration.foundry!.protocols?.[id] === "anthropic" ? configuration.foundry!.endpoint.replace(/\/openai\/v1\/?$/, "/anthropic") : configuration.foundry!.endpoint } } : { vertex: configuration.vertex }),
         },
       };
     });
+  }
+  if (provider === "bedrock" && configuration.modelIds && configuration.region) {
+    const selected = configuration.modelIds.map((id, index) => {
+      const profile = managedProviderModel(provider, id, configuration.modelMetadata?.[id])!;
+      const alias = `${managedProviderModelAlias(provider, id)}-${createHash("sha256").update(configuration.region!).digest("hex").slice(0, 16)}`;
+      return { alias, upstreamModelId: id, displayName: profile.displayName, primary: index === 0, legacyAlias: false,
+        model: { alias, model: profile.model, vision: profile.vision, modelCapabilities: profile.modelCapabilities,
+          metadata: configuration.modelMetadata?.[id], bedrockRegion: configuration.region } };
+    });
+    // Preserve the old configured deployment when expanding a legacy account.
+    const legacy = approvedBedrockApiKeyModelProfiles[0]!;
+    if (configuration.modelIds.includes(legacy.litellmModel.replace("bedrock/converse/", ""))) {
+      const previous = templatesFor(provider, { region: configuration.region, modelProfileId: legacy.id });
+      selected.splice(configuration.modelIds.indexOf(legacy.litellmModel.replace("bedrock/converse/", "")), 1);
+      return [...previous, ...selected];
+    }
+    return selected;
   }
   if (provider === "bedrock") {
     const profile = approvedBedrockApiKeyModelProfiles.find((candidate) => (
@@ -333,7 +375,7 @@ const templatesFor = (
     }];
   }
   const selectedIds = managedProviderSelectedModelIds(provider, configuration);
-  const profiles = selectedIds.map((id) => managedProviderModel(provider, id)!);
+  const profiles = selectedIds.map((id) => managedProviderModel(provider, id, configuration.modelMetadata?.[id])!);
   const primary = profiles[0]!;
   const legacy = managedProviderModels[provider].map((model) => ({
     alias: model.alias,
@@ -350,7 +392,7 @@ const templatesFor = (
       const alias = managedProviderModelAlias(provider, profile.id);
       return {
         alias,
-        model: { alias, model: profile.model, vision: profile.vision, modelCapabilities: profile.modelCapabilities },
+        model: { alias, model: profile.model, vision: profile.vision, modelCapabilities: profile.modelCapabilities, metadata: configuration.modelMetadata?.[profile.id] },
         upstreamModelId: profile.id,
         displayName: profile.displayName,
         primary: profile.id === primary.id,
@@ -368,7 +410,7 @@ export const managedProviderDeploymentDescriptors = (
   const accountId = tenantCredentialName(tenantId, provider);
   const templates = templatesFor(provider, configuration);
   const concrete = configuration.modelIds
-    ? templates.filter((template) => !template.legacyAlias)
+    ? templates.filter((template) => !template.legacyAlias || provider === "bedrock")
     : [templates.find((template) => template.alias === managedProviderDisplayMetadata[provider].primaryAlias) ?? templates[0]]
       .filter((template): template is ProviderModelTemplate => Boolean(template));
   return concrete.map((template) => {
@@ -386,7 +428,8 @@ export const managedProviderDeploymentDescriptors = (
       providerModel: template.model.baseModel ?? template.model.model,
       providerDeployment: accessGroup,
       ...(configuration.modelLimits?.[accessGroup] ? { modelLimits: configuration.modelLimits[accessGroup] } : {}),
-      region: template.model.bedrock?.region ?? template.model.vertex?.location ?? null,
+      ...(template.model.metadata ? { metadata: template.model.metadata } : {}),
+      region: template.model.bedrockRegion ?? template.model.bedrock?.region ?? template.model.vertex?.location ?? null,
       providerServiceTier: "standard",
       accessGroup,
       primary: template.primary,
@@ -427,15 +470,33 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     this.adminFetch = config.adminFetch ?? fetch;
   }
 
+  async discoverModels(input: ManagedProviderOperation & { apiKey?: string; modelIds?: string[] }): Promise<ProviderModelCatalog> {
+    const apiKey = input.apiKey && input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey;
+    const result = await this.call("/lemmacomputer/model-catalog", { method: "POST", body: {
+      tenantId: input.tenantId, provider: input.provider, configuration: { ...(input.configuration?.foundry ? { foundry: { endpoint: input.configuration.foundry.endpoint } } : {}), ...(input.configuration?.vertex ? { vertex: input.configuration.vertex } : {}), ...(input.configuration?.region ? { region: input.configuration.region } : {}) }, useSavedCredential: input.useSavedCredential === true,
+      ...(apiKey ? { apiKey } : {}), ...(input.modelIds ? { modelIds: input.modelIds } : {}),
+    } });
+    const parsed = providerModelCatalogSchema.safeParse(result.payload);
+    if (!result.ok || !parsed.success) throw new LemmaComputerError("PROVIDER_CATALOG_UNAVAILABLE", "Model discovery is unavailable; add an exact model ID or retry", 503, true);
+    return parsed.data;
+  }
+
   async configureManagedProvider(input: ManagedProviderConfiguration): Promise<ManagedProviderRoute> {
-    const apiKey = input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey.trim();
-    if (!apiKey) throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
+    const apiKey = input.apiKey ? (input.provider === "vertex" ? validatedVertexCredentials(input.apiKey) : input.apiKey.trim()) : "";
+    if (!apiKey && (!input.existingModelIds.length || !input.credentialFingerprint)) throw new LemmaComputerError("PROVIDER_KEY_REQUIRED", "A provider API key is required", 400);
     const configuration = this.configurationFor(input);
+    if (input.modelMetadata) configuration.modelMetadata = input.modelMetadata;
     const models = templatesFor(input.provider, configuration);
     if (models.length === 0) {
       throw new LemmaComputerError("PROVIDER_MODEL_UNAPPROVED", "The selected provider models are not approved", 400);
     }
     const descriptors = managedProviderDeploymentDescriptors(input.tenantId, input.provider, configuration);
+    for (const deployment of descriptors) {
+      const metadata = deployment.metadata;
+      if (metadata?.contextTokens && metadata.outputTokens && metadata.contextTokens >= 1024 && metadata.outputTokens < metadata.contextTokens) {
+        configuration.modelLimits = { ...configuration.modelLimits, [deployment.providerDeployment]: { contextTokens: metadata.contextTokens, outputTokens: metadata.outputTokens } };
+      }
+    }
     const credentialName = tenantCredentialName(input.tenantId, input.provider);
     const deploymentFor = (template: ProviderModelTemplate, candidate = false): ProviderModelDeployment => {
       const suffix = candidate ? `-candidate-${randomBytes(8).toString("hex")}` : "";
@@ -471,19 +532,24 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     }
 
     await this.ensureRetiringAliasesAreGone(input.provider);
-    const candidateCredentialName = `${credentialName}-candidate-${randomBytes(12).toString("hex")}`;
+    const candidateCredentialName = apiKey ? `${credentialName}-candidate-${randomBytes(12).toString("hex")}` : credentialName;
     const candidates: Array<{ id: string; alias: string }> = [];
     try {
-      await this.createCredential(candidateCredentialName, input, apiKey);
+      if (apiKey) await this.createCredential(candidateCredentialName, input, apiKey);
       for (const model of models) {
         const deployment = deploymentFor(model, true);
         deployment.credentialName = candidateCredentialName;
         candidates.push({ id: await this.createModel(deployment), alias: deployment.alias });
       }
-      for (const candidate of (input.provider === "foundry" || input.provider === "vertex" ? candidates : candidates.slice(0, 1))) await this.probe(candidate.alias, undefined, input.provider);
+      for (const [index, candidate] of candidates.entries()) {
+        const template = models[index]!;
+        if (models.findIndex((model) => model.upstreamModelId === template.upstreamModelId) !== index) continue;
+        const legacy = Boolean(template.model.bedrock) || input.provider !== "bedrock" && managedProviderModelProfiles[input.provider].some((profile) => profile.id === template.upstreamModelId);
+        await this.probe(candidate.alias, undefined, input.provider, !legacy ? template.model.modelCapabilities : undefined);
+      }
 
       if (existing.length > 0) {
-        await this.replaceCredential(credentialName, input, apiKey);
+        if (apiKey) await this.replaceCredential(credentialName, input, apiKey);
         try {
           for (const deployment of targetDeployments) {
             const updated = await this.upsertModel(deployment);
@@ -508,7 +574,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         return {
           modelIds: targetIds,
           deployments: descriptors,
-          credentialFingerprint: this.fingerprint(apiKey),
+          credentialFingerprint: apiKey ? this.fingerprint(apiKey) : input.credentialFingerprint!,
           configuration,
         };
       }
@@ -530,7 +596,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         return {
           modelIds: targetIds,
           deployments: descriptors,
-          credentialFingerprint: this.fingerprint(apiKey),
+          credentialFingerprint: apiKey ? this.fingerprint(apiKey) : input.credentialFingerprint!,
           configuration,
         };
       } catch (error) {
@@ -543,7 +609,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       throw new LemmaComputerError("PROVIDER_CONFIGURATION_FAILED", "The provider configuration could not be validated", 502, true);
     } finally {
       await Promise.all(candidates.map(({ id }) => this.deleteModel(id, input.provider).catch(() => undefined)));
-      await this.deleteCredential(candidateCredentialName, input.provider).catch(() => undefined);
+      if (apiKey) await this.deleteCredential(candidateCredentialName, input.provider).catch(() => undefined);
     }
   }
 
@@ -562,8 +628,10 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       throw new LemmaComputerError("PROVIDER_NOT_CONFIGURED", "That provider is not configured", 409);
     }
     await this.ensureRetiringAliasesAreGone(input.provider);
-    const accessGroup = tenantManagedModelAccessGroup(input.tenantId, model.alias);
-    await this.probe(accessGroup, accessGroup, input.provider);
+    for (const selected of models.filter((item) => !item.legacyAlias || !input.configuration?.modelIds || input.provider === "bedrock")) {
+      const accessGroup = tenantManagedModelAccessGroup(input.tenantId, selected.alias);
+      await this.probe(accessGroup, accessGroup, input.provider);
+    }
   }
 
   async deleteManagedProvider(input: ManagedProviderOperation) {
@@ -588,6 +656,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
       const selected = managedProviderSelectedModelIds(input.provider, { modelId: input.modelId });
       return { modelId: selected[0]! };
     }
+    if (input.modelIds) return providerSettingMetadataSchema.parse({ region: input.region, modelIds: input.modelIds });
     const region = bedrockApiKeyRegionSchema.safeParse(input.region);
     const modelProfileId = bedrockApiKeyModelProfileIdSchema.safeParse(input.modelProfileId);
     if (!region.success || !modelProfileId.success) {
@@ -615,7 +684,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
     return { id: await this.createModel(deployment), created: true };
   }
 
-  private async probe(model: string, accessGroup: string | undefined, provider: ManagedProviderName) {
+  private async probe(model: string, accessGroup: string | undefined, provider: ManagedProviderName, capabilities?: ManagedProviderModelCapabilities) {
     const credential = `sk-ocp-${randomBytes(24).toString("base64url")}`;
     try {
       const grant = await this.call("/key/generate", {
@@ -645,6 +714,17 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           : { model, messages: [{ role: "user", content: "Reply with OK." }] },
       });
       if (!result.ok) throw this.providerFailure(result.status, "credential", provider, result.payload);
+      if (capabilities?.tools || capabilities?.streaming) {
+        const features = await this.call("/chat/completions", { method: "POST", credential, body: {
+          model, stream: true, messages: [{ role: "user", content: capabilities.tools ? "Call record_ok once with an empty object." : "Reply with OK." }],
+          ...(capabilities.tools ? { tools: [{ type: "function", function: { name: "record_ok", description: "Record a successful connection check", parameters: { type: "object", properties: {}, additionalProperties: false } } }], tool_choice: "required" } : {}),
+        } });
+        const events = asObject(features.payload).events;
+        const choices = Array.isArray(events) ? events.flatMap((event) => Array.isArray(asObject(event).choices) ? asObject(event).choices as unknown[] : []) : [];
+        const completed = choices.some((choice) => typeof asObject(choice).finish_reason === "string");
+        const toolCalled = choices.some((choice) => (asObject(asObject(choice).delta).tool_calls as unknown[] | undefined)?.some((call) => asObject(asObject(call).function).name === "record_ok"));
+        if (!features.ok || !completed || (capabilities.tools && !toolCalled)) throw new LemmaComputerError("PROVIDER_TEST_REQUEST_REJECTED", "The model did not pass its streaming or tool-call compatibility check", 422);
+      }
     } finally {
       await this.call("/key/delete", { method: "POST", body: { keys: [credential] } }).catch(() => undefined);
     }
@@ -711,6 +791,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           vertex_project: deployment.model.vertex.projectId,
           vertex_location: deployment.model.vertex.location,
         } : {}),
+        ...(deployment.model.bedrockRegion ? { aws_region_name: deployment.model.bedrockRegion } : {}),
         ...(bedrock ? {
           aws_region_name: bedrock.region,
           timeout: 60,
@@ -725,7 +806,7 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
         lemmacomputer_base_model: deployment.model.baseModel ?? deployment.model.model,
         lemmacomputer_deployment_id: deployment.accessGroups[0],
         lemmacomputer_provider_service_tier: "standard",
-        ...(bedrock ? { lemmacomputer_region: bedrock.region } : deployment.model.vertex ? { lemmacomputer_region: deployment.model.vertex.location } : {}),
+        ...(deployment.model.bedrockRegion ? { lemmacomputer_region: deployment.model.bedrockRegion } : bedrock ? { lemmacomputer_region: bedrock.region } : deployment.model.vertex ? { lemmacomputer_region: deployment.model.vertex.location } : {}),
         ...(deployment.upstreamModelId ? { lemmacomputer_upstream_model_id: deployment.upstreamModelId } : {}),
         lemmacomputer_primary_deployment: deployment.primary,
         lemmacomputer_legacy_alias: deployment.legacyAlias,
@@ -773,9 +854,25 @@ export class LiteLLMProviderAdministration implements ProviderAdministrationGate
           "content-type": "application/json",
         },
         ...(input.body ? { body: JSON.stringify(input.body) } : {}),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(path === "/lemmacomputer/model-catalog" ? Math.max(this.timeoutMs, 60000) : this.timeoutMs),
       });
-      const payload = await response.json().catch(() => ({}));
+      let payload: unknown;
+      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let wire = "";
+        try {
+          if (!reader) throw new Error();
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) break;
+            wire += decoder.decode(chunk.value, { stream: true });
+            if (wire.length > 262144) throw new Error();
+          }
+          wire += decoder.decode();
+          payload = { events: wire.split(/\r?\n/).filter((line) => line.startsWith("data:") && line.slice(5).trim() !== "[DONE]").map((line) => JSON.parse(line.slice(5))) };
+        } finally { await reader?.cancel().catch(() => undefined); }
+      } else payload = await response.json().catch(() => ({}));
       // LiteLLM v1.93.0's credential update endpoint can encode a not-found
       // error as a JSON OpenAI error document while retaining HTTP 200. Treat
       // its embedded numeric status as authoritative, rather than treating a
