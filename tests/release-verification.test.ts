@@ -50,14 +50,14 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(qualifier, /PostgresWorkspaceStore\.fromConnectionString/);
   assert.match(qualifier, /runtimePolicyFor\([\s\S]+\["hermes-claw"\]/);
   assert.match(qualifier, /saveSandboxSettings[\s\S]+agentIds:\s*\["hermes-claw"\]/);
-  assert.match(qualifier, /state:\s*"provisioning"/);
+  assert.match(qualifier, /workspaceStore\.claim\(workspaceId, \["not_created"\], "provisioning"\)/);
   assert.match(qualifier, /chatRuntimes: \[\{/);
   assert.match(qualifier, /AgentBridgeAuthority\(agentBridgeSecret\)/);
   assert.match(qualifier, /new LiteLLMGatewayAdapter\(\{/);
   assert.match(qualifier, /gateway\.ensureGrant\(\{ workspaceId, accessGeneration: 1, identity, agentId, policy \}\)/);
   assert.match(qualifier, /workspaceId,\s+accessGeneration: 1,\s+correlationId/);
   assert.match(qualifier, /http:\/\/lemmacomputer-sandbox-\$\{workspaceId\}:8642\/health/);
-  assert.match(qualifier, /hermesHealth\?\.connectors !== "ready"/);
+  assert.match(qualifier, /hermesHealth\?\.protocol !== "lemmacomputer-chat-events\/v1"/);
   assert.match(qualifier, /gateway\.revoke\(workspaceId, agentId\)/);
   assert.match(qualifier, /workspaceStore\.remove\(identity, workspaceId\)/);
   assert.match(qualifier, /status\?\.state !== "ready"/);

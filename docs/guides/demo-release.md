@@ -35,6 +35,14 @@ isolated Compose stack, checks the product origin, and creates, observes, and
 destroys a real Hermes workspace. A healthy control stack without a durable
 workspace readiness marker is not a releasable candidate.
 
+The workspace smoke creates its own disposable organization and owner using
+the current onboarding store API; it does not require a bootstrap user or real
+customer credentials. Its Chrome selection requires the installed
+[Electron sandbox profile](operations.md#workspace-node-runtime) and
+`LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED=true` in the qualification
+worktree. Hermes runtime readiness is independent of connector availability;
+the provider, OAuth, and Microsoft 365 gates qualify those separate contracts.
+
 Promote each recorded first-party build to the deployment registry, record its
 resulting repository digest, and set the four image variables to those exact
 `repository@sha256:<digest>` references. The deployment-profile preflight
