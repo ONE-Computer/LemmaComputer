@@ -90,6 +90,30 @@ test("a complete bounded Hermes live record passes without requiring a named pro
   assert.deepEqual(evidence.runtime.proposedEffortLevels, ["low", "medium", "high"]);
 });
 
+test("native Desktop records absent Auto explicitly without waiving effort, tool, or policy evidence", () => {
+  const desktop = {
+    ...completeEvidence(),
+    runtime: {
+      ...completeEvidence().runtime,
+      surface: "native-desktop",
+      agentCatalogId: "claude-desktop",
+      clientVersion: "1.22209.3",
+      qualificationId: "claude-desktop-1.22209.3-governed-effort-adapter-2026-09-06",
+    },
+    autoResolution: { status: "not-exposed" },
+  };
+  assert.deepEqual(validateReasoningAdapterEvidence(desktop).autoResolution, { status: "not-exposed" });
+  assert.throws(() => validateReasoningAdapterEvidence({
+    ...completeEvidence(), autoResolution: { status: "not-exposed" },
+  }), { code: "EVIDENCE_CONTRACT_INVALID" });
+  assert.throws(() => validateReasoningAdapterEvidence({
+    ...desktop, levels: desktop.levels.slice(1),
+  }), { code: "EVIDENCE_CONTRACT_INVALID" });
+  assert.throws(() => validateReasoningAdapterEvidence({
+    ...desktop, negativeCases: { ...desktop.negativeCases, overPolicyEffort: "not-tested" },
+  }), { code: "EVIDENCE_CONTRACT_INVALID" });
+});
+
 test("qualification rejects incomplete level, resume, concurrency, and suppression claims", () => {
   const cases = [
     { ...completeEvidence(), levels: [observation("low", "low"), observation("medium", "medium")] },

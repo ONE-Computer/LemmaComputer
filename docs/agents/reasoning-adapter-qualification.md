@@ -20,6 +20,7 @@ Changing a record from discovery to qualified is a reviewed product change. Admi
 | Runtime | Exact pin | Review state | Provider-effort authority | Product behavior |
 | --- | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Qualified under `claude-cli-2.1.215-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | Eligible for Auto, Low, Medium, and High when the route and organization policy also allow them |
+| Claude Desktop | `1.22209.3`, embedded engine `2.1.215` | `claude-desktop-1.22209.3-governed-effort-adapter-2026-09-06` | Native `output_config.effort` is intent; Control signs it before route resolution | Native Low, Medium, and High; see [Desktop recovery](claude-desktop-recovery.md) for evidence and limits |
 | Hermes Agent CLI | `0.19.0` from tag `v2026.7.20`, upstream commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` | Qualified under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | Its native model menu offers Lite, Balanced, and Pro; its native effort menu offers Low, Medium, and High |
 | Hermes Desktop | `0.17.0` | Qualified under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | The patched native effort menu hides unsupported Minimal, Extra High, Max, and Ultra values on LemmaComputer routes |
 | Codex CLI | `0.144.4` | Discovery under `codex-cli-0.144.4-governed-effort-discovery-2026-08-13` | Governed route; no Codex-native `effort` is trusted as policy | No selector until the live gates pass |
@@ -101,6 +102,12 @@ The evidence file contains only:
 - fail-closed negative-case results and hidden-reasoning absence across product surfaces;
 - provider-confirmed token availability, bounded latency, and confirmed/estimated/unavailable cost status;
 - explicit evidence limitations.
+
+Native Desktop evidence sets `runtime.surface` to `native-desktop`. When its
+native menu has no Auto choice, record `autoResolution: {"status":"not-exposed"}`
+instead of inventing an Auto conversation. Product Chat evidence still requires
+the original organization-maximum Auto check. All level, tool, resume,
+concurrency, policy, and hidden-reasoning evidence remains required.
 
 Keep the evidence outside the repository until it has been reviewed. Never add screenshots, prompts, responses, tool payloads, access tokens, credentials, or signed bindings to it.
 

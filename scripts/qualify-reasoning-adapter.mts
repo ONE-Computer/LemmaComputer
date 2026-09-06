@@ -59,6 +59,7 @@ export const reasoningAdapterEvidenceSchema = z.strictObject({
     reviewState: z.enum(["candidate", "qualified"]),
     agentCatalogId: identifierSchema,
     clientVersion: identifierSchema,
+    surface: z.enum(["product-chat", "native-desktop"]).default("product-chat"),
     discoveryId: identifierSchema.optional(),
     qualificationId: identifierSchema.optional(),
     proposedEffortLevels: z.array(effortSchema).min(1).max(3),
@@ -73,11 +74,11 @@ export const reasoningAdapterEvidenceSchema = z.strictObject({
     mappingVersionId: identifierSchema,
   }),
   levels: z.array(liveLevelSchema).min(1).max(3),
-  autoResolution: z.strictObject({
+  autoResolution: z.union([z.strictObject({
     conversationId: identifierSchema,
     resolvedEffort: effortSchema,
     organizationMaximumApplied: requiredObservationSchema,
-  }),
+  }), z.strictObject({ status: z.literal("not-exposed") })]),
   resume: z.strictObject({
     conversationId: identifierSchema,
     requestedEffort: effortSchema,
@@ -123,7 +124,11 @@ export const reasoningAdapterEvidenceSchema = z.strictObject({
       context.addIssue({ code: "custom", path: ["levels", index, "resolvedEffort"], message: "An explicitly qualified level must resolve without substitution" });
     }
   });
-  if (!proposed.has(value.autoResolution.resolvedEffort)) {
+  if ("status" in value.autoResolution) {
+    if (value.runtime.surface !== "native-desktop") {
+      context.addIssue({ code: "custom", path: ["autoResolution"], message: "Only a native desktop without an Auto control may record Auto as not exposed" });
+    }
+  } else if (!proposed.has(value.autoResolution.resolvedEffort)) {
     context.addIssue({ code: "custom", path: ["autoResolution", "resolvedEffort"], message: "Auto must resolve to a proposed qualified level" });
   }
   if (value.route.reviewState === "candidate" && !value.route.discoveryId) {

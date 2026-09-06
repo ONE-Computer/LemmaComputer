@@ -20,6 +20,7 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Agent runtime | Pinned version | Product levels | Status |
 | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Auto, Low, Medium, High | Qualified for signed, conversation-pinned propagation |
+| Claude Desktop | `1.22209.3` | Low, Medium, High | Native effort intent uses `output_config.effort`; separate exact-version registration and [recovery evidence](claude-desktop-recovery.md) |
 | Hermes Agent CLI | `0.19.0` | Low, Medium, High | Qualified separately under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13`; route capability still intersects independently |
 | Hermes Desktop | `0.17.0` | Low, Medium, High | Qualified separately under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13`; unsupported upstream levels are hidden on LemmaComputer routes |
 | Codex CLI | `0.144.4` | None | Discovery recorded; credentialed reasoning-plus-tool evidence remains incomplete; fail closed |
