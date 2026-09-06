@@ -5154,9 +5154,9 @@ function ChatConversation({
   const latestActivityTurnId = activityTurns.at(-1) ?? "";
 
   useEffect(() => {
-    onTurnBusyChange?.(turnBusy);
-    return () => onTurnBusyChange?.(false);
-  }, [onTurnBusyChange, turnBusy]);
+    onTurnBusyChange?.(threadId, turnBusy);
+    return () => onTurnBusyChange?.(threadId, false);
+  }, [onTurnBusyChange, threadId, turnBusy]);
 
   useEffect(() => {
     if (latestActivityTurnId) setSelectedActivityTurnId(latestActivityTurnId);
@@ -5750,9 +5750,11 @@ export function ChatScreen({
     onSessionChange(sessionId);
   };
 
-  const changeThreadBusy = (threadId, busy) => {
+  // Keep this stable: a changing callback retriggers the child's effect cleanup,
+  // toggling busy false/true on every parent render while a stream is active.
+  const changeThreadBusy = useCallback((threadId, busy) => {
     setThreadBusy((current) => current[threadId] === busy ? current : { ...current, [threadId]: busy });
-  };
+  }, []);
 
   const registerThreadSession = (threadId, sessionId) => {
     setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, sessionId } : thread));
@@ -6073,7 +6075,7 @@ export function ChatScreen({
               requestedServiceClass={requestedServiceClass}
               requestedServiceClassAvailable={readyServiceClassValues.has(requestedServiceClass)}
               reasoningEffort={qualifiedEfforts.includes(reasoningEffort) ? reasoningEffort : undefined}
-              onTurnBusyChange={(busy) => changeThreadBusy(thread.id, busy)}
+              onTurnBusyChange={changeThreadBusy}
               sessionId={thread.sessionId}
               onSessionsChange={onSessionsChange}
               onSessionCreated={registerThreadSession}
