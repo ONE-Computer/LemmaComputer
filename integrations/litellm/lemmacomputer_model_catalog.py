@@ -54,7 +54,9 @@ def metadata(provider, model_id, raw=None):
     prices = PUBLIC_CATALOG or litellm.model_cost
     info = prices.get(route) or prices.get(model_id) or {}
     if provider == "foundry":
-        info = prices.get("azure/" + model_id) or info
+        info = prices.get("azure/" + model_id) or prices.get("azure_ai/" + model_id) or info
+    if provider == "vertex":
+        info = prices.get("vertex_ai-anthropic/" + model_id) or info
     if provider == "bedrock":
         info = prices.get("bedrock/" + model_id) or info
     result = {"id": model_id, "displayName": str(raw.get("display_name") or raw.get("displayName") or model_id)[:200],
