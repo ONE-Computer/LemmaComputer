@@ -373,7 +373,10 @@ export const createScheduleSchema = z.object({
 }).strict();
 export type CreateSchedule = z.infer<typeof createScheduleSchema>;
 
-export const updateScheduleSchema = createScheduleSchema.partial().strict().refine(
+export const updateScheduleSchema = createScheduleSchema.partial().extend({
+  requestedServiceClass: scheduleRequestedServiceClassSchema.optional(),
+  state: scheduleStateSchema.optional(),
+}).strict().refine(
   (value) => Object.keys(value).length > 0,
   "At least one schedule field is required",
 );

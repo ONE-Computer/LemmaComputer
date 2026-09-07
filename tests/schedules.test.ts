@@ -6,7 +6,7 @@ import type {
   IdentityContext,
   ScheduleRunState,
 } from "@lemmacomputer/contracts";
-import { createScheduleSchema, LemmaComputerError } from "@lemmacomputer/contracts";
+import { createScheduleSchema, updateScheduleSchema, LemmaComputerError } from "@lemmacomputer/contracts";
 import {
   MemoryChatStore,
   nextScheduleAt,
@@ -262,6 +262,40 @@ test("schedule contracts default legacy creates and reject unsupported model pre
   });
   assert.throws(() => createScheduleSchema.parse({ ...input, requestedServiceClass: "auto" }));
   assert.throws(() => createScheduleSchema.parse({ ...input, reasoningEffort: "max" }));
+});
+
+test("partial schedule updates preserve model preferences and paused state", async () => {
+  assert.deepEqual(updateScheduleSchema.parse({ state: "paused" }), { state: "paused" });
+  assert.deepEqual(updateScheduleSchema.parse({ title: "Renamed schedule" }), { title: "Renamed schedule" });
+  assert.throws(() => updateScheduleSchema.parse({}));
+  const service = new ScheduleService(
+    new MemoryScheduleStore(),
+    new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
+    successfulAgent,
+    async () => {},
+    async () => access,
+  );
+  const created = await service.create(identity, createScheduleSchema.parse({
+    title: "Preference preservation",
+    workspaceId,
+    agentCatalogId: "codex-cli",
+    requestedServiceClass: "pro",
+    reasoningEffort: "high",
+    prompt: "Verify preferences.",
+    cronExpression: "0 9 * * *",
+    timeZone: "UTC",
+  }));
+  for (const [patch, expectedState] of [
+    [{ state: "paused" }, "paused"],
+    [{ title: "Renamed schedule" }, "paused"],
+    [{ state: "enabled" }, "enabled"],
+  ] as const) {
+    const updated = await service.update(identity, created.id, updateScheduleSchema.parse(patch));
+    assert.equal(updated.requestedServiceClass, "pro");
+    assert.equal(updated.reasoningEffort, "high");
+    assert.equal(updated.state, expectedState);
+    if (expectedState === "paused") assert.equal(updated.nextRunAt, null);
+  }
 });
 
 test("saved prompts are encrypted and bound to their owner and schedule", () => {
