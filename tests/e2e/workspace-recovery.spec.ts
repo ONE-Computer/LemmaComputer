@@ -576,6 +576,17 @@ test("workspace rename propagates to workspace, schedule, and chat labels", asyn
   await page.getByRole("combobox", { name: "Workspace" }).click();
   await expect(page.getByRole("option", { name: "Client research" })).toBeVisible();
   await page.getByRole("option", { name: "Client research" }).click();
+  await expect(page.getByRole("combobox", { name: "Agent" })).toHaveText("Hermes Agent CLI");
+  await expect(page.getByRole("combobox", { name: "Model" })).toHaveText("Balanced · everyday work");
+
+  await page.getByRole("combobox", { name: "Workspace" }).click();
+  await page.getByRole("option", { name: "Product" }).click();
+  await page.getByRole("combobox", { name: "Agent" }).click();
+  await page.getByRole("option", { name: "Claude Code" }).click();
+  await page.getByRole("combobox", { name: "Model" }).click();
+  await page.getByRole("option", { name: "Pro · highest capability" }).click();
+  await page.getByRole("combobox", { name: "Thinking" }).click();
+  await page.getByRole("option", { name: "High · deepest, highest latency and cost" }).click();
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("button", { name: "Chat" }).click();
