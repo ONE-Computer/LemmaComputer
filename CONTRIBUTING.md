@@ -34,6 +34,7 @@ migration numbers, or release commands.
 | `npm test` | Full non-database Node unit and contract suite |
 | `npm run verify:quick` | Doctor, environment check, Compose validation, build, and full non-database tests |
 | `npm run verify:db` | Disposable PostgreSQL product/auth migrations, compatibility, concurrency, backup/restore, and PostgreSQL feature tests |
+| `npm run demo:update -- plan/apply/rollback/status --host=user@host` | Routine development-demo updates; exact source, quick/browser gates, environment continuity and application rollback; see [runbook](docs/guides/demo-release.md) |
 | `npm run verify:release` | Full clean-SHA release qualification, including provider/OAuth gates, quick/DB gates, workspace image, isolated Compose health, and workspace readiness |
 
 Run a focused Node test while iterating:

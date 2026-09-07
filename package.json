@@ -63,6 +63,7 @@
     "verify:quick": "node scripts/verify-quick.mjs",
     "verify:db": "node scripts/verify-db.mjs",
     "verify:release": "node scripts/verify-release.mjs",
+    "demo:update": "node scripts/demo-update.mjs",
     "release:tag": "node scripts/release-tag.mjs",
     "db:migration:new": "node scripts/migration-new.mjs",
     "db:backfill:organization-rbac": "node --import tsx scripts/backfill-organization-rbac.ts",

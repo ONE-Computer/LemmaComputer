@@ -84,15 +84,17 @@ never attach the same writable volumes to concurrent worktrees.
 
 ## Integration and demo releases
 
-`main` is the integration branch. The running demo is a separate deployment pinned to an immutable `demo-*` tag, so ordinary changes to `main` do not change the demo.
+`main` is the integration branch. The running demo is a separate deployment pinned to an exact commit and image identity, so ordinary changes to `main` do not change the demo.
 
 - Feature work happens in isolated branches/worktrees and is merged into `main` after `npm run verify:quick`.
 - Database or migration changes also require `npm run verify:db` before integration.
 - The integration owner may merge and push `main`; there is no GitHub Actions, paid branch protection, or blocking local hook.
-- A demo release requires a clean pushed commit on `main` or `release/*`, `npm run verify:release`, then `npm run release:tag -- --push`.
+- Routine updates of the `onecomputer-demo` worktree/development installation use `npm run demo:update` as documented in [Demo updates](docs/guides/demo-release.md). They require a clean committed task worktree, quick verification and relevant browser tests, but no release tag, full release gate, EBS snapshot, or database dump. The command refuses non-routine changes.
+- Preserve the demo server `.env` and service projections byte-for-byte. Never copy a developer `.env`, regenerate secrets, recreate databases, delete volumes, or change deployment profiles for a routine update. Keep the previous application image/directory for rollback.
+- Full releases (including schema, dependency, topology, authentication, provider, and workspace-runtime changes) require a clean pushed commit on `main` or `release/*`, `npm run verify:release`, then `npm run release:tag -- --push`.
 - `release:tag` pushes only a new immutable tag. It never moves a branch or reuses a tag.
 - Create a temporary `release/*` branch only when demo stabilization must continue while new work lands on `main`. Merge its fixes back into `main`.
-- Deploy the exact demo tag and image digest, never a moving branch or dirty checkout.
+- Full releases deploy the exact tag and registry image digests. Routine demo updates may pin host-local content-addressed image IDs; never deploy a moving branch or dirty checkout.
 
 Local command output is the verification record. Do not claim a check ran when it did not.
 
