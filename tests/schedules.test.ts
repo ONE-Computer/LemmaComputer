@@ -9,6 +9,7 @@ import type {
 import { createScheduleSchema, updateScheduleSchema, LemmaComputerError } from "@lemmacomputer/contracts";
 import {
   MemoryChatStore,
+  MemoryWorkspaceStore,
   nextScheduleAt,
   type ClaimedScheduleRun,
   type ScheduleRecord,
@@ -18,6 +19,8 @@ import {
 import { MemoryArtifactStore } from "@lemmacomputer/artifact-store";
 import { SchedulePromptVault, ScheduleService } from "../apps/control-api/src/schedules.js";
 import { DurableChatService } from "../apps/control-api/src/durable-chat.js";
+import { ChatTurnExecutor } from "../apps/control-api/src/chat-turn-executor.js";
+import { ActivityEventService } from "../apps/control-api/src/activity.js";
 import { SchedulerWorker } from "../apps/scheduler-worker/src/server.js";
 import type { AgentChatAccess, AgentChatClient } from "../apps/control-api/src/agent-chat.js";
 
@@ -271,7 +274,7 @@ test("partial schedule updates preserve model preferences and paused state", asy
   const service = new ScheduleService(
     new MemoryScheduleStore(),
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
-    successfulAgent,
+    new ChatTurnExecutor(successfulAgent),
     async () => {},
     async () => access,
   );
@@ -323,7 +326,7 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
-    successfulAgent,
+    new ChatTurnExecutor(successfulAgent, chatStore, durableChat),
     async (_owner, targetWorkspaceId, catalogId, requestedServiceClass, reasoningEffort) => {
       validations += 1;
       assert.equal(targetWorkspaceId, workspaceId);
@@ -362,7 +365,6 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
       };
     },
     chatStore,
-    durableChat,
   );
   const schedule = await service.create(identity, {
     title: "Daily project summary",
@@ -398,6 +400,64 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
   );
 });
 
+for (const outcome of ["completed", "failed", "cancelled", "needs_input", "truncated", "throws"] as const) {
+  test(`scheduled ${outcome} turns retain the shared Chat transcript and Activity`, async () => {
+    const workspaceStore = new MemoryWorkspaceStore();
+    const workspace = await workspaceStore.createOrGet(identity, "scheduled-activity", crypto.randomUUID());
+    const scopedAccess = { ...access, workspaceId: workspace.id };
+    const chatStore = new MemoryChatStore();
+    const scheduleStore = new MemoryScheduleStore();
+    const durable = new DurableChatService(chatStore, new MemoryArtifactStore(), { requireNodePlacement: false });
+    const activity = new ActivityEventService(workspaceStore);
+    const ends: string[] = [];
+    const client: AgentChatClient = {
+      ...successfulAgent,
+      async *streamTurn(_access, sessionId) {
+        const common = { version: 1 as const, sessionId, turnId: "scheduled-shared-turn" };
+        yield { ...common, sequence: 0, type: "turn-start", messageId: "shared-assistant", createdAt: new Date().toISOString() };
+        if (outcome === "throws") throw new Error("provider disconnected");
+        if (outcome === "truncated") return;
+        yield { ...common, sequence: 1, type: "turn-finish", state: outcome, vendorSessionId: "provider-session", completedAt: new Date().toISOString() };
+      },
+    };
+    const executor = new ChatTurnExecutor(client, chatStore, durable, activity);
+    const service = new ScheduleService(
+      scheduleStore, new SchedulePromptVault("shared-schedule-secret-at-least-32-characters"), executor,
+      async () => {}, async () => scopedAccess, undefined,
+      async () => ({
+        identity: { state: "verified", agentInstanceId: scheduledInstanceId },
+        markRunning: async () => {}, end: async (reason) => { ends.push(reason); },
+      }),
+      chatStore,
+    );
+    const schedule = await service.create(identity, createScheduleSchema.parse({
+      title: "Activity regression", workspaceId: workspace.id, agentCatalogId: "codex-cli",
+      requestedServiceClass: "pro", reasoningEffort: "high", prompt: "Reply only: verified.",
+      cronExpression: "0 9 * * *", timeZone: "UTC", state: "paused",
+    }));
+    await service.runNow(identity, schedule.id);
+    const [claimed] = await scheduleStore.claimDueScheduleRuns(new Date(), 1, 120_000);
+    assert.ok(claimed?.run.leaseToken);
+    const run = await service.executeClaimed(claimed.run.id, claimed.run.leaseToken);
+    assert.equal(run.state, outcome === "completed" ? "succeeded" : "failed");
+    assert.ok(run.sessionId);
+    const scope = { workspaceId: workspace.id, agentCatalogId: "codex-cli" as const, sessionId: run.sessionId, turnId: "scheduled-shared-turn" };
+    const replay = await activity.replay(identity, scope, -1);
+    assert.equal(replay.terminal, true);
+    const expectedState = outcome === "truncated" || outcome === "throws" ? "failed" : outcome;
+    assert.deepEqual(replay.events.map((event) => event.kind), expectedState === "failed" ? ["plan", "error", "terminal"] : ["plan", "terminal"]);
+    const messages = await chatStore.listMessages(identity, run.sessionId);
+    assert.deepEqual(messages.map((message) => message.role), ["user", "assistant"]);
+    assert.equal(messages[1]!.metadata?.state, expectedState);
+    assert.deepEqual(ends, [expectedState === "failed" ? "provider_failed" : "process_exited"]);
+    if (outcome !== "truncated" && outcome !== "throws") {
+      assert.equal(await chatStore.getVendorSession(identity, run.sessionId, "codex-cli"), "provider-session");
+    }
+    await assert.rejects(activity.replay({ ...identity, tenantId: "other" }, scope, -1), /Activity turn not found/);
+    await assert.rejects(activity.replay({ ...identity, subjectId: "other" }, scope, -1), /Activity turn not found/);
+  });
+}
+
 test("a claimed run with revoked authority is skipped before contacting the agent", async () => {
   const store = new MemoryScheduleStore();
   let agentCalls = 0;
@@ -408,7 +468,7 @@ test("a claimed run with revoked authority is skipped before contacting the agen
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
-    agent,
+    new ChatTurnExecutor(agent),
     async () => {},
     async () => {
       throw new LemmaComputerError("POLICY_NOT_ASSIGNED", "No active workspace policy is assigned", 403);
@@ -462,7 +522,7 @@ test("a scheduled run waits once for a workspace guardrail transition instead of
   const service = new ScheduleService(
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
-    agent,
+    new ChatTurnExecutor(agent),
     async () => {},
     async () => {
       accessAttempts += 1;

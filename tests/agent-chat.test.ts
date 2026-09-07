@@ -135,17 +135,22 @@ test("agent runtime permits independent active turns for separate chat sessions"
 
 test("Control pumps workspace events independently of the browser response", async () => {
   const control = await readFile(new URL("../apps/control-api/src/server.ts", import.meta.url), "utf8");
+  const executor = await readFile(new URL("../apps/control-api/src/chat-turn-executor.ts", import.meta.url), "utf8");
+  const schedules = await readFile(new URL("../apps/control-api/src/schedules.ts", import.meta.url), "utf8");
   const path = '"/v1/workspaces/:workspaceId/chat/agents/:catalogId/sessions/:sessionId/messages"';
   const pathIndex = control.lastIndexOf(path);
   const route = control.slice(control.lastIndexOf("app.post", pathIndex), control.indexOf("app.delete", pathIndex));
   assert.match(route, /const pump = async \(\) =>/);
   assert.match(route, /agentProcesses\.beginBrowserChat\(/);
-  assert.match(route, /agentChat\.streamTurn\([\s\S]*usageTaskBinding, agentInstanceId,/);
-  assert.match(route, /processLifecycle\.markRunning\(event\.turnId\)/);
-  assert.match(route, /processLifecycle\.end\(event\.state === "failed" \? "provider_failed" : "process_exited"\)/);
+  assert.match(route, /turnExecutor\.execute\(prepared/);
+  assert.match(schedules, /turnExecutor\.execute\(prepared/);
+  assert.doesNotMatch(schedules, /\.streamTurn\(/);
+  assert.match(executor, /client\.streamTurn\([\s\S]*usageTaskBinding, agentInstanceId,/);
+  assert.match(executor, /lifecycle\?\.markRunning\(event\.turnId\)/);
+  assert.match(executor, /lifecycle\?\.end\(event\.state === "failed" \? "provider_failed" : "process_exited"\)/);
   assert.match(route, /issueUsageTaskBinding\(/);
   assert.match(route, /void pump\(\)/);
-  assert.match(route, /chunks\.push\(\.\.\.mapper\.chunks\(projected\)\)/);
+  assert.match(route, /chunks\.push\(\.\.\.mapper\.chunks\(event\)\)/);
   assert.doesNotMatch(route, /browser-disconnected|abort\.signal/);
   assert.match(control, /sessions\/:sessionId\/turns\/active/);
   assert.match(control, /await agentChat\.cancelTurn\(access, sessionId\)/);

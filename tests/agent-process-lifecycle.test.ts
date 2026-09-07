@@ -300,6 +300,15 @@ test("the browser chat route binds the trusted instance before one real Claude s
     assert.equal(instances.registration?.logicalAgentId, "agent-1:claude-cli");
     assert.equal(instances.running?.providerRuntimeId, "chat-turn:turn-33333333-3333-4333-8333-333333333333");
     assert.equal(instances.ended?.reason, "process_exited");
+    const activity = await app.inject({
+      method: "GET",
+      url: `/v1/workspaces/${owned.id}/chat/agents/claude-cli/sessions/${conversation.id}/turns/turn-33333333-3333-4333-8333-333333333333/activity`,
+      headers,
+    });
+    assert.equal(activity.statusCode, 200, activity.body);
+    assert.equal(activity.json().terminal, true);
+    assert.deepEqual(activity.json().events.map((event: { kind: string }) => event.kind), ["plan", "terminal"]);
+    assert.deepEqual((await chatStore.listMessages(identity, conversation.id)).map((message) => message.role), ["user", "assistant"]);
 
     const rejected = await app.inject({
       method: "POST",

@@ -28,9 +28,9 @@ import {
   type ScheduleStore,
   type ChatStore,
 } from "@lemmacomputer/workspace-store";
-import { AgentMessageAccumulator, type AgentChatAccess, type AgentChatClient } from "./agent-chat.js";
+import type { AgentChatAccess } from "./agent-chat.js";
+import type { ChatTurnExecutor } from "./chat-turn-executor.js";
 import type { AgentProcessLifecycle } from "./agent-process-lifecycle.js";
-import type { DurableChatService } from "./durable-chat.js";
 
 const key = (secret: string) => createHash("sha256")
   .update("lemmacomputer/schedule-prompt/k1\0")
@@ -142,7 +142,7 @@ export class ScheduleService {
   constructor(
     private readonly store: ScheduleStore,
     private readonly vault: SchedulePromptVault,
-    private readonly agentChat: AgentChatClient,
+    private readonly turnExecutor: ChatTurnExecutor,
     private readonly validateTarget: (
       identity: IdentityContext,
       workspaceId: string,
@@ -169,7 +169,6 @@ export class ScheduleService {
       logicalAgentId: string; sessionId: string; runId: string;
     }) => Promise<AgentProcessLifecycle>,
     private readonly chatStore?: ChatStore,
-    private readonly durableChat?: DurableChatService,
   ) {}
 
   private next(cronExpression: string, timeZone: string, after = new Date()) {
@@ -284,9 +283,6 @@ export class ScheduleService {
   private async execute({ run, schedule }: ClaimedScheduleRun) {
     const identity = identityFor(schedule);
     let sessionId: string | undefined;
-    let lifecycle: AgentProcessLifecycle | undefined;
-    let processStarted = false;
-    let processEnded = false;
     try {
       const access = await this.resolveAccess(
         identity,
@@ -295,7 +291,7 @@ export class ScheduleService {
         schedule.requestedServiceClass,
         schedule.reasoningEffort,
       );
-      await this.agentChat.health(access);
+      await this.turnExecutor.health(access);
       const session = this.chatStore
         ? await this.chatStore.createConversation({
             identity,
@@ -307,11 +303,6 @@ export class ScheduleService {
           })
         : undefined;
       sessionId = session?.id ?? randomUUID();
-      lifecycle = await this.beginAgentProcess?.({
-        identity, workspaceId: schedule.workspaceId, catalogId: schedule.agentCatalogId,
-        logicalAgentId: access.agentId, sessionId, runId: run.id,
-      });
-      const agentInstanceId = lifecycle?.identity.state === "verified" ? lifecycle.identity.agentInstanceId : undefined;
       const message: ChatUiMessage = {
         id: randomUUID(),
         role: "user",
@@ -325,83 +316,37 @@ export class ScheduleService {
           text: this.vault.unprotect(identity, schedule.id, schedule.promptCiphertext),
         }],
       };
-      const history = session && this.chatStore ? await this.chatStore.listMessages(identity, session.id) : [];
-      const vendorSessionId = session && this.chatStore
-        ? await this.chatStore.getVendorSession(identity, session.id, schedule.agentCatalogId)
-        : null;
-      if (session && this.durableChat) {
-        await this.durableChat.persistUserMessage({ identity, conversation: session, access, message });
-      }
-      const accumulator = new AgentMessageAccumulator(schedule.agentCatalogId);
-      let terminal: "needs_input" | "completed" | "cancelled" | "failed" | null = null;
-      let terminalMessage: string | undefined;
-      const usageTaskBinding = this.issueUsageTaskBinding?.({
-        identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
-        taskId: `schedule:${run.id}`, sessionId, turnId: message.id, agentInstanceId,
+      const prepared = await this.turnExecutor.prepare({
+        identity, access, sessionId, conversation: session, message,
         requestedServiceClass: schedule.requestedServiceClass,
-        ...(schedule.reasoningEffort ? { requestedReasoningEffort: schedule.reasoningEffort } : {}),
-        ...(access.maximumReasoningEffort ? { maximumReasoningEffort: access.maximumReasoningEffort } : {}),
+        reasoningEffort: schedule.reasoningEffort ?? undefined,
       });
-      for await (const runtimeEvent of this.agentChat.streamTurn(
-        access, sessionId, message, undefined, usageTaskBinding, agentInstanceId,
-        schedule.reasoningEffort ?? undefined, history, vendorSessionId ?? undefined,
-      )) {
-        const event = runtimeEvent.type === "artifact" && session && this.durableChat
-          ? await this.durableChat.persistGeneratedArtifact({ identity, conversation: session, access, client: this.agentChat, event: runtimeEvent })
-          : runtimeEvent;
-        if (event.type === "turn-start") {
-          if (lifecycle) { await lifecycle.markRunning(event.turnId); processStarted = true; }
-          if (session && this.chatStore) {
-            await this.chatStore.beginRun({
-              identity, conversationId: session.id, turnId: event.turnId,
-              effectiveAgentCatalogId: schedule.agentCatalogId,
-              requestedServiceClass: schedule.requestedServiceClass,
-              reasoningEffort: schedule.reasoningEffort ?? undefined,
-              policyVersionId: access.policyVersionId,
-              policyVersion: access.policyVersion,
-              policyHash: access.policyHash,
-              workspaceId: schedule.workspaceId,
-              workspaceNodeId: access.workspaceNodeId,
-              accessGeneration: access.accessGeneration,
-              ...(agentInstanceId ? { agentInstanceId } : {}),
-            });
-          }
-        }
-        accumulator.apply(event);
-        const checkpoint = accumulator.snapshot();
-        if (checkpoint && session && this.chatStore && this.durableChat) {
-          await this.chatStore.upsertMessage(identity, session.id, checkpoint);
-          await this.durableChat.bindMessageArtifacts(identity, session.id, checkpoint);
-        }
-        if (event.type === "turn-finish") {
-          terminal = event.state;
-          terminalMessage = event.message;
-          if (session && this.chatStore) {
-            if (event.vendorSessionId) {
-              await this.chatStore.setVendorSession(identity, session.id, schedule.agentCatalogId, event.vendorSessionId);
-            }
-            await this.chatStore.finishRun(identity, session.id, event.turnId, {
-              status: event.state,
-              ...(checkpoint ? { assistantMessageId: checkpoint.id } : {}),
-              ...(event.state === "failed" ? { failureCode: "SCHEDULE_TURN_FAILED" } : {}),
-              completedAt: new Date(),
-            });
-          }
-        }
-      }
-      if (lifecycle) { await lifecycle.end(terminal === "failed" ? "provider_failed" : "process_exited"); processEnded = true; }
-      if (terminal !== "completed") {
+      const lifecycle = await this.beginAgentProcess?.({
+        identity, workspaceId: schedule.workspaceId, catalogId: schedule.agentCatalogId,
+        logicalAgentId: access.agentId, sessionId, runId: run.id,
+      });
+      const terminal = await this.turnExecutor.execute(prepared, {
+        lifecycle,
+        issueUsageTaskBinding: (agentInstanceId) => this.issueUsageTaskBinding?.({
+          identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
+          taskId: `schedule:${run.id}`, sessionId: prepared.sessionId, turnId: message.id, agentInstanceId,
+          requestedServiceClass: schedule.requestedServiceClass,
+          requestedReasoningEffort: schedule.reasoningEffort ?? undefined,
+          maximumReasoningEffort: access.maximumReasoningEffort,
+        }),
+      });
+      if (terminal.state !== "completed") {
         throw new LemmaComputerError(
-          terminal === "cancelled"
+          terminal.state === "cancelled"
             ? "SCHEDULE_TURN_CANCELLED"
-            : terminal === "needs_input" ? "SCHEDULE_NEEDS_INPUT" : "SCHEDULE_TURN_FAILED",
-          terminalMessage ?? (
-            terminal === "needs_input"
+            : terminal.state === "needs_input" ? "SCHEDULE_NEEDS_INPUT" : "SCHEDULE_TURN_FAILED",
+          terminal.message ?? (
+            terminal.state === "needs_input"
               ? "The scheduled agent needs input before it can continue"
               : "The scheduled agent turn did not complete"
           ),
           502,
-          terminal !== "cancelled" && terminal !== "needs_input",
+          terminal.state !== "cancelled" && terminal.state !== "needs_input",
         );
       }
       const completed = await this.store.finishScheduleRun(run.id, {
@@ -412,9 +357,6 @@ export class ScheduleService {
       if (!completed) throw new Error("Scheduled run ownership was lost");
       return runView(completed);
     } catch (error) {
-      if (lifecycle && !processEnded) {
-        try { await lifecycle.end(processStarted ? "provider_failed" : "launch_failed"); } catch (lifecycleError) { error = lifecycleError; }
-      }
       const known = error instanceof LemmaComputerError ? error : new LemmaComputerError(
         "SCHEDULE_EXECUTION_FAILED",
         "The scheduled agent turn failed",

@@ -47,6 +47,7 @@ import {
 import { DurableChatService } from "./durable-chat.js";
 import { HttpChannelBrokerManagementClient, type ChannelBrokerManagementClient } from "./channel-broker.js";
 import { SchedulePromptVault, ScheduleService } from "./schedules.js";
+import { ChatTurnExecutor } from "./chat-turn-executor.js";
 import { BudgetUsageEventRecordedHook, budgetOverrideSchema, saveTeamBudgetSchema, TeamBudgetAdministrationService } from "./budgets.js";
 import { ActivityEventService, activitySseFrame } from "./activity.js";
 import { SitesService } from "./sites.js";
@@ -1966,11 +1967,20 @@ export function createControlServer(
       maximumReasoningEffort: policy.maximumReasoningEffort,
     };
   };
+  const turnExecutor = new ChatTurnExecutor(agentChat, security.chatStore, durableChat, activityEvents, async (owner, event) => {
+    try {
+      const operation = await operations.get(owner, event.operationId);
+      return { ...event, summary: chatApprovalSummary(event.state, operation.safeSummary) };
+    } catch (error) {
+      if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
+      return event;
+    }
+  });
   const schedules = security.scheduleStore && security.schedulePromptSecret
     ? new ScheduleService(
         security.scheduleStore,
         new SchedulePromptVault(security.schedulePromptSecret),
-        agentChat,
+        turnExecutor,
         async (owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort) => {
           await resolveScheduleTarget(owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort);
         },
@@ -1991,7 +2001,6 @@ export function createControlServer(
           });
         },
         security.chatStore,
-        durableChat,
       )
     : undefined;
   const requireSchedules = () => {
@@ -6102,15 +6111,16 @@ export function createControlServer(
     if (conversation.defaultAgentCatalogId !== catalogId) {
       throw new LemmaComputerError("CHAT_AGENT_MISMATCH", "Continue with another agent by creating an explicit conversation fork", 409);
     }
-    const history = await durable.store.listMessages(owner, sessionId);
     const access = await service.agentChatAccess(owner, policy, request.params.workspaceId, catalogId);
-    const persistedUser = await durable.service.persistUserMessage({
+    const prepared = await turnExecutor.prepare({
       identity: owner,
       conversation,
       access,
+      sessionId,
       message: input.message,
+      requestedServiceClass: input.requestedServiceClass,
+      reasoningEffort: input.reasoningEffort,
     });
-    const vendorSessionId = await durable.store.getVendorSession(owner, sessionId, catalogId) ?? undefined;
     const processLifecycle = await agentProcesses.beginBrowserChat({
       identity: owner,
       workspace,
@@ -6121,7 +6131,6 @@ export function createControlServer(
       idempotencyKey: launchIdempotencyKey,
     });
     const mapper = new AgentUiStreamMapper(catalogId);
-    const accumulator = new AgentMessageAccumulator(catalogId);
     const chunks: ReturnType<AgentUiStreamMapper["chunks"]>[number][] = [];
     const waiters = new Set<() => void>();
     let pumpDone = false;
@@ -6131,145 +6140,21 @@ export function createControlServer(
       waiters.clear();
     };
     const pump = async () => {
-      let lastEvent: AgentChatEvent | undefined;
-      let processStarted = false;
-      let processEnded = false;
-      const agentInstanceId = processLifecycle.identity.state === "verified"
-        ? processLifecycle.identity.agentInstanceId
-        : undefined;
       try {
-        const usageTaskBinding = issueUsageTaskBinding(
-          owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
-          undefined, input.requestedServiceClass, agentInstanceId,
-          input.reasoningEffort, policy.maximumReasoningEffort,
-        );
-        for await (const event of agentChat.streamTurn(
-          access, sessionId, persistedUser.runtimeMessage, undefined, usageTaskBinding, agentInstanceId,
-          input.reasoningEffort, history, vendorSessionId,
-        )) {
-          if (event.type === "turn-start") {
-            await processLifecycle.markRunning(event.turnId);
-            await durable.store.beginRun({
-              identity: owner,
-              conversationId: sessionId,
-              turnId: event.turnId,
-              effectiveAgentCatalogId: catalogId,
-              requestedServiceClass: input.requestedServiceClass,
-              reasoningEffort: input.reasoningEffort,
-              policyVersionId: policy.policyVersionId,
-              policyVersion: policy.policyVersion,
-              policyHash: policy.policyHash,
-              workspaceId: request.params.workspaceId,
-              workspaceNodeId: access.workspaceNodeId,
-              accessGeneration: access.accessGeneration,
-              agentInstanceId,
-            });
-            processStarted = true;
-          }
-          let projected: AgentChatEvent = event.type === "artifact"
-            ? await durable.service.persistGeneratedArtifact({
-                identity: owner,
-                conversation,
-                access,
-                client: agentChat,
-                event,
-              })
-            : event;
-          if (event.type === "approval") {
-            try {
-              const operation = await operations.get(owner, event.operationId);
-              projected = {
-                ...event,
-                summary: chatApprovalSummary(event.state, operation.safeSummary),
-              };
-            } catch (error) {
-              if (!(error instanceof LemmaComputerError && error.code === "OPERATION_NOT_FOUND")) throw error;
-            }
-          }
-          await activityEvents.recordAgentEvent({
-            identity: owner,
-            ...(agentInstanceId ? { agentInstanceId } : {}),
-            workspaceId: request.params.workspaceId,
-            agentCatalogId: catalogId,
-            sessionId,
-            displayName: access.displayName,
-            event: projected,
-          });
-          lastEvent = projected;
-          accumulator.apply(projected);
-          const checkpoint = accumulator.snapshot();
-          if (checkpoint) {
-            await durable.store.upsertMessage(owner, sessionId, checkpoint);
-            await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
-          }
-          chunks.push(...mapper.chunks(projected));
-          if (event.type === "turn-finish") {
-            if (event.vendorSessionId) {
-              await durable.store.setVendorSession(owner, sessionId, catalogId, event.vendorSessionId);
-            }
-            await durable.store.finishRun(owner, sessionId, event.turnId, {
-              status: event.state,
-              assistantMessageId: checkpoint?.id,
-              ...(event.state === "failed" ? { failureCode: "AGENT_TURN_FAILED" } : {}),
-              completedAt: new Date(event.completedAt),
-            });
-            await processLifecycle.end(event.state === "failed" ? "provider_failed" : "process_exited");
-            processEnded = true;
-          }
-          notify();
-        }
+        await turnExecutor.execute(prepared, {
+          lifecycle: processLifecycle,
+          issueUsageTaskBinding: (agentInstanceId) => issueUsageTaskBinding(
+            owner, request.params.workspaceId, access.agentId, "chat", input.message.id, sessionId,
+            undefined, input.requestedServiceClass, agentInstanceId,
+            input.reasoningEffort, policy.maximumReasoningEffort,
+          ),
+          onEvent: (event) => {
+            chunks.push(...mapper.chunks(event));
+            notify();
+          },
+        });
       } catch (error) {
         pumpError = error;
-        if (!processEnded) {
-          try {
-            await processLifecycle.end(processStarted ? "provider_failed" : "launch_failed");
-          } catch (lifecycleError) {
-            // Compliance evidence is part of the launch contract. A failure to
-            // record it must surface rather than being hidden by the upstream
-            // process error that triggered lifecycle closure.
-            pumpError = lifecycleError;
-          }
-        }
-        if (lastEvent && lastEvent.type !== "turn-finish") {
-          const completedAt = new Date().toISOString();
-          const terminal = {
-            version: 1 as const,
-            sequence: lastEvent.sequence + 1,
-            sessionId,
-            turnId: lastEvent.turnId,
-            type: "turn-finish" as const,
-            state: "failed" as const,
-            message: "The agent stream ended before completion",
-            completedAt,
-          };
-          await activityEvents.recordAgentEvent({
-            identity: owner,
-            ...(agentInstanceId ? { agentInstanceId } : {}),
-            workspaceId: request.params.workspaceId,
-            agentCatalogId: catalogId,
-            sessionId,
-            displayName: access.displayName,
-            event: terminal,
-          }).catch(() => undefined);
-          try {
-            accumulator.apply(terminal);
-            const checkpoint = accumulator.snapshot();
-            if (checkpoint) {
-              await durable.store.upsertMessage(owner, sessionId, checkpoint);
-              await durable.service.bindMessageArtifacts(owner, sessionId, checkpoint);
-            }
-            if (processStarted) {
-              await durable.store.finishRun(owner, sessionId, terminal.turnId, {
-                status: "failed",
-                assistantMessageId: checkpoint?.id,
-                failureCode: error instanceof LemmaComputerError ? error.code : "AGENT_STREAM_FAILED",
-                completedAt: new Date(completedAt),
-              });
-            }
-          } catch (persistenceError) {
-            pumpError = persistenceError;
-          }
-        }
       } finally {
         pumpDone = true;
         notify();
