@@ -1150,8 +1150,7 @@ async def hermes_vendor_events(
                 "image_url": {"url": attachment["url"]},
             } for attachment in images),
         ]
-    streamed_text = False
-    final_text = ""
+    final_text: str | None = None
     completed = False
     tool_counter = 0
     pending_tools: dict[str, list[dict[str, Any]]] = {}
@@ -1197,10 +1196,11 @@ async def hermes_vendor_events(
             if not isinstance(payload, dict):
                 raise RuntimeError("Hermes returned an invalid event")
             if name == "assistant.delta":
-                delta = payload.get("delta")
-                if isinstance(delta, str) and delta:
-                    streamed_text = True
-                    yield {"kind": "text", "delta": delta}
+                # Hermes mixes tool-loop commentary and answer tokens in this
+                # stream. Keep tool activity live, but publish only its explicit
+                # final reply after successful run completion. Do not guess at
+                # message boundaries or classify progress by its wording.
+                continue
             elif name in {"tool.started", "tool.completed", "tool.failed"}:
                 tool_name = safe_tool_name(payload.get("tool_name") or payload.get("tool"))
                 explicit_raw_id = payload.get("tool_call_id") or payload.get("toolCallId")
@@ -1247,6 +1247,8 @@ async def hermes_vendor_events(
                     if action:
                         yield {"kind": "web-action", **action}
             elif name == "assistant.completed":
+                if payload.get("partial") is True or payload.get("interrupted") is True:
+                    raise RuntimeError("Hermes returned an incomplete answer")
                 candidate = payload.get("content")
                 if isinstance(candidate, str):
                     final_text = candidate
@@ -1264,6 +1266,8 @@ async def hermes_vendor_events(
             raise RuntimeError("Hermes event stream ended mid-frame")
     if not completed:
         raise RuntimeError("Hermes event stream ended without completion")
+    if final_text is None:
+        raise RuntimeError("Hermes event stream ended without a final answer")
     if re.match(r"^API call failed after \d+ retries:", final_text.strip(), re.IGNORECASE):
         raise RuntimeError("Hermes could not complete the request")
     for source in extract_sources(final_text):
@@ -1271,7 +1275,7 @@ async def hermes_vendor_events(
             continue
         emitted_source_urls.add(source["url"])
         yield {"kind": "source", **source}
-    if not streamed_text and final_text:
+    if final_text:
         yield {"kind": "text", "delta": final_text}
     yield {
         "kind": "vendor-finish",
