@@ -29,6 +29,7 @@ export type WorkspaceRecord = {
   tenantId: string;
   subjectId: string;
   grantId: string;
+  displayName?: string | null;
   state: WorkspaceState;
   desiredState: "running" | "stopped";
   providerId: string | null;
@@ -472,6 +473,7 @@ export interface WorkspaceStore {
   getOwned(identity: IdentityContext, workspaceId: string): Promise<WorkspaceRecord | null>;
   authorizeWorkspaceAccess(input: IdentityContext & { workspaceId: string; accessGeneration: number }, allowedStates?: WorkspaceState[]): Promise<boolean>;
   createOrGet(identity: IdentityContext, grantId: string, idempotencyKey: string): Promise<WorkspaceRecord>;
+  rename(identity: IdentityContext, workspaceId: string, displayName: string): Promise<WorkspaceRecord | null>;
   claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord): Promise<WorkspaceRecord | null>;
   finish(workspaceId: string, operationToken: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
   update(workspaceId: string, patch: Partial<Pick<WorkspaceRecord, "state" | "providerId" | "failureCode">>): Promise<WorkspaceRecord>;
@@ -528,6 +530,7 @@ const mapRow = (row: Record<string, unknown>): WorkspaceRecord => ({
   tenantId: String(row.tenant_id),
   subjectId: String(row.subject_id),
   grantId: String(row.grant_id),
+  displayName: row.display_name == null ? null : String(row.display_name),
   state: row.state as WorkspaceState,
   providerId: row.provider_id ? String(row.provider_id) : null,
   failureCode: row.failure_code ? String(row.failure_code) : null,
@@ -1056,6 +1059,14 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
     } finally {
       client.release();
     }
+  }
+
+  async rename(identity: IdentityContext, workspaceId: string, displayName: string) {
+    const result = await this.pool.query(
+      "UPDATE workspaces SET display_name=$4 WHERE id=$1 AND tenant_id=$2 AND subject_id=$3 AND deleted_at IS NULL RETURNING *",
+      [workspaceId, identity.tenantId, identity.subjectId, displayName],
+    );
+    return result.rowCount ? mapRow(result.rows[0]) : null;
   }
 
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord) {
@@ -2627,6 +2638,13 @@ export class MemoryWorkspaceStore implements WorkspaceStore, GovernanceStore, Op
     const record: WorkspaceRecord = { id: randomUUID(), ...identity, grantId, state: "not_created", desiredState: "stopped", providerId: null, failureCode: null, operationToken: null, accessGeneration: 1, deletedAt: null, deletionContentDisposition: null, createdAt: now, updatedAt: now };
     this.records.set(record.id, record);
     return record;
+  }
+  async rename(identity: IdentityContext, workspaceId: string, displayName: string) {
+    const record = await this.getOwned(identity, workspaceId);
+    if (!record) return null;
+    const renamed = { ...record, displayName };
+    this.records.set(workspaceId, renamed);
+    return renamed;
   }
   async claim(workspaceId: string, allowed: WorkspaceState[], next: WorkspaceState, observed?: WorkspaceRecord) {
     const record = this.records.get(workspaceId);

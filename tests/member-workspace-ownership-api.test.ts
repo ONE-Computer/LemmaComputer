@@ -128,6 +128,7 @@ test("a member owns the complete workspace lifecycle while foreign identifiers r
 
       for (const operation of [
         { method: "GET" as const, suffix: "/deletion-impact" },
+        { method: "PATCH" as const, suffix: "", payload: { displayName: "Foreign rename" } },
         { method: "POST" as const, suffix: "/open" },
         { method: "POST" as const, suffix: "/restart" },
         { method: "POST" as const, suffix: "/stop" },
@@ -137,11 +138,13 @@ test("a member owns the complete workspace lifecycle while foreign identifiers r
           method: operation.method,
           url: `/v1/workspaces/${workspaceId}${operation.suffix}`,
           headers,
+          payload: operation.payload,
         });
         const missing = await app.inject({
           method: operation.method,
           url: `/v1/workspaces/${nonexistentId}${operation.suffix}`,
           headers,
+          payload: operation.payload,
         });
         assert.deepEqual(
           safeError(foreign),
@@ -156,6 +159,27 @@ test("a member owns the complete workspace lifecycle while foreign identifiers r
     const opened = await ownerApp.inject({ method: "POST", url: `/v1/workspaces/${workspaceId}/open`, headers });
     assert.equal(opened.statusCode, 200);
     assert.equal(opened.json().workspace.state, "open");
+
+    const renamed = await ownerApp.inject({
+      method: "PATCH",
+      url: `/v1/workspaces/${workspaceId}`,
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { displayName: "  Client research  " },
+    });
+    assert.equal(renamed.statusCode, 200);
+    assert.equal(renamed.json().displayName, "Client research");
+    assert.equal((await store.getOwned(member.identity, workspaceId))?.displayName, "Client research");
+    const renamedInventory = await ownerApp.inject({ method: "GET", url: "/v1/workspaces", headers });
+    assert.equal(renamedInventory.json().workspaces[0].displayName, "Client research");
+
+    const emptyName = await ownerApp.inject({
+      method: "PATCH",
+      url: `/v1/workspaces/${workspaceId}`,
+      headers: { ...headers, "content-type": "application/json" },
+      payload: { displayName: "   " },
+    });
+    assert.equal(emptyName.statusCode, 400);
+    assert.equal((await store.getOwned(member.identity, workspaceId))?.displayName, "Client research");
 
     const restarted = await ownerApp.inject({ method: "POST", url: `/v1/workspaces/${workspaceId}/restart`, headers });
     assert.equal(restarted.statusCode, 200);

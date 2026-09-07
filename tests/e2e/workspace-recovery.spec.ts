@@ -524,3 +524,48 @@ for (const initial of ["failed", "stopped"] as const) {
     await expect(cards.first()).toContainText(initial === "failed" ? "Needs attention" : "Stopped");
   });
 }
+
+test("workspace name can be edited and saved from its configuration heading", async ({ page }) => {
+  const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d70";
+  let renamedWorkspace = null;
+  let renameRequest = null;
+  await page.route("**/api/v1/workspaces", async (route) => {
+    const response = await route.fetch();
+    const payload = await response.json();
+    await route.fulfill({
+      response,
+      json: renamedWorkspace ? {
+        ...payload,
+        workspaces: payload.workspaces.map((workspace) => workspace.id === workspaceId ? renamedWorkspace : workspace),
+      } : payload,
+    });
+  });
+  await page.route(`**/api/v1/workspaces/${workspaceId}`, async (route) => {
+    renameRequest = route.request().postDataJSON();
+    const response = await page.request.get("/api/v1/workspaces");
+    const payload = await response.json();
+    renamedWorkspace = {
+      ...payload.workspaces.find((workspace) => workspace.id === workspaceId),
+      displayName: renameRequest.displayName,
+    };
+    await route.fulfill({ json: renamedWorkspace });
+  });
+
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+
+  await page.getByRole("button", { name: "Edit workspace name" }).click();
+  const input = page.getByRole("textbox", { name: "Workspace name" });
+  await expect(input).toHaveValue("Research");
+  await input.fill("Client research");
+  await page.getByRole("button", { name: "Save workspace name" }).click();
+
+  await expect(page.getByRole("heading", { name: "Client research" })).toBeVisible();
+  await expect(page.getByText("Client research renamed.")).toBeVisible();
+  expect(renameRequest).toEqual({ displayName: "Client research" });
+
+  await page.getByRole("button", { name: "All workspaces" }).click();
+  await expect(page.getByRole("article", { name: "Client research" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("article", { name: "Client research" })).toBeVisible();
+});

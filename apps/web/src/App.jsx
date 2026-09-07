@@ -12,12 +12,13 @@ import { Calendar24Regular } from "@fluentui/react-icons/svg/calendar";
 import { Open24Regular } from "@fluentui/react-icons/svg/open";
 import { ArrowClockwise24Regular } from "@fluentui/react-icons/svg/arrow-clockwise";
 import { CheckmarkCircle24Regular } from "@fluentui/react-icons/svg/checkmark-circle";
+import { Edit24Regular } from "@fluentui/react-icons/svg/edit";
 import { Laptop24Regular, Laptop48Regular } from "@fluentui/react-icons/svg/laptop";
 import { Delete24Regular } from "@fluentui/react-icons/svg/delete";
 import { Person24Regular } from "@fluentui/react-icons/svg/person";
 import { ChevronDown16Regular } from "@fluentui/react-icons/svg/chevron-down";
 import { ChevronRight16Regular } from "@fluentui/react-icons/svg/chevron-right";
-import { Checkmark16Filled } from "@fluentui/react-icons/svg/checkmark";
+import { Checkmark16Filled, Checkmark24Regular } from "@fluentui/react-icons/svg/checkmark";
 import { ArrowLeft24Regular } from "@fluentui/react-icons/svg/arrow-left";
 import { ArrowUp24Regular } from "@fluentui/react-icons/svg/arrow-up";
 import { Add24Regular } from "@fluentui/react-icons/svg/add";
@@ -3478,9 +3479,9 @@ const unavailableAgentCopy = (choice) => choice.status === "available"
   ? { status: "Disabled by organization policy", detail: "This client is not allowed by the active organization policy." }
   : { status: "Coming soon", detail: "This client is awaiting governance qualification." };
 
-const workspaceName = (workspace) => workspace?.grantId === "personal"
+const workspaceName = (workspace) => workspace?.displayName?.trim() || (workspace?.grantId === "personal"
   ? "Acme Workspace"
-  : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Restricted workspace";
+  : workspace?.grantId?.replace(/^(sandbox|workspace)-/, "").split("-").filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ") || "Restricted workspace");
 
 const workspacePreferenceKey = "lemmacomputer.active-workspace-id";
 const chatAgentPreferenceKey = (workspaceId) => `lemmacomputer.active-chat-agent:${workspaceId}`;
@@ -3570,7 +3571,7 @@ function WorkspaceCreationProgress({ name }) {
   </div>;
 }
 
-function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
+function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, error, configurationAccess, selectedGrantId, onBack, onSave, onRename, canManageFirewall, telegram, credentials, channelLoading, channelBusy, channelError, onSaveTelegram, onDisconnectTelegram, onCreateCredential, showChannels = true, ownerName = "", backLabel = "All workspaces" }) {
   const [profileId, setProfileId] = useState("");
   const [applicationIds, setApplicationIds] = useState([]);
   const [modelAlias, setModelAlias] = useState(null);
@@ -3578,8 +3579,13 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
   const [agentIds, setAgentIds] = useState([]);
   const [securityGroupVersionId, setSecurityGroupVersionId] = useState("");
   const [pendingProfileId, setPendingProfileId] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  const nameInputRef = useRef(null);
   const selectedWorkspace = workspaces.find((workspace) => workspace.grantId === selectedGrantId);
   const creatingWorkspace = !selectedWorkspace;
+  const currentName = workspaceName(selectedWorkspace ?? { grantId: selectedGrantId });
   const availableServiceClasses = explicitWorkspaceServiceClassOptions(settings);
   const aiSetupReady = Boolean(availableServiceClasses.length && settings?.availableModels?.length);
   const canManageAiSetup = Boolean(configurationAccess?.provider || configurationAccess?.modelRoutes || configurationAccess?.pricing);
@@ -3596,6 +3602,30 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
     setAgentIds(aiSetupReady ? settings.agentIds : []);
     setSecurityGroupVersionId(settings.securityGroup?.assignmentSource === "custom" ? settings.securityGroup.id : "inherit");
   }, [creatingWorkspace, aiSetupReady, settings?.profileId, settings?.availableProfiles, settings?.applicationIds, settings?.modelAlias, settings?.requestedServiceClass, settings?.agentIds, settings?.securityGroup?.id, settings?.availableSecurityGroups]);
+
+  useEffect(() => {
+    if (!editingName) setNameDraft(currentName);
+  }, [editingName, currentName]);
+
+  const beginNameEdit = () => {
+    setNameDraft(currentName);
+    setEditingName(true);
+    window.requestAnimationFrame(() => nameInputRef.current?.select());
+  };
+  const saveName = async () => {
+    const displayName = nameDraft.trim();
+    if (!selectedWorkspace || !displayName || renaming) return;
+    if (displayName === currentName) {
+      setEditingName(false);
+      return;
+    }
+    setRenaming(true);
+    try {
+      if (await onRename(selectedWorkspace, displayName)) setEditingName(false);
+    } finally {
+      setRenaming(false);
+    }
+  };
 
   const canChange = !["provisioning", "ready", "open", "restarting", "stopping"].includes(selectedWorkspace?.state);
   const dirty = settings && (
@@ -3656,7 +3686,17 @@ function WorkspaceConfigurationScreen({ settings, workspaces, loading, saving, e
       <header className="sandbox-detail-heading">
         <div>
           <p>{ownerName ? `${ownerName} · Workspace configuration` : creatingWorkspace ? "Create workspace" : "Workspace configuration"}</p>
-          <h1>{workspaceName(selectedWorkspace ?? { grantId: selectedGrantId })}</h1>
+          <div className="workspace-title-row">
+            {editingName
+              ? <input ref={nameInputRef} className="workspace-title-input" aria-label="Workspace name" value={nameDraft} maxLength="80" disabled={renaming} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); void saveName(); }
+                if (event.key === "Escape") { event.preventDefault(); setEditingName(false); }
+              }} />
+              : <h1>{currentName}</h1>}
+            {!creatingWorkspace && <button className="workspace-title-edit" type="button" aria-label={editingName ? "Save workspace name" : "Edit workspace name"} aria-busy={renaming || undefined} disabled={renaming || (editingName && !nameDraft.trim())} onClick={editingName ? () => void saveName() : beginNameEdit}>
+              {editingName ? <Checkmark24Regular aria-hidden="true" /> : <Edit24Regular aria-hidden="true" />}
+            </button>}
+          </div>
           <span>{ownerName ? "Manage this member’s policy-bounded workspace configuration. Optional application and AI changes apply after the workspace restarts." : creatingWorkspace ? "Choose workspace access and add only the applications or AI agents this workspace needs." : "Changes are recorded as a policy-bounded configuration document and apply the next time this workspace starts."}</span>
         </div>
         <span className={`sandbox-state ${creatingWorkspace ? "not_created" : selectedWorkspace?.state}`}>{creatingWorkspace ? "Not created" : workspaceConfigurationStatus(selectedWorkspace?.state)}</span>
@@ -7421,6 +7461,19 @@ export function App() {
     }
   };
 
+  const renameWorkspace = async (targetWorkspace, displayName) => {
+    setSandboxError("");
+    try {
+      const renamed = await workspaceApi.rename(targetWorkspace.id, displayName);
+      updateWorkspaceInventory(renamed);
+      setToast(`${workspaceName(renamed)} renamed.`);
+      return true;
+    } catch (error) {
+      setSandboxError(error);
+      return false;
+    }
+  };
+
   const selectNav = (name, historyMode = "push") => {
     setActiveNav(name);
     if (name === "Workspace") setWorkspaceSection("mine");
@@ -8282,6 +8335,7 @@ export function App() {
           selectedGrantId={selectedSandboxGrantId}
           onBack={() => { setSelectedSandboxGrantId(null); setSandboxSettings(null); setSandboxError(""); setTelegramConnection(null); setTelegramError(""); }}
           onSave={saveWorkspaceSettings}
+          onRename={renameWorkspace}
           canManageFirewall={Boolean(homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id
             && hasScopedCapability("policy.manage", "workspace", homeWorkspaces.find((item) => item.grantId === selectedSandboxGrantId)?.id))}
           telegram={telegramConnection}

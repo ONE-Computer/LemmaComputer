@@ -3,7 +3,7 @@ import { foundryConfigurationSchema, vertexConfigurationSchema, foundryProviderM
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, deleteWorkspaceSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, deleteWorkspaceSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, renameWorkspaceSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
@@ -3308,9 +3308,9 @@ export function createControlServer(
             : { state: "desired" as const, reasonCode: null };
         return {
           id: workspace.id,
-          name: workspace.grantId === "personal"
+          name: workspace.displayName ?? (workspace.grantId === "personal"
             ? "Personal workspace"
-            : workspace.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" "),
+            : workspace.grantId.split(/[-_]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ")),
           state: workspace.state,
           health: {
             status: health,
@@ -5645,6 +5645,13 @@ export function createControlServer(
     await assertProviderConfiguration(actor, policy);
     const workspace = await service.create(identity(request), policy, input.grantId, idempotency(request.headers), request.id);
     return reply.code(201).send(workspace);
+  });
+  app.patch<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId", async (request) => {
+    requireOwnedWorkspaceManagement(request, request.params.workspaceId);
+    const input = renameWorkspaceSchema.parse(request.body ?? {});
+    const actor = principal(request);
+    const { policy } = await requireWorkspacePolicy(request, request.params.workspaceId);
+    return service.rename(actor.identity, policy, request.params.workspaceId, input.displayName);
   });
   app.post<{ Params: { workspaceId: string } }>("/v1/workspaces/:workspaceId/open", async (request) => {
     const actor = principal(request);

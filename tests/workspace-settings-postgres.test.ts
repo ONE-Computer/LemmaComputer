@@ -26,6 +26,12 @@ for (const backend of ["memory", "postgres"] as const) {
       }
       const created = await store.createOrGet(identity, "personal", "status-fence-create");
       workspaceId = created.id;
+      assert.equal(created.displayName ?? null, null);
+      const renamed = await store.rename(identity, created.id, "Client research");
+      assert.equal(renamed?.displayName, "Client research");
+      assert.equal(renamed?.updatedAt.getTime(), created.updatedAt.getTime(), "renaming must not alter lifecycle timing");
+      assert.equal(await store.rename({ ...identity, subjectId: "other-owner" }, created.id, "Foreign rename"), null);
+      assert.equal((await store.getOwned(identity, created.id))?.displayName, "Client research");
       const observed = await store.update(created.id, { state: "ready", providerId: "provider-original" });
       assert.deepEqual(await store.reconcile(observed, {
         state: observed.state, providerId: observed.providerId, failureCode: observed.failureCode,

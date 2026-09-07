@@ -695,11 +695,68 @@ textarea:focus-visible,
 }
 
 .sandbox-detail-heading h1 {
-  margin-top: 8px;
   color: var(--ink);
   font-size: var(--desktop-page-title-size);
   letter-spacing: -.045em;
   line-height: 1.08;
+}
+
+.workspace-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 8px;
+}
+
+.workspace-title-edit {
+  display: inline-grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #2e5fa9;
+  cursor: pointer;
+}
+
+.workspace-title-edit:hover,
+.workspace-title-edit:focus-visible {
+  background: #edf4fd;
+}
+
+.workspace-title-edit:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+.workspace-title-edit svg {
+  width: 20px;
+  height: 20px;
+}
+
+.workspace-title-input {
+  width: min(520px, calc(100vw - 230px));
+  min-width: 180px;
+  padding: 2px 8px 3px;
+  border: 1px solid #7c9bc5;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--desktop-page-title-size);
+  font-weight: 700;
+  letter-spacing: -.045em;
+  line-height: 1.08;
+  outline: 0;
+}
+
+.workspace-title-input:focus {
+  border-color: #174a95;
+  box-shadow: 0 0 0 3px rgba(23, 74, 149, .14);
 }
 
 .sandbox-detail-heading div > span {
@@ -7286,6 +7343,10 @@ a.chat-file-part:hover {
   .sandbox-security-card {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .workspace-title-input {
+    width: min(100%, calc(100vw - 104px));
   }
 
   .create-sandbox-button,

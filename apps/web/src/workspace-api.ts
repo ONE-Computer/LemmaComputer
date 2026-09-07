@@ -107,6 +107,10 @@ export const workspaceApi = {
   current: () => request<WorkspaceView>("/api/v1/workspaces/current", { cache: "no-store" }),
   list: () => request<{ workspaces: WorkspaceView[] }>("/api/v1/workspaces", { cache: "no-store" }),
   create: (grantId = "personal") => retryableMutation<WorkspaceView>("/api/v1/workspaces", "POST", { grantId }),
+  rename: (id: string, displayName: string) => request<WorkspaceView>(
+    `/api/v1/workspaces/${encodeURIComponent(id)}`,
+    mutation("PATCH", { displayName }),
+  ),
   open: (id: string) => request(`/api/v1/workspaces/${encodeURIComponent(id)}/open`, mutation()),
   restart: (id: string) => retryableMutation<WorkspaceView>(`/api/v1/workspaces/${encodeURIComponent(id)}/restart`),
   stop: (id: string) => retryableMutation<WorkspaceView>(`/api/v1/workspaces/${encodeURIComponent(id)}/stop`),

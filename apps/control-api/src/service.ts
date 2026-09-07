@@ -266,6 +266,7 @@ export const toView = (
 ): WorkspaceView => ({
   id: record.id,
   grantId: record.grantId,
+  displayName: record.displayName ?? null,
   state: record.state,
   readiness: readinessFor(record.state, gateway),
   ...(gateway ? { modelRoute: gateway.modelRoute } : {}),
@@ -699,6 +700,12 @@ export class WorkspaceService {
     const launch = this.publicLaunch(identity, record, controllerLaunch);
     const updated = await this.store.update(record.id, { state: "open", failureCode: null });
     return { workspace: await this.view(updated, policy, authorized), launch };
+  }
+
+  async rename(identity: IdentityContext, policy: RuntimePolicy, workspaceId: string, displayName: string) {
+    const renamed = await this.store.rename(identity, workspaceId, displayName);
+    if (!renamed) throw new LemmaComputerError("WORKSPACE_NOT_FOUND", "Workspace not found", 404);
+    return this.view(renamed, policy);
   }
 
   private publicLaunch(identity: IdentityContext, record: WorkspaceRecord, launch: ControllerLaunch): Launch {

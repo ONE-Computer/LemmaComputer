@@ -790,6 +790,7 @@ export const saveSandboxSettingsSchema = z.object({
 export const workspaceViewSchema = z.object({
   id: z.uuid(),
   grantId: z.string().min(1),
+  displayName: z.string().trim().min(1).max(80).nullable().optional(),
   state: workspaceStateSchema,
   readiness: readinessSchema,
   modelRoute: modelRouteSchema.optional(),
@@ -829,6 +830,10 @@ export type WorkspaceView = z.infer<typeof workspaceViewSchema>;
 export const createWorkspaceSchema = z.object({
   grantId: z.string().min(1).max(128).default("personal"),
 });
+
+export const renameWorkspaceSchema = z.object({
+  displayName: z.string().trim().min(1).max(80),
+}).strict();
 
 export const workspaceContentDispositionSchema = z.enum(["preserve", "delete"]);
 export type WorkspaceContentDisposition = z.infer<typeof workspaceContentDispositionSchema>;

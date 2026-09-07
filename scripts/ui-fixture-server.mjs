@@ -1510,6 +1510,25 @@ const server = http.createServer((request, response) => {
     });
     return;
   }
+  const renameWorkspaceMatch = url.pathname.match(/^\/v1\/workspaces\/([^/]+)$/);
+  if (request.method === "PATCH" && renameWorkspaceMatch) {
+    const requestedWorkspaceId = decodeURIComponent(renameWorkspaceMatch[1]);
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const input = JSON.parse(body);
+      const existing = fixtureWorkspaces.find((item) => item.id === requestedWorkspaceId);
+      if (!existing) {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: { code: "WORKSPACE_NOT_FOUND", message: "Workspace not found", retryable: false } }));
+        return;
+      }
+      const renamed = { ...existing, displayName: input.displayName };
+      fixtureWorkspaces = fixtureWorkspaces.map((item) => item.id === requestedWorkspaceId ? renamed : item);
+      response.end(JSON.stringify(renamed));
+    });
+    return;
+  }
   if (key === "PUT /v1/sandbox-settings") {
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
