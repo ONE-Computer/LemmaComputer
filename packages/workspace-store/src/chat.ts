@@ -41,6 +41,7 @@ export type ChatConversationPage = {
 
 export type ChatConversationLibraryRecord = ChatConversationRecord & {
   workspaceGrantId: string;
+  workspaceDisplayName: string | null;
   workspaceDeletedAt: Date | null;
 };
 
@@ -123,6 +124,7 @@ export type ArtifactLibraryRecord = AuthorizedArtifactRevision & {
   conversationTitle: string | null;
   conversationAgentCatalogId: ChatAgentCatalogId;
   workspaceGrantId: string;
+  workspaceDisplayName: string | null;
   workspaceDeletedAt: Date | null;
 };
 
@@ -385,6 +387,7 @@ export class PostgresChatStore implements ChatStore {
     }
     const result = await this.pool.query(
       `SELECT conversation.*,workspace.grant_id AS workspace_grant_id,
+         workspace.display_name AS workspace_display_name,
          workspace.deleted_at AS workspace_deleted_at
        FROM chat_conversations conversation
        JOIN workspaces workspace
@@ -398,6 +401,7 @@ export class PostgresChatStore implements ChatStore {
     const values = result.rows.map((row) => ({
       ...conversation(row),
       workspaceGrantId: String(row.workspace_grant_id),
+      workspaceDisplayName: row.workspace_display_name == null ? null : String(row.workspace_display_name),
       workspaceDeletedAt: row.workspace_deleted_at == null ? null : new Date(String(row.workspace_deleted_at)),
     }));
     const hasMore = values.length > input.limit;
@@ -751,7 +755,8 @@ export class PostgresChatStore implements ChatStore {
          revision.storage_backend,revision.storage_locator,revision.created_by_subject_id,
          revision.created_at AS revision_created_at,conversation.title AS conversation_title,
          conversation.default_agent_catalog_id AS conversation_agent_catalog_id,
-         workspace.grant_id AS workspace_grant_id,workspace.deleted_at AS workspace_deleted_at
+         workspace.grant_id AS workspace_grant_id,workspace.display_name AS workspace_display_name,
+         workspace.deleted_at AS workspace_deleted_at
        FROM artifacts artifact
        JOIN artifact_revisions revision
          ON revision.tenant_id=artifact.tenant_id AND revision.id=artifact.current_revision_id
@@ -785,6 +790,7 @@ export class PostgresChatStore implements ChatStore {
       conversationTitle: row.conversation_title == null ? null : String(row.conversation_title),
       conversationAgentCatalogId: chatAgentCatalogIdSchema.parse(row.conversation_agent_catalog_id),
       workspaceGrantId: String(row.workspace_grant_id),
+      workspaceDisplayName: row.workspace_display_name == null ? null : String(row.workspace_display_name),
       workspaceDeletedAt: row.workspace_deleted_at == null ? null : new Date(String(row.workspace_deleted_at)),
     }));
     const hasMore = values.length > input.limit;

@@ -18,7 +18,7 @@ test("browses, searches, downloads, and traces durable artifacts from their prim
   await expect(download).toBeVisible();
   await expect(download).toHaveAttribute("href", /\/api\/v1\/chat\/artifacts\/artifact-1111.*revision=revision-1111/);
   await expect(page.getByText("Markdown", { exact: true })).toBeVisible();
-  await expect(page.getByText("Project Workspace", { exact: true })).toBeVisible();
+  await expect(page.getByText("Project archive", { exact: true })).toBeVisible();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
   const searchRequest = page.waitForRequest((request) => request.method() === "GET"
@@ -36,5 +36,5 @@ test("browses, searches, downloads, and traces durable artifacts from their prim
 
   await page.getByRole("button", { name: "Project handover" }).click();
   await expect(page).toHaveURL(/view=chat.*chat=fixture-session-archived/);
-  await expect(page.getByText(/Saved from Project Workspace\. Choose an agent to continue/)).toBeVisible();
+  await expect(page.getByText(/Saved from Project archive\. Choose an agent to continue/)).toBeVisible();
 });

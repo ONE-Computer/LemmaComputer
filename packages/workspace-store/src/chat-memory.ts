@@ -64,6 +64,7 @@ export class MemoryChatStore implements ChatStore {
     const page = values.slice(start, start + input.limit).map((item) => ({
       ...item,
       workspaceGrantId: item.workspaceId,
+      workspaceDisplayName: null,
       workspaceDeletedAt: null,
     }));
     return { conversations: structuredClone(page), nextCursor: values.length > start + input.limit ? page.at(-1)!.id : null };
@@ -188,6 +189,7 @@ export class MemoryChatStore implements ChatStore {
       conversationTitle: this.conversations.get(key(identity.tenantId, saved.artifact.conversationId))?.title ?? null,
       conversationAgentCatalogId: this.conversations.get(key(identity.tenantId, saved.artifact.conversationId))?.defaultAgentCatalogId ?? "hermes-claw" as const,
       workspaceGrantId: saved.artifact.workspaceId,
+      workspaceDisplayName: null,
       workspaceDeletedAt: null,
     }));
     return {

@@ -1021,7 +1021,7 @@ function ArtifactsScreen({ onOpenConversation }) {
               <span>{attachmentSize(artifact.byteLength)}</span>
               <span>{siteUpdatedAt(artifact.createdAt)}</span>
               <span>{protectedPolicyAgentNames[artifact.agentCatalogId] || artifact.agentCatalogId}</span>
-              <span>{workspaceName({ grantId: artifact.workspaceGrantId })}</span>
+              <span>{workspaceName({ displayName: artifact.workspaceDisplayName, grantId: artifact.workspaceGrantId })}</span>
             </div>
             <div className="artifact-source">
               <span>From</span>
@@ -6137,7 +6137,7 @@ export function ChatScreen({
               availableAgents={agents}
               onFork={forkThread}
               archived={archived}
-              sourceWorkspaceName={savedSession ? workspaceName({ grantId: savedSession.workspaceGrantId }) : ""}
+              sourceWorkspaceName={savedSession ? workspaceName({ displayName: savedSession.workspaceDisplayName, grantId: savedSession.workspaceGrantId }) : ""}
               configurationAccess={configurationAccess}
             />
           </div>;
@@ -8187,7 +8187,7 @@ export function App() {
             {chatSessions.length === 0
               ? <p>No recent chats</p>
               : chatSessions.map((item, index) => <button key={item.id} className={activeChatSessionId === item.id ? "active" : ""} type="button" onClick={() => { selectChatSession(item.id); setMobileNavOpen(false); }} aria-current={activeChatSessionId === item.id ? "true" : undefined}>
-                <span>{item.title || `Conversation ${chatSessions.length - index}`}<small>{protectedPolicyAgentNames[item.agentCatalogId] || item.agentCatalogId}{item.workspaceDeleted ? ` · Saved from ${workspaceName({ grantId: item.workspaceGrantId })}` : ""}</small></span>
+                <span>{item.title || `Conversation ${chatSessions.length - index}`}<small>{protectedPolicyAgentNames[item.agentCatalogId] || item.agentCatalogId}{item.workspaceDeleted ? ` · Saved from ${workspaceName({ displayName: item.workspaceDisplayName, grantId: item.workspaceGrantId })}` : ""}</small></span>
                 {runningChatSessionIds.includes(item.id) && <span className="sidebar-chat-running" aria-hidden="true" />}
               </button>)}
             {chatHistoryHasMore && <button className="sidebar-chat-load-more" type="button" disabled={chatHistoryLoadingMore} onClick={() => setChatHistoryLoadRequest((value) => value + 1)}>{chatHistoryLoadingMore ? "Loading chats…" : "Load older chats"}</button>}

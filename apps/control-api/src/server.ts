@@ -5773,6 +5773,7 @@ export function createControlServer(
       sessions: page.conversations.map((session) => ({
         ...chatSessionView(session),
         workspaceGrantId: session.workspaceGrantId,
+        workspaceDisplayName: session.workspaceDisplayName,
         workspaceDeleted: session.workspaceDeletedAt !== null,
       })),
       nextCursor: page.nextCursor,
@@ -5814,6 +5815,7 @@ export function createControlServer(
         agentCatalogId: saved.conversationAgentCatalogId,
         workspaceId: saved.artifact.workspaceId,
         workspaceGrantId: saved.workspaceGrantId,
+        workspaceDisplayName: saved.workspaceDisplayName,
         workspaceDeleted: saved.workspaceDeletedAt !== null,
         displayName: saved.artifact.displayName,
         mediaType: saved.revision.mediaType,

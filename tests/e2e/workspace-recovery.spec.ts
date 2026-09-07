@@ -525,8 +525,8 @@ for (const initial of ["failed", "stopped"] as const) {
   });
 }
 
-test("workspace name can be edited and saved from its configuration heading", async ({ page }) => {
-  const workspaceId = "3c536c1f-6a31-427d-af8f-dbb0c63f8d70";
+test("workspace rename propagates to workspace, schedule, and chat labels", async ({ page }) => {
+  const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
   let renamedWorkspace = null;
   let renameRequest = null;
   await page.route("**/api/v1/workspaces", async (route) => {
@@ -552,11 +552,11 @@ test("workspace name can be edited and saved from its configuration heading", as
   });
 
   await page.goto("/");
-  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+  await page.getByRole("article", { name: "Acme Workspace" }).getByRole("button", { name: "Manage configuration" }).click();
 
   await page.getByRole("button", { name: "Edit workspace name" }).click();
   const input = page.getByRole("textbox", { name: "Workspace name" });
-  await expect(input).toHaveValue("Research");
+  await expect(input).toHaveValue("Acme Workspace");
   await input.fill("Client research");
   await page.getByRole("button", { name: "Save workspace name" }).click();
 
@@ -568,4 +568,16 @@ test("workspace name can be edited and saved from its configuration heading", as
   await expect(page.getByRole("article", { name: "Client research" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("article", { name: "Client research" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Schedules" }).click();
+  await expect(page.getByRole("article").filter({ hasText: "Weekday project summary" }))
+    .toContainText("Client research · Hermes Agent CLI");
+  await page.getByRole("button", { name: "Create schedule" }).click();
+  await page.getByRole("combobox", { name: "Workspace" }).click();
+  await expect(page.getByRole("option", { name: "Client research" })).toBeVisible();
+  await page.getByRole("option", { name: "Client research" }).click();
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  await page.getByRole("button", { name: "Chat" }).click();
+  await expect(page.getByRole("button", { name: /Hermes Agent CLI · Client research · Balanced/ })).toBeVisible();
 });

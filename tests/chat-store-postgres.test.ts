@@ -132,6 +132,8 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
       protectedConversations: 0,
       protectedArtifacts: 0,
     });
+    const renamedWorkspace = await workspaces.rename(identity, workspace.id, "Client research");
+    assert.equal(renamedWorkspace?.displayName, "Client research");
     assert.equal(await workspaces.tombstone(identity, workspace.id, "preserve"), true);
     assert.equal(await workspaces.getOwned(identity, workspace.id), null);
     assert.deepEqual((await pool.query(
@@ -146,10 +148,12 @@ test("ChatStore owns unified history, forks without vendor sessions, and enforce
     const archivedConversations = await chats.listOwnedConversations(identity, { limit: 20 });
     assert.equal(archivedConversations.conversations.length, 2);
     assert.ok(archivedConversations.conversations.every((item) => item.workspaceDeletedAt instanceof Date));
+    assert.ok(archivedConversations.conversations.every((item) => item.workspaceDisplayName === "Client research"));
     const archivedArtifacts = await chats.listOwnedArtifacts(identity, { limit: 20 });
     assert.equal(archivedArtifacts.artifacts.length, 1);
     assert.equal(archivedArtifacts.artifacts[0].artifact.id, artifactId);
     assert.ok(archivedArtifacts.artifacts[0].workspaceDeletedAt instanceof Date);
+    assert.equal(archivedArtifacts.artifacts[0].workspaceDisplayName, "Client research");
     assert.equal((await chats.listOwnedArtifacts(identity, { limit: 20, query: "REPORT.XLSX" })).artifacts.length, 1);
     assert.equal((await chats.listOwnedArtifacts(identity, { limit: 20, query: "missing" })).artifacts.length, 0);
 
