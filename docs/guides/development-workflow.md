@@ -688,8 +688,20 @@ Playwright suite. Report actual commands and outcomes rather than relying on a
 hidden hook.
 
 The integration owner merges verified work into `main`. `main` remains
-buildable but is not the running demo. A demo release requires a clean pushed
-commit and:
+buildable but is not the running demo. Routine updates to the development-mode
+client demo use the lighter [demo update workflow](demo-release.md):
+
+```bash
+npm run demo:update -- plan --host=ubuntu@demo-host.example
+npm run demo:update -- apply --host=ubuntu@demo-host.example
+```
+
+This uses the clean task worktree commit, runs quick verification and relevant
+browser tests, preserves the server environment, and restarts application
+services only. It creates no EBS snapshot and runs no migration. The planner
+refuses dependency, schema, environment-contract, infrastructure, authentication,
+provider, and workspace-runtime changes. Full releases still require a clean
+pushed commit and:
 
 ```bash
 npm run verify:release

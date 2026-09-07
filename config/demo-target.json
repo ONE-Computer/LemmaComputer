@@ -1,0 +1,5 @@
+{
+  "root": "/opt/onecomputer",
+  "project": "onecomputer-demo",
+  "controlContainer": "onecomputer-demo-control-api"
+}
