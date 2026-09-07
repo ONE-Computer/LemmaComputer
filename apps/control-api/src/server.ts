@@ -3,7 +3,7 @@ import { foundryConfigurationSchema, vertexConfigurationSchema, foundryProviderM
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 import Fastify, { LogController } from "fastify";
-import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, deleteWorkspaceSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, renameWorkspaceSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
+import { anthropicProviderModelIdSchema, assignEgressSecurityGroupSchema, assignTeamMembershipSchema, bedrockApiKeyModelProfileIdSchema, bedrockApiKeyRegionSchema, channelArtifactDownloadRequestSchema, channelArtifactMaxBytes, channelRouteSchema, channelTurnRequestSchema, channelTurnResponseSchema, channelTurnStreamEventSchema, chatAgentCatalogIdSchema, chatPartIdSchema, chatSessionIdSchema, createChatSessionSchema, createScheduleSchema, createTeamSchema, deleteWorkspaceSchema, egressSecurityGroupVersionSchema, executeScheduleRunSchema, glmProviderModelIdSchema, isWorkspaceSelectableAgentCatalogId, LemmaComputerError, recentAuthenticationStepUpWindowMs, TelegramTokenIntakeGrantIssuer, createDeleteFileOperationSchema, createWorkspaceSchema, fixtureApprovalSchema, identityContextSchema, mcpPolicyRequestSchema, openAiProviderModelIdSchema, ownedAgentCatalog, providerEmissionsRegionSchema, reviewedAgentSkillCatalog, policyVerificationKeySetSchema, renameWorkspaceSchema, runtimePolicySchema, saveEgressSecurityGroupSchema, saveHostedConnectorToolPolicySchema, saveMcpToolPolicySchema, saveTelegramChannelConnectionSchema, saveTelegramCredentialSchema, telegramTokenIntakePath, telegramTokenIntakeGrantSchema, sandboxApplicationSchema, sandboxConfigurationSchema, sandboxProfileSchema, sandboxSettingsSchema, saveSandboxSettingsSchema, sendChatTurnSchema, setDefaultSpendingTeamSchema, telegramChannelConnectionStatusSchema, toolAuditTerminalInputSchema, updateScheduleSchema, updateTeamSchema, workspaceManifestAgentIdFor, workspaceManifestChatAgentIdFor, workspaceManifestSchema, type AgentCatalogId, type AgentChatEvent, type ChannelRoute, type ChatAgentCatalogId, type ChatUiMessage, type EgressSecurityGroupVersion, type IdentityContext, type RuntimePolicy, type SandboxApplicationId, type SandboxModelAlias, type SandboxProfileId, type SandboxConfiguration, type TelegramChannelConnectionStatus, type WorkspaceManifest, type WorkspaceState } from "@lemmacomputer/contracts";
 import { organizationWorkspacePolicyConstraintsSchema, type OrganizationWorkspacePolicyConstraints } from "@lemmacomputer/contracts";
 import { createMutualTlsFetch, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, LiteLlmTeamBudgetProjector, managedProviderForAlias, type GatewayClient, type GovernedToolExecutor, type ManagedProviderName, type OAuthConnectionGateway, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import {qualifiedAgentReasoningAdapter,RoutingDecisionBindingAuthority} from "@lemmacomputer/model-router";
@@ -1948,23 +1948,40 @@ export function createControlServer(
     await agentProcesses.requireActive({ identity: owner, workspace, logicalAgentId: actor.agentId, agentInstanceId });
     return agentInstanceId;
   };
+  const resolveScheduleTarget = async (
+    owner: IdentityContext,
+    workspaceId: string,
+    catalogId: ChatAgentCatalogId,
+    requestedServiceClass: "lite" | "balanced" | "pro",
+    reasoningEffort?: "auto" | "low" | "medium" | "high" | null,
+  ) => {
+    const { policy } = await channelPolicy(owner, workspaceId);
+    if (!assignedChatAgentIds(policy).includes(catalogId)) {
+      throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That agent is not selected for this workspace", 409);
+    }
+    await requireChatServiceClass(owner, requestedServiceClass, policy);
+    await requireReasoningEffort(owner, policy, catalogId, requestedServiceClass, reasoningEffort ?? undefined);
+    return {
+      access: await service.agentChatAccess(owner, policy, workspaceId, catalogId),
+      maximumReasoningEffort: policy.maximumReasoningEffort,
+    };
+  };
   const schedules = security.scheduleStore && security.schedulePromptSecret
     ? new ScheduleService(
         security.scheduleStore,
         new SchedulePromptVault(security.schedulePromptSecret),
         agentChat,
-        async (owner, workspaceId, catalogId) => {
-          const { policy } = await channelPolicy(owner, workspaceId);
-          if (!assignedChatAgentIds(policy).includes(catalogId)) {
-            throw new LemmaComputerError("CHAT_AGENT_NOT_SELECTED", "That agent is not selected for this workspace", 409);
-          }
+        async (owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort) => {
+          await resolveScheduleTarget(owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort);
         },
-        async (owner, workspaceId, catalogId) => {
-          const { policy } = await channelPolicy(owner, workspaceId);
-          return service.agentChatAccess(owner, policy, workspaceId, catalogId);
+        async (owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort) => {
+          const resolved = await resolveScheduleTarget(owner, workspaceId, catalogId, requestedServiceClass, reasoningEffort);
+          return { ...resolved.access, maximumReasoningEffort: resolved.maximumReasoningEffort };
         },
-        ({ identity: owner, workspaceId, agentId, taskId, sessionId, turnId, agentInstanceId }) => issueUsageTaskBinding(
-          owner, workspaceId, agentId, "schedule", taskId, sessionId, turnId, "auto", agentInstanceId,
+        ({ identity: owner, workspaceId, agentId, taskId, sessionId, turnId, agentInstanceId,
+          requestedServiceClass, requestedReasoningEffort, maximumReasoningEffort }) => issueUsageTaskBinding(
+          owner, workspaceId, agentId, "schedule", taskId, sessionId, turnId,
+          requestedServiceClass, agentInstanceId, requestedReasoningEffort, maximumReasoningEffort,
         ),
         async ({ identity: owner, workspaceId, catalogId, logicalAgentId, sessionId, runId }) => {
           const { policy, workspace } = await channelPolicy(owner, workspaceId);

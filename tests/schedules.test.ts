@@ -6,7 +6,7 @@ import type {
   IdentityContext,
   ScheduleRunState,
 } from "@lemmacomputer/contracts";
-import { LemmaComputerError } from "@lemmacomputer/contracts";
+import { createScheduleSchema, LemmaComputerError } from "@lemmacomputer/contracts";
 import {
   MemoryChatStore,
   nextScheduleAt,
@@ -200,10 +200,11 @@ const successfulAgent: AgentChatClient = {
   health: async () => {},
   cancelTurn: async () => {},
   downloadArtifact: async () => Buffer.alloc(0),
-  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding, agentInstanceId, _reasoningEffort, history) {
+  async *streamTurn(_access, sessionId, message, _signal, usageTaskBinding, agentInstanceId, reasoningEffort, history) {
     assert.equal(usageTaskBinding, "signed-schedule-binding");
     assert.match(sessionId, /^[0-9a-f-]{36}$/);
     assert.equal(agentInstanceId, scheduledInstanceId);
+    assert.equal(reasoningEffort, "high");
     assert.equal(message.parts[0]?.type, "text");
     assert.equal(message.parts[0]?.type === "text" ? message.parts[0].text : "", "Summarize the project.");
     assert.deepEqual(history, [], "the current scheduled prompt must not also be sent as prior history");
@@ -239,6 +240,30 @@ test("cron schedules retain IANA timezone behavior across weekdays and DST", () 
   );
 });
 
+test("schedule contracts default legacy creates and reject unsupported model preferences", () => {
+  const input = {
+    title: "Daily project summary",
+    workspaceId,
+    agentCatalogId: "codex-cli",
+    prompt: "Summarize the project.",
+    cronExpression: "0 9 * * 1-5",
+    timeZone: "Asia/Singapore",
+    state: "enabled",
+  };
+  assert.equal(createScheduleSchema.parse(input).requestedServiceClass, "balanced");
+  assert.deepEqual(createScheduleSchema.parse({
+    ...input,
+    requestedServiceClass: "pro",
+    reasoningEffort: "high",
+  }), {
+    ...input,
+    requestedServiceClass: "pro",
+    reasoningEffort: "high",
+  });
+  assert.throws(() => createScheduleSchema.parse({ ...input, requestedServiceClass: "auto" }));
+  assert.throws(() => createScheduleSchema.parse({ ...input, reasoningEffort: "max" }));
+});
+
 test("saved prompts are encrypted and bound to their owner and schedule", () => {
   const vault = new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters");
   const protectedValue = vault.protect(identity, "22222222-2222-4222-8222-222222222222", "private prompt");
@@ -265,11 +290,19 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
     store,
     new SchedulePromptVault("test-schedule-prompt-secret-with-at-least-32-characters"),
     successfulAgent,
-    async () => { validations += 1; },
-    async (_owner, targetWorkspaceId, catalogId: ChatAgentCatalogId) => {
+    async (_owner, targetWorkspaceId, catalogId, requestedServiceClass, reasoningEffort) => {
       validations += 1;
       assert.equal(targetWorkspaceId, workspaceId);
       assert.equal(catalogId, "codex-cli");
+      assert.equal(requestedServiceClass, "pro");
+      assert.equal(reasoningEffort, "high");
+    },
+    async (_owner, targetWorkspaceId, catalogId: ChatAgentCatalogId, requestedServiceClass, reasoningEffort) => {
+      validations += 1;
+      assert.equal(targetWorkspaceId, workspaceId);
+      assert.equal(catalogId, "codex-cli");
+      assert.equal(requestedServiceClass, "pro");
+      assert.equal(reasoningEffort, "high");
       return access;
     },
     (input) => {
@@ -281,6 +314,8 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
       assert.match(input.sessionId, /^[0-9a-f-]{36}$/);
       assert.match(input.turnId, /^[0-9a-f-]{36}$/);
       assert.equal(input.agentInstanceId, scheduledInstanceId);
+      assert.equal(input.requestedServiceClass, "pro");
+      assert.equal(input.requestedReasoningEffort, "high");
       return "signed-schedule-binding";
     },
     async (input) => {
@@ -299,12 +334,16 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
     title: "Daily project summary",
     workspaceId,
     agentCatalogId: "codex-cli",
+    requestedServiceClass: "pro",
+    reasoningEffort: "high",
     prompt: "Summarize the project.",
     cronExpression: "0 9 * * 1-5",
     timeZone: "Asia/Singapore",
     state: "enabled",
   });
   const queued = await store.queueScheduleRun(identity, schedule.id, new Date());
+  assert.equal(schedule.requestedServiceClass, "pro");
+  assert.equal(schedule.reasoningEffort, "high");
   assert.ok(queued);
   const [claimed] = await store.claimDueScheduleRuns(new Date(), 1, 120_000);
   assert.ok(claimed?.run.leaseToken);
@@ -317,6 +356,8 @@ test("a claimed run revalidates its target and creates a fresh Control conversat
   assert.equal(endReason, "process_exited");
   const conversations = await chatStore.listConversations(identity, workspaceId, { limit: 10 });
   assert.equal(conversations.conversations.length, 1);
+  assert.equal(conversations.conversations[0]!.requestedServiceClass, "pro");
+  assert.equal(conversations.conversations[0]!.reasoningEffort, "high");
   assert.deepEqual(
     (await chatStore.listMessages(identity, conversations.conversations[0]!.id)).map((message) => message.role),
     ["user", "assistant"],
@@ -436,6 +477,8 @@ test("the worker sends only leased run identifiers to Control", async () => {
     id,
     workspaceId,
     agentCatalogId: "codex-cli",
+    requestedServiceClass: "balanced",
+    reasoningEffort: null,
     title: "Test",
     promptCiphertext: vault.protect(identity, id, "must not leave Control"),
     cronExpression: "0 9 * * *",
@@ -459,12 +502,18 @@ test("the migration enforces ownership lifecycle, unique occurrences, and leased
     new URL("../packages/workspace-store/migrations/027_schedules.sql", import.meta.url),
     "utf8",
   );
+  const preferencesMigration = await readFile(
+    new URL("../packages/workspace-store/migrations/01M1WT3VZ3PS3B2PGB9AF8Q50W_add_schedule_model_preferences.sql", import.meta.url),
+    "utf8",
+  );
   const store = await readFile(
     new URL("../packages/workspace-store/src/schedules.ts", import.meta.url),
     "utf8",
   );
   assert.match(migration, /REFERENCES workspaces\(id\) ON DELETE CASCADE/);
   assert.match(migration, /UNIQUE \(schedule_id, scheduled_for\)/);
+  assert.match(preferencesMigration, /requested_service_class text NOT NULL DEFAULT 'balanced'/);
+  assert.match(preferencesMigration, /reasoning_effort text NULL/);
   assert.match(store, /FOR UPDATE SKIP LOCKED/);
   assert.match(store, /SCHEDULE_RUN_OUTCOME_UNKNOWN/);
 });

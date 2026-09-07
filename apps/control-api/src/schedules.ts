@@ -10,12 +10,15 @@ import {
   scheduleRunSchema,
   scheduleSchema,
   type ChatAgentCatalogId,
+  type ChatReasoningEffort,
+  type ChatRequestedServiceClass,
   type ChatUiMessage,
   type CreateSchedule,
   type IdentityContext,
   type Schedule,
   type ScheduleRun,
   type UpdateSchedule,
+  type WorkspaceReasoningEffort,
 } from "@lemmacomputer/contracts";
 import {
   nextScheduleAt,
@@ -88,6 +91,8 @@ const scheduleView = (record: ScheduleRecord, prompt: string): Schedule => sched
   title: record.title,
   workspaceId: record.workspaceId,
   agentCatalogId: record.agentCatalogId,
+  requestedServiceClass: record.requestedServiceClass,
+  reasoningEffort: record.reasoningEffort,
   prompt,
   cronExpression: record.cronExpression,
   timeZone: record.timeZone,
@@ -129,6 +134,10 @@ const unavailableCodes = new Set([
 const workspaceTransitionCode = "WORKSPACE_POLICY_TRANSITION_IN_PROGRESS";
 const workspaceTransitionRetryMs = 30_000;
 
+type ScheduledAgentChatAccess = AgentChatAccess & {
+  maximumReasoningEffort?: WorkspaceReasoningEffort;
+};
+
 export class ScheduleService {
   constructor(
     private readonly store: ScheduleStore,
@@ -138,15 +147,22 @@ export class ScheduleService {
       identity: IdentityContext,
       workspaceId: string,
       agentCatalogId: ChatAgentCatalogId,
+      requestedServiceClass: ChatRequestedServiceClass,
+      reasoningEffort?: ChatReasoningEffort | null,
     ) => Promise<void>,
     private readonly resolveAccess: (
       identity: IdentityContext,
       workspaceId: string,
       agentCatalogId: ChatAgentCatalogId,
-    ) => Promise<AgentChatAccess>,
+      requestedServiceClass: ChatRequestedServiceClass,
+      reasoningEffort?: ChatReasoningEffort | null,
+    ) => Promise<ScheduledAgentChatAccess>,
     private readonly issueUsageTaskBinding?: (input: {
       identity: IdentityContext; workspaceId: string; agentId: string;
       taskId: string; sessionId: string; turnId: string; agentInstanceId?: string;
+      requestedServiceClass: ChatRequestedServiceClass;
+      requestedReasoningEffort?: ChatReasoningEffort;
+      maximumReasoningEffort?: WorkspaceReasoningEffort;
     }) => string | undefined,
     private readonly beginAgentProcess?: (input: {
       identity: IdentityContext; workspaceId: string; catalogId: ChatAgentCatalogId;
@@ -174,7 +190,14 @@ export class ScheduleService {
   }
 
   async create(identity: IdentityContext, input: CreateSchedule) {
-    await this.validateTarget(identity, input.workspaceId, input.agentCatalogId);
+    const requestedServiceClass = input.requestedServiceClass ?? "balanced";
+    await this.validateTarget(
+      identity,
+      input.workspaceId,
+      input.agentCatalogId,
+      requestedServiceClass,
+      input.reasoningEffort,
+    );
     const id = randomUUID();
     const nextRunAt = input.state === "enabled"
       ? this.next(input.cronExpression, input.timeZone)
@@ -183,6 +206,8 @@ export class ScheduleService {
       id,
       workspaceId: input.workspaceId,
       agentCatalogId: input.agentCatalogId,
+      requestedServiceClass,
+      reasoningEffort: input.reasoningEffort ?? null,
       title: input.title,
       promptCiphertext: this.vault.protect(identity, id, input.prompt),
       cronExpression: input.cronExpression,
@@ -201,8 +226,10 @@ export class ScheduleService {
     if (!current) throw new LemmaComputerError("SCHEDULE_NOT_FOUND", "Schedule not found", 404);
     const workspaceId = input.workspaceId ?? current.workspaceId;
     const agentCatalogId = input.agentCatalogId ?? current.agentCatalogId;
-    if (input.workspaceId || input.agentCatalogId) {
-      await this.validateTarget(identity, workspaceId, agentCatalogId);
+    const requestedServiceClass = input.requestedServiceClass ?? current.requestedServiceClass;
+    const reasoningEffort = input.reasoningEffort === undefined ? current.reasoningEffort : input.reasoningEffort;
+    if (input.workspaceId || input.agentCatalogId || input.requestedServiceClass || input.reasoningEffort !== undefined) {
+      await this.validateTarget(identity, workspaceId, agentCatalogId, requestedServiceClass, reasoningEffort);
     }
     const cronExpression = input.cronExpression ?? current.cronExpression;
     const timeZone = input.timeZone ?? current.timeZone;
@@ -261,7 +288,13 @@ export class ScheduleService {
     let processStarted = false;
     let processEnded = false;
     try {
-      const access = await this.resolveAccess(identity, schedule.workspaceId, schedule.agentCatalogId);
+      const access = await this.resolveAccess(
+        identity,
+        schedule.workspaceId,
+        schedule.agentCatalogId,
+        schedule.requestedServiceClass,
+        schedule.reasoningEffort,
+      );
       await this.agentChat.health(access);
       const session = this.chatStore
         ? await this.chatStore.createConversation({
@@ -269,7 +302,8 @@ export class ScheduleService {
             workspaceId: schedule.workspaceId,
             defaultAgentCatalogId: schedule.agentCatalogId,
             title: `Scheduled: ${schedule.title}`,
-            requestedServiceClass: "balanced",
+            requestedServiceClass: schedule.requestedServiceClass,
+            reasoningEffort: schedule.reasoningEffort ?? undefined,
           })
         : undefined;
       sessionId = session?.id ?? randomUUID();
@@ -304,9 +338,13 @@ export class ScheduleService {
       const usageTaskBinding = this.issueUsageTaskBinding?.({
         identity, workspaceId: schedule.workspaceId, agentId: access.agentId,
         taskId: `schedule:${run.id}`, sessionId, turnId: message.id, agentInstanceId,
+        requestedServiceClass: schedule.requestedServiceClass,
+        ...(schedule.reasoningEffort ? { requestedReasoningEffort: schedule.reasoningEffort } : {}),
+        ...(access.maximumReasoningEffort ? { maximumReasoningEffort: access.maximumReasoningEffort } : {}),
       });
       for await (const runtimeEvent of this.agentChat.streamTurn(
-        access, sessionId, message, undefined, usageTaskBinding, agentInstanceId, undefined, history, vendorSessionId ?? undefined,
+        access, sessionId, message, undefined, usageTaskBinding, agentInstanceId,
+        schedule.reasoningEffort ?? undefined, history, vendorSessionId ?? undefined,
       )) {
         const event = runtimeEvent.type === "artifact" && session && this.durableChat
           ? await this.durableChat.persistGeneratedArtifact({ identity, conversation: session, access, client: this.agentChat, event: runtimeEvent })
@@ -317,7 +355,8 @@ export class ScheduleService {
             await this.chatStore.beginRun({
               identity, conversationId: session.id, turnId: event.turnId,
               effectiveAgentCatalogId: schedule.agentCatalogId,
-              requestedServiceClass: "balanced",
+              requestedServiceClass: schedule.requestedServiceClass,
+              reasoningEffort: schedule.reasoningEffort ?? undefined,
               policyVersionId: access.policyVersionId,
               policyVersion: access.policyVersion,
               policyHash: access.policyHash,

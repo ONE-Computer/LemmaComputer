@@ -477,6 +477,8 @@ let fixtureSchedules = [{
   title: "Weekday project summary",
   workspaceId,
   agentCatalogId: "hermes-claw",
+  requestedServiceClass: "balanced",
+  reasoningEffort: null,
   prompt: "Summarize the current project status, open decisions, and the next useful action.",
   cronExpression: "0 9 * * 1-5",
   timeZone: "Asia/Singapore",

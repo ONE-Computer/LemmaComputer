@@ -3,6 +3,8 @@ import pg from "pg";
 import { CronExpressionParser } from "cron-parser";
 import type {
   ChatAgentCatalogId,
+  ChatReasoningEffort,
+  ChatRequestedServiceClass,
   IdentityContext,
   ScheduleRunState,
   ScheduleState,
@@ -14,6 +16,8 @@ export type ScheduleRecord = {
   subjectId: string;
   workspaceId: string;
   agentCatalogId: ChatAgentCatalogId;
+  requestedServiceClass: ChatRequestedServiceClass;
+  reasoningEffort: ChatReasoningEffort | null;
   title: string;
   promptCiphertext: string;
   cronExpression: string;
@@ -55,6 +59,8 @@ export interface ScheduleStore {
     id: string;
     workspaceId: string;
     agentCatalogId: ChatAgentCatalogId;
+    requestedServiceClass: ChatRequestedServiceClass;
+    reasoningEffort: ChatReasoningEffort | null;
     title: string;
     promptCiphertext: string;
     cronExpression: string;
@@ -65,6 +71,8 @@ export interface ScheduleStore {
   updateSchedule(identity: IdentityContext, scheduleId: string, input: Partial<{
     workspaceId: string;
     agentCatalogId: ChatAgentCatalogId;
+    requestedServiceClass: ChatRequestedServiceClass;
+    reasoningEffort: ChatReasoningEffort | null;
     title: string;
     promptCiphertext: string;
     cronExpression: string;
@@ -112,6 +120,8 @@ const mapSchedule = (row: Record<string, unknown>): ScheduleRecord => ({
   subjectId: String(row.subject_id),
   workspaceId: String(row.workspace_id),
   agentCatalogId: String(row.agent_catalog_id) as ChatAgentCatalogId,
+  requestedServiceClass: String(row.requested_service_class) as ChatRequestedServiceClass,
+  reasoningEffort: row.reasoning_effort ? String(row.reasoning_effort) as ChatReasoningEffort : null,
   title: String(row.title),
   promptCiphertext: String(row.prompt_ciphertext),
   cronExpression: String(row.cron_expression),
@@ -150,6 +160,8 @@ const schedulePatch = (input: Record<string, unknown>) => {
   };
   if (Object.hasOwn(input, "workspaceId")) add("workspace_id", input.workspaceId);
   if (Object.hasOwn(input, "agentCatalogId")) add("agent_catalog_id", input.agentCatalogId);
+  if (Object.hasOwn(input, "requestedServiceClass")) add("requested_service_class", input.requestedServiceClass);
+  if (Object.hasOwn(input, "reasoningEffort")) add("reasoning_effort", input.reasoningEffort);
   if (Object.hasOwn(input, "title")) add("title", input.title);
   if (Object.hasOwn(input, "promptCiphertext")) add("prompt_ciphertext", input.promptCiphertext);
   if (Object.hasOwn(input, "cronExpression")) add("cron_expression", input.cronExpression);
@@ -187,15 +199,16 @@ export class PostgresScheduleStore implements ScheduleStore {
   async createSchedule(identity: IdentityContext, input: Parameters<ScheduleStore["createSchedule"]>[1]) {
     const result = await this.pool.query(
       `INSERT INTO schedules (
-         id,tenant_id,subject_id,workspace_id,agent_catalog_id,title,prompt_ciphertext,
-         cron_expression,time_zone,state,next_run_at,created_at,updated_at
+         id,tenant_id,subject_id,workspace_id,agent_catalog_id,requested_service_class,
+         reasoning_effort,title,prompt_ciphertext,cron_expression,time_zone,state,next_run_at,created_at,updated_at
        )
-       SELECT $1,$2,$3,w.id,$5,$6,$7,$8,$9,$10,$11,now(),now()
+       SELECT $1,$2,$3,w.id,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),now()
        FROM workspaces w
        WHERE w.id=$4 AND w.tenant_id=$2 AND w.subject_id=$3
        RETURNING *`,
       [input.id, identity.tenantId, identity.subjectId, input.workspaceId, input.agentCatalogId,
-        input.title, input.promptCiphertext, input.cronExpression, input.timeZone, input.state, input.nextRunAt],
+        input.requestedServiceClass, input.reasoningEffort, input.title, input.promptCiphertext,
+        input.cronExpression, input.timeZone, input.state, input.nextRunAt],
     );
     return result.rowCount ? mapSchedule(result.rows[0]) : null;
   }

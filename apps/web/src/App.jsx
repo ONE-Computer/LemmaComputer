@@ -679,6 +679,8 @@ const scheduleDraft = (schedule, workspaces) => {
     title: schedule?.title ?? "",
     workspaceId: workspace?.id ?? "",
     agentCatalogId: schedule?.agentCatalogId ?? agents[0]?.id ?? "",
+    requestedServiceClass: schedule?.requestedServiceClass ?? "balanced",
+    reasoningEffort: schedule?.reasoningEffort ?? "",
     prompt: schedule?.prompt ?? "",
     cadence,
     weekday: cadence === "weekly" ? days : "1",
@@ -690,12 +692,78 @@ const scheduleDraft = (schedule, workspaces) => {
 
 function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
   const [draft, setDraft] = useState(() => scheduleDraft(schedule, workspaces));
+  const [capabilities, setCapabilities] = useState({ loading: false, error: "", serviceClassOptions: [], agents: [] });
   const selectedWorkspace = workspaces.find((item) => item.id === draft.workspaceId);
-  const agentOptions = (selectedWorkspace?.agents ?? [])
-    .filter((agent) => scheduledAgentIds.has(agent.id))
-    .map((agent) => ({ value: agent.id, label: agent.displayName }));
+  const selectedAgent = capabilities.agents.find((agent) => agent.catalogId === draft.agentCatalogId);
+  const agentOptions = capabilities.agents
+    .filter((agent) => scheduledAgentIds.has(agent.catalogId))
+    .map((agent) => ({ value: agent.catalogId, label: agent.displayName }));
+  const readyServiceClassValues = new Set(
+    capabilities.serviceClassOptions.filter((option) => option.available).map((option) => option.value),
+  );
+  const modelOptions = chatServiceClassOptions.filter((option) => readyServiceClassValues.has(option.value));
+  const reasoningEfforts = selectedAgent?.reasoningEffortsByServiceClass?.[draft.requestedServiceClass] ?? [];
   const workspaceOptions = workspaces.map((item) => ({ value: item.id, label: workspaceName(item) }));
   const set = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  useEffect(() => {
+    let active = true;
+    if (!draft.workspaceId) {
+      setCapabilities({ loading: false, error: "", serviceClassOptions: [], agents: [] });
+      return () => { active = false; };
+    }
+    setCapabilities({ loading: true, error: "", serviceClassOptions: [], agents: [] });
+    chatApi.agents(draft.workspaceId)
+      .then((result) => {
+        if (!active) return;
+        const agents = (result.agents ?? []).filter((agent) => scheduledAgentIds.has(agent.catalogId));
+        const serviceClassOptions = result.serviceClassOptions ?? [];
+        const ready = serviceClassOptions.filter((option) => option.available).map((option) => option.value);
+        setCapabilities({ loading: false, error: "", serviceClassOptions, agents });
+        setDraft((current) => {
+          if (current.workspaceId !== draft.workspaceId) return current;
+          const agent = agents.find((item) => item.catalogId === current.agentCatalogId) ?? agents[0];
+          const requestedServiceClass = ready.includes(current.requestedServiceClass)
+            ? current.requestedServiceClass
+            : ready.includes("balanced") ? "balanced" : ready[0] ?? "balanced";
+          const efforts = agent?.reasoningEffortsByServiceClass?.[requestedServiceClass] ?? [];
+          const reasoningEffort = efforts.includes(current.reasoningEffort)
+            ? current.reasoningEffort
+            : efforts.includes("auto") ? "auto" : efforts[0] ?? "";
+          return {
+            ...current,
+            agentCatalogId: agent?.catalogId ?? "",
+            requestedServiceClass,
+            reasoningEffort,
+          };
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setCapabilities({ loading: false, error: error.message, serviceClassOptions: [], agents: [] });
+      });
+    return () => { active = false; };
+  }, [draft.workspaceId]);
+  const selectAgent = (agentCatalogId) => {
+    const agent = capabilities.agents.find((item) => item.catalogId === agentCatalogId);
+    const efforts = agent?.reasoningEffortsByServiceClass?.[draft.requestedServiceClass] ?? [];
+    setDraft((current) => ({
+      ...current,
+      agentCatalogId,
+      reasoningEffort: efforts.includes(current.reasoningEffort)
+        ? current.reasoningEffort
+        : efforts.includes("auto") ? "auto" : efforts[0] ?? "",
+    }));
+  };
+  const selectModel = (requestedServiceClass) => {
+    const efforts = selectedAgent?.reasoningEffortsByServiceClass?.[requestedServiceClass] ?? [];
+    setDraft((current) => ({
+      ...current,
+      requestedServiceClass,
+      reasoningEffort: efforts.includes(current.reasoningEffort)
+        ? current.reasoningEffort
+        : efforts.includes("auto") ? "auto" : efforts[0] ?? "",
+    }));
+  };
   const save = async (event) => {
     event.preventDefault();
     const [hour, minute] = draft.time.split(":");
@@ -705,6 +773,8 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
       title: draft.title,
       workspaceId: draft.workspaceId,
       agentCatalogId: draft.agentCatalogId,
+      requestedServiceClass: draft.requestedServiceClass,
+      reasoningEffort: draft.reasoningEffort || null,
       prompt: draft.prompt,
       cronExpression: `${Number(minute)} ${Number(hour)} * * ${days}`,
       timeZone: draft.timeZone,
@@ -723,12 +793,13 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
         <label><span>Name</span><input name="schedule-title" value={draft.title} maxLength="120" required onChange={(event) => set("title", event.target.value)} placeholder="Weekday project summary" /></label>
         <div className="schedule-form-grid">
           <label><span>Workspace</span><SelectMenu value={draft.workspaceId} options={workspaceOptions} ariaLabel="Workspace" onValueChange={(value) => {
-            const nextWorkspace = workspaces.find((item) => item.id === value);
-            const nextAgent = nextWorkspace?.agents?.find((agent) => scheduledAgentIds.has(agent.id));
-            setDraft((current) => ({ ...current, workspaceId: value, agentCatalogId: nextAgent?.id ?? "" }));
+            setDraft((current) => ({ ...current, workspaceId: value, agentCatalogId: "", requestedServiceClass: "balanced", reasoningEffort: "" }));
           }} /></label>
-          <label><span>Agent</span><SelectMenu value={draft.agentCatalogId} options={agentOptions} ariaLabel="Agent" disabled={!agentOptions.length} onValueChange={(value) => set("agentCatalogId", value)} /></label>
+          <label><span>Agent</span><SelectMenu value={draft.agentCatalogId} options={agentOptions} ariaLabel="Agent" disabled={capabilities.loading || !agentOptions.length} onValueChange={selectAgent} /></label>
+          <label><span>Model</span><SelectMenu value={draft.requestedServiceClass} options={modelOptions.length ? modelOptions : [{ value: "balanced", label: capabilities.loading ? "Loading model routes…" : "No ready model route", disabled: true }]} ariaLabel="Model" disabled={capabilities.loading || !modelOptions.length} onValueChange={selectModel} /></label>
+          {reasoningEfforts.length > 0 && <label><span>Thinking</span><SelectMenu value={draft.reasoningEffort} options={reasoningEfforts.map((effort) => ({ value: effort, label: chatReasoningEffortDescription[effort] }))} ariaLabel="Thinking" disabled={capabilities.loading} onValueChange={(value) => set("reasoningEffort", value)} /></label>}
         </div>
+        {capabilities.error && <p className="schedule-workspace-note" role="alert"><Info24Regular aria-hidden="true" />{capabilities.error}</p>}
         <label><span>Prompt</span><textarea name="schedule-prompt" value={draft.prompt} maxLength="16000" rows="6" required onChange={(event) => set("prompt", event.target.value)} placeholder="Describe what the agent should do on each run." /></label>
         <div className={`schedule-form-grid schedule-timing-grid${draft.cadence === "weekly" ? " schedule-timing-grid-weekly" : ""}`}>
           <label><span>Repeat</span><SelectMenu value={draft.cadence} options={scheduleCadences} ariaLabel="Repeat schedule" onValueChange={(value) => set("cadence", value)} /></label>
@@ -741,7 +812,7 @@ function ScheduleDialog({ schedule, workspaces, busy, onSave, onClose }) {
         )}
         <div className="modal-actions">
           <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={busy || !draft.workspaceId || !draft.agentCatalogId}>{busy ? "Saving schedule" : draft.id ? "Save" : "Create schedule"}</button>
+          <button className="primary-button" type="submit" disabled={busy || capabilities.loading || Boolean(capabilities.error) || !draft.workspaceId || !draft.agentCatalogId || !modelOptions.length}>{busy ? "Saving schedule" : draft.id ? "Save" : "Create schedule"}</button>
         </div>
       </form>
     </ModalDialog>

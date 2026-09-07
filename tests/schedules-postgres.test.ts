@@ -34,6 +34,8 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
       id: scheduleId,
       workspaceId: workspace.id,
       agentCatalogId: "codex-cli",
+      requestedServiceClass: "pro",
+      reasoningEffort: "high",
       title: "PostgreSQL schedule",
       promptCiphertext: "encrypted-fixture",
       cronExpression: "0 9 * * *",
@@ -42,6 +44,8 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
       nextRunAt: new Date(Date.now() + 86_400_000),
     });
     assert.equal(created?.id, scheduleId);
+    assert.equal(created?.requestedServiceClass, "pro");
+    assert.equal(created?.reasoningEffort, "high");
     assert.equal((await first.updateSchedule(identity, scheduleId, { title: "Updated schedule" }))?.title, "Updated schedule");
 
     const queued = await first.queueScheduleRun(identity, scheduleId, new Date());

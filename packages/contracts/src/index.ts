@@ -357,11 +357,15 @@ export const scheduleCronExpressionSchema = z.string().trim().min(9).max(120).re
   "A five-field cron expression is required",
 );
 export const scheduleTimeZoneSchema = z.string().trim().min(1).max(100);
+export const scheduleRequestedServiceClassSchema = z.enum(["lite", "balanced", "pro"]);
+export const scheduleReasoningEffortSchema = z.enum(["auto", "low", "medium", "high"]);
 
 export const createScheduleSchema = z.object({
   title: z.string().trim().min(1).max(120),
   workspaceId: z.uuid(),
   agentCatalogId: chatAgentCatalogIdSchema,
+  requestedServiceClass: scheduleRequestedServiceClassSchema.default("balanced"),
+  reasoningEffort: scheduleReasoningEffortSchema.nullable().optional(),
   prompt: z.string().trim().min(1).max(16_000),
   cronExpression: scheduleCronExpressionSchema,
   timeZone: scheduleTimeZoneSchema,
@@ -378,6 +382,7 @@ export type UpdateSchedule = z.infer<typeof updateScheduleSchema>;
 export const scheduleSchema = createScheduleSchema.omit({ prompt: true }).extend({
   id: z.uuid(),
   prompt: z.string().max(16_000),
+  reasoningEffort: scheduleReasoningEffortSchema.nullable(),
   nextRunAt: z.iso.datetime().nullable(),
   lastRunAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
