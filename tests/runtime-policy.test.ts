@@ -285,7 +285,7 @@ test("policy-selected Claude and Hermes clients receive distinct governed identi
   );
 });
 
-test("Codex CLI remains schema-compatible but cannot be selected before qualification", () => {
+test("Codex CLI retains a separate policy identity and requires an explicit assignment", () => {
   const effective: EffectivePolicy = {
     assignmentId: "assignment-codex", policyBundleId: "bundle-1", policyVersionId: "version-codex", version: 1,
     documentHash: "9".repeat(64), assignedBy: "admin-1", assignedAt: "2026-08-15T00:00:00.000Z",
@@ -302,9 +302,13 @@ test("Codex CLI remains schema-compatible but cannot be selected before qualific
     },
   };
 
-  assert.deepEqual(runtimePolicyFor(effective).agents?.map((agent) => agent.catalogId), ["claude-cli"]);
+  assert.deepEqual(runtimePolicyFor(effective).agents?.map((agent) => agent.catalogId), ["codex-cli"]);
+  const selected = runtimePolicyFor(effective, undefined, undefined, ["codex-cli"]);
+  assert.equal(selected.agentId, "agent-1:codex-cli");
+  assert.equal(selected.agentProfile, "codex-cli-managed-v1");
+  const denied = { ...effective, document: { ...effective.document, agents: ["claude-cli" as const], defaultAgents: ["claude-cli" as const] } };
   assert.throws(
-    () => runtimePolicyFor(effective, undefined, undefined, ["codex-cli"]),
+    () => runtimePolicyFor(denied, undefined, undefined, ["codex-cli"]),
     /not assigned/,
   );
 });

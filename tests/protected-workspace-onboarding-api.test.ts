@@ -177,7 +177,7 @@ test("a new organization has no policy ceiling and its administrator can create 
       "claude-desktop-standard-v1", "disposable-open-v1",
     ]);
     assert.deepEqual(settings.json().availableAgents.map((agent: { id: string }) => agent.id), [
-      "claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw",
+      "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
     ]);
     assert.deepEqual(settings.json().availableApplications.map((application: { id: string }) => application.id), [
       "firefox", "google-chrome", "visual-studio-code", "obsidian",
@@ -191,7 +191,7 @@ test("a new organization has no policy ceiling and its administrator can create 
     assert.equal(settings.json().availableSecurityGroups[0].id, managedFallback.id);
     assert.equal(settings.json().availableSecurityGroups[0].defaultAction, "deny");
 
-    const unqualifiedCodexSelection = await app.inject({
+    const unknownClientSelection = await app.inject({
       method: "PUT",
       url: "/v1/sandbox-settings",
       headers: { ...headers, "content-type": "application/json" },
@@ -201,11 +201,11 @@ test("a new organization has no policy ceiling and its administrator can create 
         applicationIds: settings.json().applicationIds,
         modelAlias: settings.json().modelAlias,
         requestedServiceClass: settings.json().requestedServiceClass,
-        agentIds: ["codex-cli"],
+        agentIds: ["codex-desktop"],
       },
     });
-    assert.equal(unqualifiedCodexSelection.statusCode, 403);
-    assert.equal(unqualifiedCodexSelection.json().error.code, "AGENT_NOT_ASSIGNED");
+    assert.equal(unknownClientSelection.statusCode, 400);
+    assert.equal(unknownClientSelection.json().error.code, "INVALID_REQUEST");
 
     const created = await app.inject({
       method: "POST",

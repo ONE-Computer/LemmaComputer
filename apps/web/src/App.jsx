@@ -2491,7 +2491,7 @@ const protectedPolicyAgentNames = {
   "hermes-desktop": "Hermes Desktop",
   "hermes-claw": "Hermes Agent",
 };
-const protectedPolicyPlannedAgents = ["Codex Desktop", "Codex CLI"];
+const protectedPolicyPlannedAgents = ["Codex Desktop"];
 const protectedPolicyProfileNames = {
   "claude-desktop-standard-v1": "Restricted workspace",
   "disposable-open-v1": "Internet workspace",
@@ -3542,7 +3542,7 @@ const pendingApplications = [];
 
 const agentChoices = [
   { family: "Claude", choices: [{ catalogId: "claude-desktop", name: "Desktop", status: "available" }, { catalogId: "claude-cli", name: "CLI", status: "available" }] },
-  { family: "OpenAI", choices: [{ name: "Codex Desktop", status: "coming soon" }, { name: "Codex CLI", status: "coming soon" }] },
+  { family: "OpenAI", choices: [{ name: "Codex Desktop", status: "coming soon" }, { catalogId: "codex-cli", name: "CLI", status: "available" }] },
   { family: "Hermes Agent", choices: [{ catalogId: "hermes-desktop", name: "Desktop", status: "available" }, { catalogId: "hermes-claw", name: "CLI", status: "available" }] },
 ];
 

@@ -169,6 +169,7 @@ const availableApplications = [
 ];
 
 const availableAgents = [
+  { id: "codex-cli", displayName: "Codex CLI", clientVersion: "0.153.4", description: "Governed Codex CLI", license: "Apache-2.0", source: "https://github.com/openai/codex", artifactSha256: "5".repeat(64), resources: { memoryMiB: 1024 } },
   {
     id: "claude-desktop",
     displayName: "Claude Desktop",

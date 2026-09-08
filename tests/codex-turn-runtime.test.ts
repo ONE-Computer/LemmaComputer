@@ -62,3 +62,7 @@ asyncio.run(run())
   assert.equal(result.length, 3);
   assert.ok(result.every((events: Array<{ vendorSessionId: string }>) => events[0]?.vendorSessionId === "saved-thread"));
 });
+
+test("Codex preserves text and completed tools while dropping raw reasoning and summaries", () => {
+  assert.equal(execFileSync("python3", ["tests/codex-events-test.py"], { encoding: "utf8" }).trim(), "passed");
+});

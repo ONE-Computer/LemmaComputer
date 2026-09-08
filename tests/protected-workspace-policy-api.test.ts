@@ -129,7 +129,7 @@ test("organization policy administration exposes the full catalog and append-onl
     assert.equal(current.statusCode, 200);
     assert.deepEqual(current.json().catalog, organizationWorkspacePolicyCatalog);
     assert.deepEqual(current.json().catalog.constraints.agents.allow, [
-      "claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw",
+      "claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw",
     ]);
     assert.deepEqual(current.json().catalog.constraints.workspaceProfiles.allow, ["claude-desktop-standard-v1", "disposable-open-v1"]);
     assert.deepEqual(current.json().catalog.constraints.serviceClasses.allow, ["lite", "balanced", "pro"]);
@@ -143,14 +143,14 @@ test("organization policy administration exposes the full catalog and append-onl
     assert.equal(createdOverlay.statusCode, 201);
     assert.equal(createdOverlay.json().version.version, 1);
 
-    const unqualifiedAgent = await app.inject({
+    const unknownAgent = await app.inject({
       method: "POST",
       url: "/v1/admin/protected-workspace-policy/organization-versions",
       headers,
-      payload: { constraints: { agents: { allow: ["codex-cli"], deny: [] } }, revisionNote: "Attempt Codex CLI" },
+      payload: { constraints: { agents: { allow: ["codex-desktop"], deny: [] } }, revisionNote: "Attempt unknown client" },
     });
-    assert.equal(unqualifiedAgent.statusCode, 400);
-    assert.equal(unqualifiedAgent.json().error.code, "WORKSPACE_AGENT_NOT_SELECTABLE");
+    assert.equal(unknownAgent.statusCode, 400);
+    assert.equal(unknownAgent.json().error.code, "INVALID_REQUEST");
 
     const overlayHistory = await app.inject({
       method: "GET",

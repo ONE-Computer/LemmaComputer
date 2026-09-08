@@ -330,7 +330,7 @@ export type AgentCatalogId = z.infer<typeof agentCatalogIdSchema>;
 
 // Keep known client identifiers schema-compatible with persisted policy history,
 // while exposing only release-qualified clients for new workspace selections.
-export const workspaceSelectableAgentCatalogIds = ["claude-desktop", "claude-cli", "hermes-desktop", "hermes-claw"] as const;
+export const workspaceSelectableAgentCatalogIds = ["claude-desktop", "claude-cli", "codex-cli", "hermes-desktop", "hermes-claw"] as const;
 export type WorkspaceSelectableAgentCatalogId = typeof workspaceSelectableAgentCatalogIds[number];
 export const isWorkspaceSelectableAgentCatalogId = (value: unknown): value is WorkspaceSelectableAgentCatalogId => (
   typeof value === "string" && (workspaceSelectableAgentCatalogIds as readonly string[]).includes(value)

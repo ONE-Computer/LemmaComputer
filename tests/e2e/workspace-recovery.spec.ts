@@ -476,8 +476,8 @@ test("workspace configuration distinguishes policy-disabled agents from unqualif
       response,
       json: {
         ...payload,
-        agentIds: payload.agentIds.filter((id: string) => id !== "claude-cli"),
-        availableAgents: payload.availableAgents.filter((agent: { id: string }) => agent.id !== "claude-cli"),
+        agentIds: payload.agentIds.filter((id: string) => !["claude-cli", "codex-cli"].includes(id)),
+        availableAgents: payload.availableAgents.filter((agent: { id: string }) => !["claude-cli", "codex-cli"].includes(agent.id)),
       },
     });
   });
@@ -489,7 +489,9 @@ test("workspace configuration distinguishes policy-disabled agents from unqualif
   await expect(claudeCli).toContainText("Disabled by organization policy");
   await expect(claudeCli).toContainText("This client is not allowed by the active organization policy.");
 
-  const codexCli = page.locator(".agent-family").filter({ hasText: "OpenAI" }).locator(".agent-choice.unavailable").filter({ hasText: "Codex CLI" });
+  await expect(page.getByRole("checkbox", { name: /CLI Codex CLI/ })).toHaveCount(0);
+  await expect(page.locator(".agent-family").filter({ hasText: "OpenAI" })).toContainText("Disabled by organization policy");
+  const codexCli = page.locator(".agent-family").filter({ hasText: "OpenAI" }).locator(".agent-choice.unavailable").filter({ hasText: "Codex Desktop" });
   await expect(codexCli).toContainText("Coming soon");
   await expect(codexCli).toContainText("This client is awaiting governance qualification.");
 });
@@ -591,4 +593,21 @@ test("workspace rename propagates to workspace, schedule, and chat labels", asyn
 
   await page.getByRole("button", { name: "Chat" }).click();
   await expect(page.getByRole("button", { name: /Hermes Agent CLI · Client research · Balanced/ })).toBeVisible();
+});
+
+
+test("Codex CLI is opt-in and saves only when organization policy assigns it", async ({ page }) => {
+  let saved: any = null;
+  await page.route("**/api/v1/sandbox-settings**", async (route) => {
+    if (route.request().method() === "PUT") saved = route.request().postDataJSON();
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.getByRole("article", { name: "Research" }).getByRole("button", { name: "Manage configuration" }).click();
+  const codex = page.getByRole("checkbox", { name: /CLI Codex CLI/ });
+  await expect(codex).not.toBeChecked();
+  await codex.press("Space");
+  await expect(codex).toBeChecked();
+  await page.getByRole("button", { name: "Save configuration" }).click();
+  await expect.poll(() => saved?.agentIds).toContain("codex-cli");
 });

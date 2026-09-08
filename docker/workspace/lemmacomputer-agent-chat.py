@@ -1078,10 +1078,9 @@ async def _codex_vendor_events_with_client(
                     if plan_summary:
                         yield {"kind": "plan", "title": "Approach", "summary": plan_summary}
                 elif notification.method == "item/completed" and item_type == "reasoning":
-                    summaries = getattr(sdk_item, "summary", None)
-                    summary = safe_trace_text(" ".join(summaries)) if isinstance(summaries, list) else None
-                    if summary:
-                        yield {"kind": "provider-summary", "summary": summary, "provider": "Codex"}
+                    # Neither raw reasoning nor provider summaries belong in
+                    # transcripts, Activity, artifacts, or persisted events.
+                    continue
                 elif notification.method == "item/completed" and item_type == "webSearch":
                     action_value = getattr(sdk_item, "action", None)
                     action_value = getattr(action_value, "root", action_value)

@@ -38,7 +38,7 @@ test("the latest organization policy constrains every member runtime", () => {
     documentHash: "b".repeat(64),
     constraints: {
       workspaceProfiles: { allow: ["claude-desktop-standard-v1"], deny: [] },
-      agents: { allow: ["claude-cli", "codex-cli"], deny: [] },
+      agents: { allow: ["claude-cli", "codex-cli"], deny: ["codex-cli"] },
       applications: { allow: ["firefox", "google-chrome", "visual-studio-code", "obsidian"], deny: [] },
       serviceClasses: { allow: ["balanced", "pro"], deny: [] },
       maximumEgressMode: "restricted",
