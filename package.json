@@ -20,6 +20,7 @@
     "qualify:microsoft365-contracts": "tsx scripts/qualify-microsoft365-contracts.mts",
     "qualify:oauth": "tsx scripts/qualify-oauth-renewal.mts",
     "qualify:providers": "tsx scripts/qualify-provider-settings.mts",
+    "qualify:codex-runtime": "python3 scripts/qualify-codex-runtime.py",
     "qualify:reasoning-adapter": "tsx scripts/qualify-reasoning-adapter.mts",
     "qualify:workspace-startup": "tsx scripts/qualify-workspace-startup.mts",
     "qualify:internal-mtls": "tsx --test tests/internal-mtls-boundaries.test.ts tests/litellm-admin-proxy.test.ts",

@@ -67,6 +67,7 @@ applicable suites below:
 | OAuth renewal and callback behavior | `npm run qualify:oauth` |
 | Microsoft 365 owned tool contracts | `npm run qualify:microsoft365-contracts` |
 | MCP destination isolation | `npm run qualify:mcp-egress` |
+| Codex CLI/SDK transport compatibility (activate the pinned agent-chat Python environment; pass `-- --binary /path/to/codex`) | `npm run qualify:codex-runtime` |
 | Reasoning/model adapter behavior | `npm run qualify:reasoning-adapter` |
 | Workspace startup/readiness | `npm run qualify:workspace-startup` |
 | Better Auth compatibility | `npm run qualify:better-auth` |

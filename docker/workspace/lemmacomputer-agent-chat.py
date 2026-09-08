@@ -876,10 +876,31 @@ async def claude_vendor_events(
     }
 
 
-def codex_config(agent_instance_id: str | None = None) -> Any:
+def codex_model(usage_task_binding: str | None) -> str | None:
+    # Decode only a client metadata hint. The broker/Control still verify the
+    # signature and authorize the route; this never selects a provider model.
+    if usage_task_binding:
+        try:
+            encoded = usage_task_binding.split(".", 1)[0]
+            value = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+            mode = value.get("requestedServiceClass")
+            if mode in {"lite", "balanced", "pro"}:
+                return f"lemmacomputer-{mode}"
+            if mode not in {None, "auto"}:
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError, binascii.Error):
+            raise ValueError("invalid Codex task model mode") from None
+    return None if MODEL in {"lemmacomputer-auto", "lemmacomputer-assistant"} else MODEL
+
+
+def codex_config(agent_instance_id: str | None = None, usage_task_binding: str | None = None) -> Any:
     from openai_codex import CodexConfig
 
     return CodexConfig(
+        codex_bin="/usr/local/libexec/lemmacomputer-codex-bin",
+        config_overrides=(
+            'model_providers.lemmacomputer.http_headers={"x-lemmacomputer-ai-task-binding"=' + json.dumps(usage_task_binding) + '}',
+        ) if usage_task_binding else (),
         cwd=str(HOME),
         env={
             "CODEX_HOME": str(HOME / ".codex-chat-sdk"),
@@ -905,20 +926,12 @@ async def codex_vendor_events(
     usage_task_binding: str | None,
     agent_instance_id: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
-    if agent_instance_id is None:
-        async for event in _codex_vendor_events_with_client(
-            codex, item, text, attachments, turn_id,
-            return_artifacts, usage_task_binding,
-        ):
-            yield event
-        return
-
     from openai_codex import AsyncCodex
 
-    # Verified browser turns own an actual Codex app-server subprocess. The
-    # adapter's legacy shared app server remains only for channels/schedules
-    # until those launch boundaries receive their own Control registrations.
-    async with AsyncCodex(codex_config(agent_instance_id)) as process:
+    # Codex caches provider headers in its process. Every turn, including
+    # channel/schedule resumes, needs a fresh process to prevent reuse of the
+    # previous Control-issued binding. Vendor history remains in the same home.
+    async with AsyncCodex(codex_config(agent_instance_id, usage_task_binding)) as process:
         async for event in _codex_vendor_events_with_client(
             process, item, text, attachments, turn_id,
             return_artifacts, usage_task_binding,
@@ -938,6 +951,7 @@ async def _codex_vendor_events_with_client(
     from openai_codex import ApprovalMode, ImageInput, Sandbox, TextInput
 
     vendor_id = item.get("vendorSessionId")
+    model = codex_model(usage_task_binding)
     sandbox = Sandbox.danger_full_access if EXECUTION_MODE == "disposable-open" else Sandbox.read_only
     usage_config = ({
         "model_providers": {
@@ -954,7 +968,7 @@ async def _codex_vendor_events_with_client(
             approval_mode=ApprovalMode.deny_all,
             base_instructions=system_prompt(),
             cwd=str(HOME),
-            model=MODEL,
+            model=model,
             sandbox=sandbox,
             config=usage_config,
         )
@@ -963,7 +977,7 @@ async def _codex_vendor_events_with_client(
             approval_mode=ApprovalMode.deny_all,
             base_instructions=system_prompt(),
             cwd=str(HOME),
-            model=MODEL,
+            model=model,
             sandbox=sandbox,
             config=usage_config,
         )

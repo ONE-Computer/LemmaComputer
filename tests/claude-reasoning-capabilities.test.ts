@@ -179,7 +179,7 @@ test("the pinned Claude and Hermes runtimes expose exact qualified adapters", ()
   });
   assert.equal(qualifiedAgentReasoningAdapter({
     agentCatalogId: "codex-cli",
-    clientVersion: "0.144.4",
+    clientVersion: "0.153.4",
   }), null);
 });
 
@@ -191,12 +191,12 @@ test("Codex discovery remains inspectable but fails closed before live qualifica
   ];
   assert.deepEqual(agentReasoningAdapterReview({
     agentCatalogId: "codex-cli",
-    clientVersion: "0.144.4",
+    clientVersion: "0.153.4",
   }), {
     reviewStatus: "discovery",
     discoveryId: codexReasoningAdapterDiscoveryId,
     agentCatalogId: "codex-cli",
-    clientVersion: "0.144.4",
+    clientVersion: "0.153.4",
     effortLevels: ["low", "medium", "high"],
     conversationPinned: true,
     signedTaskBinding: true,

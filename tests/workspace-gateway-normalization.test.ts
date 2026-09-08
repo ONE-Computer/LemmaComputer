@@ -197,7 +197,7 @@ test("the broker strips forged thinking controls and projects only the signed ef
   });
 });
 
-test("native effort intent accepts Claude and Hermes spellings but rejects conflicts and malformed levels", () => {
+test("native effort intent accepts Claude, Hermes, and Codex spellings but rejects conflicts and malformed levels", () => {
   const inspect = program.slice(0, program.indexOf("body, requested =")) + String.raw`
 try:
     print(json.dumps({"effort": module.native_reasoning_effort(json.loads(sys.argv[3]))}))
@@ -210,6 +210,7 @@ except ValueError as error:
   for (const level of ["low", "medium", "high"]) {
     assert.deepEqual(effort({ output_config: { effort: level }, thinking: { type: "adaptive" } }), { effort: level });
     assert.deepEqual(effort({ reasoning_effort: level }), { effort: level });
+    assert.deepEqual(effort({ reasoning: { effort: level } }), { effort: level });
     assert.deepEqual(effort({ reasoning_effort: level, output_config: { effort: level } }), { effort: level });
   }
   assert.deepEqual(effort({ thinking: { type: "enabled", budget_tokens: 999999 } }), { effort: null });
@@ -217,8 +218,11 @@ except ValueError as error:
   for (const value of ["max", "xhigh", 123, ["low"], { effort: "low" }, true]) {
     assert.match(effort({ output_config: { effort: value } }).error, /reasoning effort is not assigned/);
     assert.match(effort({ reasoning_effort: value }).error, /reasoning effort is not assigned/);
+    assert.match(effort({ reasoning: { effort: value } }).error, /reasoning effort is not assigned/);
   }
   assert.match(effort({ reasoning_effort: "low", output_config: { effort: "high" } }).error, /conflicting/);
+  assert.match(effort({ reasoning: { effort: "high" }, reasoning_effort: "low" }).error, /conflicting/);
+  assert.deepEqual(effort({ reasoning: { effort: "none" } }), { effort: null });
 });
 
 test("the broker preserves only the safe Chat Completions reasoning opt-out", () => {

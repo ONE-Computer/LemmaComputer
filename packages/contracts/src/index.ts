@@ -459,11 +459,11 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
   agentCatalogEntrySchema.parse({
     id: "codex-cli",
     displayName: "Codex CLI",
-    clientVersion: "0.144.4",
+    clientVersion: "0.153.4",
     description: "Pinned Codex SDK and CLI runtime routed through its own governed LemmaComputer identity.",
     license: "Apache-2.0",
-    source: "https://pypi.org/project/openai-codex/0.144.4/",
-    artifactSha256: "de1513a6e94b9a8d7728a3b74298bc1469428ade10ba0ef2d5db47dd1cb606f5",
+    source: "https://registry.npmjs.org/@openai/codex/-/codex-0.153.4-linux-x64.tgz",
+    artifactSha256: "54818cb9fce3360cc6e44cfc5a96952cd5c1243efb43cbe488e11dda84663e08",
     resources: { memoryMiB: 1024 },
   }),
   agentCatalogEntrySchema.parse({

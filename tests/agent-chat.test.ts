@@ -166,8 +166,8 @@ test("trusted browser chat identities reach each vendor's per-turn execution bou
   assert.match(turns, /agent_instance_id = value\.get\("agentInstanceId"\)/);
   assert.match(turns, /parsed_agent_instance_id\.version != 4/);
   assert.match(claude, /"LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id/);
-  assert.match(codex, /if agent_instance_id is None:[\s\S]*_codex_vendor_events_with_client\(\s*codex,/);
-  assert.match(codex, /async with AsyncCodex\(codex_config\(agent_instance_id\)\) as process/);
+  assert.doesNotMatch(codex, /if agent_instance_id is None:/);
+  assert.match(codex, /async with AsyncCodex\(codex_config\(agent_instance_id, usage_task_binding\)\) as process/);
   assert.match(codex, /"LEMMACOMPUTER_AGENT_INSTANCE_ID": agent_instance_id/);
   assert.match(hermes, /"x-lemmacomputer-agent-instance-id": agent_instance_id,[\s\S]*if agent_instance_id else \{\}/);
   assert.match(adapter, /codex = AsyncCodex\(codex_config\(\)\)/);

@@ -101,7 +101,7 @@ export const claudeDesktopReasoningAdapterQualificationId = "claude-desktop-1.22
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const hermesReasoningAdapterQualificationId = "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13";
 export const hermesDesktopReasoningAdapterQualificationId = "hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13";
-export const codexReasoningAdapterDiscoveryId = "codex-cli-0.144.4-governed-effort-discovery-2026-08-13";
+export const codexReasoningAdapterDiscoveryId = "codex-cli-0.153.4-governed-effort-discovery-2026-09-08";
 
 const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
   Object.freeze({
@@ -175,7 +175,7 @@ const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = O
     reviewStatus: "discovery",
     discoveryId: codexReasoningAdapterDiscoveryId,
     agentCatalogId: "codex-cli",
-    clientVersion: "0.144.4",
+    clientVersion: "0.153.4",
     effortLevels: resolvedReasoningEfforts,
     conversationPinned: true,
     signedTaskBinding: true,

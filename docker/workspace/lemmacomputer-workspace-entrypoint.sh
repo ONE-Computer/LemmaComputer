@@ -446,56 +446,17 @@ PY
 fi
 
 configure_codex() {
-  local home="$1"
-  local model="$2"
-  local allowed_tools="$3"
-  local execution_mode="$4"
-  install -d -o 1000 -g 1000 -m 0700 "$home"
-  python3 - "$home" "$model" "$allowed_tools" "$execution_mode" <<'PY'
-import json
-import os
-import sys
-
-home, model, allowed_tools, execution_mode = sys.argv[1:]
-tools = [item for item in allowed_tools.split(",") if item]
-sandbox_mode = "danger-full-access" if execution_mode == "disposable-open" else "read-only"
-web_search = "live" if execution_mode == "disposable-open" else "disabled"
-document = f"""model = {json.dumps(model)}
-model_provider = "lemmacomputer"
-approval_policy = "never"
-sandbox_mode = {json.dumps(sandbox_mode)}
-web_search = {json.dumps(web_search)}
-
-[model_providers.lemmacomputer]
-name = "LemmaComputer governed OpenAI"
-base_url = "http://127.0.0.1:4317/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "responses"
-supports_websockets = false
-env_http_headers = { "x-lemmacomputer-agent-instance-id" = "LEMMACOMPUTER_AGENT_INSTANCE_ID" }
-
-[analytics]
-enabled = false
-
-[mcp_servers.lemmacomputer_connectors]
-command = "/usr/local/libexec/lemmacomputer-connectors-stdio"
-args = []
-default_tools_approval_mode = "approve"
-
-[mcp_servers.lemmacomputer_connectors.env]
-LEMMACOMPUTER_CONNECTORS_BROKER = "http://127.0.0.1:4317"
-"""
-path = os.path.join(home, "config.toml")
-with open(path, "w", encoding="utf-8") as output:
-    output.write(document)
-os.chmod(path, 0o600)
-os.chown(path, 1000, 1000)
-PY
+  local profile_home="$1"
+  install -d -o 1000 -g 1000 -m 0700 "$profile_home"
+  python3 /usr/local/libexec/lemmacomputer-codex-config.py \
+    "$profile_home" "$LEMMACOMPUTER_CODEX_CLI_REQUESTED_SERVICE_CLASS" \
+    "$LEMMACOMPUTER_CODEX_CLI_ALLOWED_SERVICE_CLASSES" "$LEMMACOMPUTER_EXECUTION_MODE"
+  chown 1000:1000 "$profile_home/config.toml" "$profile_home/lemmacomputer-models.json"
 }
 
 if agent_enabled codex-cli; then
-  configure_codex /home/kasm-user/.codex-cli "$LEMMACOMPUTER_CODEX_CLI_MODEL_ALIAS" "$LEMMACOMPUTER_CODEX_CLI_ALLOWED_TOOLS" "$LEMMACOMPUTER_EXECUTION_MODE"
-  configure_codex /home/kasm-user/.codex-chat-sdk "$LEMMACOMPUTER_CODEX_CLI_MODEL_ALIAS" "$LEMMACOMPUTER_CODEX_CLI_ALLOWED_TOOLS" "$LEMMACOMPUTER_EXECUTION_MODE"
+  configure_codex /home/kasm-user/.codex-cli
+  configure_codex /home/kasm-user/.codex-chat-sdk
 fi
 
 install_agent_skill() {

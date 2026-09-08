@@ -252,12 +252,14 @@ def native_reasoning_effort(request: dict) -> str | None:
     route, and organization ceiling before signing it into a task binding.
     """
     # Claude Desktop's pinned engine sends output_config.effort, whereas
-    # Hermes uses reasoning_effort. Neither spelling is provider authority:
-    # extract only the bounded intent before normalization removes both.
+    # Hermes uses reasoning_effort and Codex uses Responses reasoning.effort.
+    # These are bounded intent, never provider authority.
     output_config = request.get("output_config")
     claude_effort = output_config.get("effort") if isinstance(output_config, dict) else None
+    reasoning = request.get("reasoning")
+    codex_effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
     requested = []
-    for value in (request.get("reasoning_effort"), claude_effort):
+    for value in (request.get("reasoning_effort"), claude_effort, codex_effort):
         if value in (None, False, "", "none"):
             continue
         if not isinstance(value, str) or value not in {"low", "medium", "high"}:

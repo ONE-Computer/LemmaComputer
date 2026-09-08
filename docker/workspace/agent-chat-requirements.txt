@@ -14,8 +14,8 @@ idna==3.18
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 mcp==1.28.1
-openai-codex==0.144.4
-openai-codex-cli-bin==0.144.4
+openai-codex==0.147.0
+openai-codex-cli-bin==0.147.0
 pycparser==3.0
 pydantic==2.13.4
 pydantic-core==2.46.4
