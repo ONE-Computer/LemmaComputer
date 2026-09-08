@@ -1,9 +1,10 @@
 # Codex CLI integration
 
 The workspace already contained a Codex launcher, per-agent broker, identity
-projection, and Python chat adapter. Ordinary workspace selection remains
-withheld pending Codex-specific live qualification. This change upgrades and
-tests the runtime foundation for #76 and #78; it does not complete either issue.
+projection, and Python chat adapter. The candidate now exposes Codex CLI as an
+opt-in workspace selection wherever organization policy assigns it. Its
+reasoning adapter remains discovery-only. This work advances #76 and #78;
+it does not yet complete either issue or qualify a production release.
 
 ## Runtime pins
 
@@ -114,3 +115,32 @@ This is a workspace-runtime and dependency change, requiring the full release
 workflow for deployment. It is not eligible for the routine `demo:update` path.
 There are no schema or migration changes. Both deployment profiles share the
 same adapter, broker, and tenant-scoped routing path.
+
+## Local integration checkpoint — 2026-09-08
+
+At the user's request, candidate `9aee7b5` was merged into the existing
+`mike/local-stateful-test` branch as `dbc9463`. The merged tree matched the
+candidate tree. The local workspace image was rebuilt and `compose:up`
+completed with healthy services, reusing the existing environment and volumes.
+The environment checksum was unchanged. Existing CP Workspace and Test2
+containers retained their running instances; no organization policy was saved.
+
+The merged quick gate passed 905 tests with 39 standard skips and no failures.
+All 16 focused workspace Playwright tests passed, including Codex opt-in save
+and absence of a selectable Codex control when organization policy denies it.
+A behavioral event test proves that text and MCP tool lifecycle survive while
+both raw reasoning and provider summaries are discarded by the Codex adapter.
+
+Real Chrome at `localhost:4174` showed Codex CLI disabled by the local
+organization's v8 allowlist. A pending, unsaved guardrail revision adds only
+Codex to that allowlist. The product applies guardrail revisions to all members
+and automatically restarts compatible running workspaces. Live qualification
+under a Codex identity awaits authorization for that policy transition.
+
+Additional governed-routing qualification uncovered an outdated fixture. Its
+authority responses now include the required workspace access generation,
+provider deployment binding, and output limit. The probe uses Responses with
+an exact provider/deployment identity, and the fixture verifies that provider
+requests exclude internal admission metadata and revoked workspace access
+fails before routing. `npm run qualify:governed-routing` passes. Production
+policy enforcement was unchanged by this fixture repair.

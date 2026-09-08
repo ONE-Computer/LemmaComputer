@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.util
+import io
 import json
 from types import SimpleNamespace
 
@@ -15,6 +16,30 @@ spec.loader.exec_module(module)
 captured = []
 captured_admissions = []
 captured_verifications = []
+captured_access = []
+access_allowed = True
+
+
+def workspace_access(request, timeout):
+    assert request.full_url == module.WORKSPACE_ACCESS_URL
+    assert request.method == "POST" and timeout == 0.9
+    payload = json.loads(request.data)
+    assert payload == {
+        "tenantId": "tenant-a", "subjectId": "user-a",
+        "workspaceId": "workspace-a", "accessGeneration": 1,
+    }
+    captured_access.append(payload)
+    if not access_allowed:
+        raise module.urllib.error.HTTPError(request.full_url, 403, "revoked", {}, None)
+    result = io.BytesIO(b'{"allowed":true}')
+    result.status = 200
+    return result
+
+
+# Exercise the production access-generation check against a bounded authority
+# fixture. Do not remove that check merely to reach routing qualification.
+module.WORKSPACE_ACCESS_TOKEN = "qualification-access-token-with-no-live-authority"
+module.urllib.request.urlopen = workspace_access
 
 
 def authority(path, payload):
@@ -50,6 +75,8 @@ def authority(path, payload):
         "reasonCode": "qualification",
         "executedDeploymentId": deployment,
         "executedModelGroup": f"private-{selected}",
+        "executedProviderDeployment": f"provider-{selected}",
+        "executedOutputTokenLimit": 4096,
         "binding": {
             "schemaVersion": 1,
             "tenantId": payload["tenantId"],
@@ -72,6 +99,7 @@ auth = SimpleNamespace(metadata={
     "lemmacomputer_subject_id": "user-a",
     "lemmacomputer_workspace_id": "workspace-a",
     "lemmacomputer_agent_id": "agent-a",
+    "lemmacomputer_access_generation": 1,
 }, models=["lemmacomputer-auto"])
 
 
@@ -93,6 +121,7 @@ async def routed(text, requested="auto", model="lemmacomputer-auto"):
 
 
 async def qualify():
+    global access_allowed
     ambiguous = await routed("Please prepare a concise summary of the quarterly update for our team.")
     reasoning = await routed("Compare and justify the trade-offs step by step before recommending an option.")
 
@@ -102,6 +131,7 @@ async def qualify():
             "lemmacomputer_provider_account_id": "account-openai",
             "lemmacomputer_base_model": "openai/gpt-qualification",
             "lemmacomputer_deployment_id": "deployment-balanced",
+            "access_groups": ["provider-balanced"],
         }
     }
     provider_request = await callback.async_pre_call_deployment_hook(
@@ -110,12 +140,15 @@ async def qualify():
     assert "user_api_key_dict" in ambiguous
     assert "user_api_key_dict" not in provider_request
     assert "user_api_key_metadata" not in provider_request
-    assert provider_request["lemmacomputer_usage_state"]["admissionId"] == "admission-1"
+    assert module._usage_state(ambiguous)["admissionId"] == "admission-1"
+    assert not any(key.startswith("lemmacomputer_") for key in provider_request)
     assert captured_verifications[0]["actual"]["deploymentId"] == "deployment-balanced"
     assert captured_admissions[0]["resolvedProvider"] == "openai"
 
     probe_auth = SimpleNamespace(metadata={
         "lemmacomputer_non_billable_exemption": "provider-route-test-v1",
+        "lemmacomputer_provider": "openai",
+        "lemmacomputer_deployment_id": "deployment-balanced",
         "lemmacomputer_policy_model_alias": "balanced",
     })
     probe = await callback.async_pre_call_hook(probe_auth, None, {
@@ -131,9 +164,9 @@ async def qualify():
                 "lemmacomputer_deployment_id": "deployment-balanced",
             }
         },
-    }, "completion")
+    }, "aresponses")
     provider_probe = await callback.async_pre_call_deployment_hook(
-        probe, "completion"
+        probe, "aresponses"
     )
     assert "user_api_key_dict" in probe
     assert "user_api_key_dict" not in provider_probe
@@ -161,6 +194,16 @@ async def qualify():
         assert error.status_code == 503 and error.detail["error"] == "AI_ROUTING_UNAVAILABLE"
     else:
         raise AssertionError("an underlying model bypass was accepted")
+    assert captured_access, "routing never checked workspace access"
+    admitted_before = len(captured)
+    access_allowed = False
+    try:
+        await routed("A revoked workspace must not reach route selection.")
+    except HTTPException as error:
+        assert error.status_code == 403 and error.detail["error"] == "WORKSPACE_ACCESS_REVOKED"
+    else:
+        raise AssertionError("revoked workspace access was accepted")
+    assert len(captured) == admitted_before
     print(json.dumps({
         "pinned_hook": "pre_call_before_router",
         "provider_boundary": "internal_auth_stripped",
