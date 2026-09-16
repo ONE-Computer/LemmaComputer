@@ -155,16 +155,16 @@ test("qualification rejects fake promotion metadata, stale commits, raw fields, 
   );
 });
 
-test("qualification accepts the Codex discovery through the same contract", () => {
+test("qualification accepts the exact qualified Codex runtime through the same contract", () => {
   const evidence = completeEvidence();
-  evidence.qualificationId = "codex-cli-0.153.4-openai-route-live-2026-08-13";
+  evidence.qualificationId = "codex-cli-0.154.0-openai-route-live-2026-09-17";
   evidence.runtime = {
     ...evidence.runtime,
-    reviewState: "candidate",
+    reviewState: "qualified",
     agentCatalogId: "codex-cli",
-    clientVersion: "0.153.4",
-    discoveryId: "codex-cli-0.153.4-governed-effort-discovery-2026-09-08",
-    qualificationId: undefined,
+    clientVersion: "0.154.0",
+    discoveryId: undefined,
+    qualificationId: "codex-cli-0.154.0-governed-effort-adapter-2026-09-17",
   };
   assert.equal(validateReasoningAdapterEvidence(evidence).runtime.agentCatalogId, "codex-cli");
 });

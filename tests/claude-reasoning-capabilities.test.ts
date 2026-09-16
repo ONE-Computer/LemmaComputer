@@ -5,7 +5,7 @@ import {
   anthropicReasoningRouteQualificationId,
   claudeReasoningAdapterQualificationId,
   claudeDesktopReasoningAdapterQualificationId,
-  codexReasoningAdapterDiscoveryId,
+  codexReasoningAdapterQualificationId,
   hermesDesktopReasoningAdapterQualificationId,
   hermesReasoningAdapterQualificationId,
   openAiReasoningRouteQualificationId,
@@ -177,32 +177,38 @@ test("the pinned Claude and Hermes runtimes expose exact qualified adapters", ()
     signedTaskBinding: true,
     providerEffortAuthority: "governed-route",
   });
-  assert.equal(qualifiedAgentReasoningAdapter({
+  assert.deepEqual(qualifiedAgentReasoningAdapter({
     agentCatalogId: "codex-cli",
-    clientVersion: "0.153.4",
-  }), null);
-});
-
-test("Codex discovery remains inspectable but fails closed before live qualification", () => {
-  const expectedBlockingEvidence = [
-    "live_reasoning_with_mcp_tools",
-    "live_streaming_and_hidden_reasoning_suppression",
-    "live_usage_cost_latency_and_cache_evidence",
-  ];
-  assert.deepEqual(agentReasoningAdapterReview({
-    agentCatalogId: "codex-cli",
-    clientVersion: "0.153.4",
+    clientVersion: "0.154.0",
   }), {
-    reviewStatus: "discovery",
-    discoveryId: codexReasoningAdapterDiscoveryId,
+    qualificationId: codexReasoningAdapterQualificationId,
     agentCatalogId: "codex-cli",
-    clientVersion: "0.153.4",
+    clientVersion: "0.154.0",
     effortLevels: ["low", "medium", "high"],
     conversationPinned: true,
     signedTaskBinding: true,
     providerEffortAuthority: "governed-route",
-    blockingEvidence: expectedBlockingEvidence,
   });
+});
+
+test("the exact qualified Codex pin exposes governed reasoning", () => {
+  assert.deepEqual(agentReasoningAdapterReview({
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.154.0",
+  }), {
+    reviewStatus: "qualified",
+    qualificationId: codexReasoningAdapterQualificationId,
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.154.0",
+    effortLevels: ["low", "medium", "high"],
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  });
+  assert.equal(qualifiedAgentReasoningAdapter({
+    agentCatalogId: "codex-cli",
+    clientVersion: "0.153.4",
+  }), null, "a stale Codex pin must fail closed");
 });
 
 test("a discovery record cannot become a product qualification through metadata alone", () => {

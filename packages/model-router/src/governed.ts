@@ -101,7 +101,7 @@ export const claudeDesktopReasoningAdapterQualificationId = "claude-desktop-1.22
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const hermesReasoningAdapterQualificationId = "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13";
 export const hermesDesktopReasoningAdapterQualificationId = "hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13";
-export const codexReasoningAdapterDiscoveryId = "codex-cli-0.153.4-governed-effort-discovery-2026-09-08";
+export const codexReasoningAdapterQualificationId = "codex-cli-0.154.0-governed-effort-adapter-2026-09-17";
 
 const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
   Object.freeze({
@@ -172,19 +172,14 @@ const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = O
     providerEffortAuthority: "governed-route",
   }),
   Object.freeze({
-    reviewStatus: "discovery",
-    discoveryId: codexReasoningAdapterDiscoveryId,
+    reviewStatus: "qualified",
+    qualificationId: codexReasoningAdapterQualificationId,
     agentCatalogId: "codex-cli",
-    clientVersion: "0.153.4",
+    clientVersion: "0.154.0",
     effortLevels: resolvedReasoningEfforts,
     conversationPinned: true,
     signedTaskBinding: true,
     providerEffortAuthority: "governed-route",
-    blockingEvidence: Object.freeze([
-      "live_reasoning_with_mcp_tools",
-      "live_streaming_and_hidden_reasoning_suppression",
-      "live_usage_cost_latency_and_cache_evidence",
-    ]),
   }),
 ]);
 

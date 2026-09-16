@@ -22,7 +22,12 @@ test("Codex projects only assigned organization modes and per-route context limi
   assert.equal(models[0].context_window, 1050000);
   assert.equal(models[0].auto_compact_token_limit, 922000);
   assert.equal(models[1].context_window, 2000000);
-  assert.deepEqual(models[0].supported_reasoning_levels, [], "discovery cannot advertise qualified effort");
+  assert.equal(models[0].default_reasoning_level, "medium");
+  assert.deepEqual(models[0].supported_reasoning_levels, [
+    { effort: "low", description: "Faster responses with lighter analysis" },
+    { effort: "medium", description: "Balanced analysis for everyday work" },
+    { effort: "high", description: "More thorough analysis for complex work" },
+  ]);
   const config = await readFile(path.join(home, "config.toml"), "utf8");
   assert.match(config, /model = "lemmacomputer-balanced"/);
   assert.match(config, /wire_api = "responses"/);

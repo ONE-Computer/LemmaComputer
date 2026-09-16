@@ -23,7 +23,7 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Claude Desktop | `1.22209.3` | Low, Medium, High | Native effort intent uses `output_config.effort`; separate exact-version registration and [recovery evidence](claude-desktop-recovery.md) |
 | Hermes Agent CLI | `0.19.0` | Low, Medium, High | Qualified separately under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13`; route capability still intersects independently |
 | Hermes Desktop | `0.17.0` | Low, Medium, High | Qualified separately under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13`; unsupported upstream levels are hidden on LemmaComputer routes |
-| Codex CLI | `0.153.4` | None | Discovery recorded; Codex-specific credentialed reasoning-plus-tool evidence remains incomplete; see [CLI integration](codex-cli-integration.md) |
+| Codex CLI | `0.154.0` | Low, Medium, High | Staged local candidate; retain only after the Codex-specific credentialed evidence contract passes; see [CLI integration](codex-cli-integration.md) |
 | Any other runtime or version | Any | None | No reviewed registration; fail closed |
 
 `Auto` is a LemmaComputer product setting, not a provider effort value. Control resolves it to the organization maximum (`low`, `medium`, or `high`) before route selection. The protected maximum `max` is deliberately clipped to product `high`; `xhigh` and `max` are not user-selectable in this phase.

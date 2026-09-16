@@ -319,8 +319,9 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(chatRequirements, /claude-agent-sdk==0\.2\.128/);
   assert.match(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": f"x-lemmacomputer-ai-task-binding: \{usage_task_binding\}"/);
   assert.doesNotMatch(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": json\.dumps/);
-  assert.match(chatRequirements, /openai-codex==0\.147\.0/);
-  assert.match(dockerfile, /openai-codex"\)\)'\)" = "0\.147\.0"/);
+  assert.match(chatRequirements, /openai-codex==0\.154\.0/);
+  assert.match(chatRequirements, /openai-codex-cli-bin==0\.154\.0/);
+  assert.match(dockerfile, /openai-codex"\)\)'\)" = "0\.154\.0"/);
   assert.match(chatAdapter, /approval\\s\+\(\?:is\\s\+\)\?required/);
   assert.match(chatAdapter, /"Waiting for governed approval"/);
   assert.match(chatAdapter, /approval_state in \{"approval_required", "approved", "executing"\}/);

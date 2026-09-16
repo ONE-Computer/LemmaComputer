@@ -58,8 +58,8 @@ class Responses(BaseHTTPRequestHandler):
 
 
 async def qualify(binary):
-    assert subprocess.check_output([binary, "--version"], text=True).strip() == "codex-cli 0.153.4"
-    assert importlib.metadata.version("openai-codex") == "0.147.0"
+    assert subprocess.check_output([binary, "--version"], text=True).strip() == "codex-cli 0.154.0"
+    assert importlib.metadata.version("openai-codex") == "0.154.0"
     spec = importlib.util.spec_from_file_location("codex_config", ROOT / "docker/workspace/lemmacomputer-codex-config.py")
     configurator = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(configurator)
@@ -98,7 +98,11 @@ async def qualify(binary):
                         models = await client.models()
                         assert {model.id for model in models.data} == {"lemmacomputer-lite", "lemmacomputer-balanced", "lemmacomputer-pro"}
                         assert next(model.id for model in models.data if model.is_default) == "lemmacomputer-balanced"
-                        assert all(not model.supported_reasoning_efforts for model in models.data)
+                        assert all(
+                            [option.reasoning_effort.value for option in model.supported_reasoning_efforts]
+                            == ["low", "medium", "high"]
+                            for model in models.data
+                        )
                         options = dict(model=f"lemmacomputer-{mode}", cwd=str(home),
                                        approval_mode=ApprovalMode.deny_all, sandbox=Sandbox.read_only,
                                        config={"model_providers": {"lemmacomputer": {
@@ -127,7 +131,7 @@ async def qualify(binary):
                 assert headers.get("content-encoding", "identity") == "identity"
                 observed.add(binding)
             assert len(observed) == 6, "resume must replace the previous signed task binding"
-            print("Codex CLI 0.153.4 + SDK 0.147.0: catalog, streaming, three concurrent modes, resume, and per-turn identity headers passed (local fixture).")
+            print("Codex CLI 0.154.0 + SDK 0.154.0: catalog, governed reasoning options, streaming, three concurrent modes, resume, and per-turn identity headers passed (local fixture).")
     finally:
         server.shutdown()
         server.server_close()

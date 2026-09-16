@@ -459,11 +459,11 @@ export const ownedAgentCatalog: readonly AgentCatalogEntry[] = Object.freeze([
   agentCatalogEntrySchema.parse({
     id: "codex-cli",
     displayName: "Codex CLI",
-    clientVersion: "0.153.4",
+    clientVersion: "0.154.0",
     description: "Pinned Codex SDK and CLI runtime routed through its own governed LemmaComputer identity.",
     license: "Apache-2.0",
-    source: "https://registry.npmjs.org/@openai/codex/-/codex-0.153.4-linux-x64.tgz",
-    artifactSha256: "54818cb9fce3360cc6e44cfc5a96952cd5c1243efb43cbe488e11dda84663e08",
+    source: "https://registry.npmjs.org/@openai/codex/-/codex-0.154.0-linux-x64.tgz",
+    artifactSha256: "e27c83a49e6031685ee7f956c12aad5f16484d3a80181dd3fea930fb96b3832b",
     resources: { memoryMiB: 1024 },
   }),
   agentCatalogEntrySchema.parse({
