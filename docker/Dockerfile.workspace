@@ -58,6 +58,8 @@ COPY docker/workspace/hermes-agent-activity.patch /tmp/hermes-agent-activity.pat
 COPY docker/workspace/lemmacomputer_hermes_mcp_identity.py /tmp/lemmacomputer_hermes_mcp_identity.py
 COPY --from=hermes_desktop_builder /tmp/hermes-agent.tar.gz /tmp/hermes-agent.tar.gz
 
+# Vendor applications are installed from checksum-pinned local artifacts below,
+# so their inherited mutable APT repositories are neither required nor trusted.
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get purge -y \
       code firefox gimp gimp-data google-chrome-stable \
@@ -66,6 +68,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       remmina remmina-common remmina-plugin-rdp remmina-plugin-secret remmina-plugin-spice remmina-plugin-vnc \
       signal-desktop slack-desktop sublime-text thunderbird zoom \
     && apt-get autoremove -y \
+    && rm -f /etc/apt/sources.list.d/* \
     && curl -fsSLo /tmp/claude-desktop.deb \
       "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_${CLAUDE_DESKTOP_VERSION}_amd64.deb" \
     && curl -fsSLo /tmp/claude-code.zst \
