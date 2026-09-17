@@ -56,6 +56,7 @@ COPY docker/workspace/hermes-agent-lemmacomputer.patch /tmp/hermes-agent-lemmaco
 COPY docker/workspace/hermes-agent-instance.patch /tmp/hermes-agent-instance.patch
 COPY docker/workspace/hermes-agent-activity.patch /tmp/hermes-agent-activity.patch
 COPY docker/workspace/lemmacomputer_hermes_mcp_identity.py /tmp/lemmacomputer_hermes_mcp_identity.py
+COPY --from=hermes_desktop_builder /tmp/hermes-agent.tar.gz /tmp/hermes-agent.tar.gz
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get purge -y \
@@ -77,8 +78,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
       "https://vscode.download.prss.microsoft.com/dbazure/download/stable/a5b500951314efd502d07465bd138dfbd714a960/code_1.133.0-1786487972_amd64.deb" \
     && curl -fsSLo /tmp/obsidian.deb \
       "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian_${OBSIDIAN_VERSION}_amd64.deb" \
-    && curl -fsSLo /tmp/hermes-agent.tar.gz \
-      "https://github.com/NousResearch/hermes-agent/archive/refs/tags/${HERMES_AGENT_TAG}.tar.gz" \
     && curl -fsSLo /tmp/hermes-office-skills.tar.gz \
       "https://github.com/NousResearch/hermes-agent/archive/${HERMES_OFFICE_SKILLS_COMMIT}.tar.gz" \
     && curl -fsSLo /tmp/node.tar.xz \
