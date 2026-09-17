@@ -316,6 +316,7 @@ test("optional browser and agent artifacts are pinned and launch-gated", async (
   assert.match(codexConfig, /base_url = "http:\/\/127\.0\.0\.1:4317\/v1"/);
   assert.match(codexConfig, /supports_websockets = false/);
   assert.match(codexConfig, /startup_timeout_sec = 60/);
+  assert.match(codexConfig, /default_tools_approval_mode = "approve"/);
   assert.match(chatRequirements, /claude-agent-sdk==0\.2\.128/);
   assert.match(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": f"x-lemmacomputer-ai-task-binding: \{usage_task_binding\}"/);
   assert.doesNotMatch(chatAdapter, /"ANTHROPIC_CUSTOM_HEADERS": json\.dumps/);

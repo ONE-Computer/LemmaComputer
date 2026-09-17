@@ -86,6 +86,10 @@ enabled = false
 command = "/usr/local/libexec/lemmacomputer-connectors-stdio"
 args = []
 startup_timeout_sec = 60
+# This bridge exposes only the policy-filtered connector catalog. Control
+# remains authoritative for tool authorization and signed approval of writes,
+# so Codex must not add a second client-local approval gate.
+default_tools_approval_mode = "approve"
 
 [mcp_servers.lemmacomputer_connectors.env]
 LEMMACOMPUTER_CONNECTORS_BROKER = "http://127.0.0.1:4317"
