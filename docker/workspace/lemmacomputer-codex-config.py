@@ -86,6 +86,7 @@ enabled = false
 command = "/usr/local/libexec/lemmacomputer-connectors-stdio"
 args = []
 startup_timeout_sec = 60
+env_vars = ["LEMMACOMPUTER_AGENT_INSTANCE_ID"]
 # This bridge exposes only the policy-filtered connector catalog. Control
 # remains authoritative for tool authorization and signed approval of writes,
 # so Codex must not add a second client-local approval gate.

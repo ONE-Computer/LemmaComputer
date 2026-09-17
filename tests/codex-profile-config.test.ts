@@ -36,6 +36,7 @@ test("Codex projects only assigned organization modes and per-route context limi
   assert.match(config, /sandbox_mode = "read-only"/);
   assert.match(config, /env_http_headers = \{ "x-lemmacomputer-agent-instance-id" = "LEMMACOMPUTER_AGENT_INSTANCE_ID" \}/);
   assert.match(config, /\[mcp_servers\.lemmacomputer_connectors\][\s\S]*default_tools_approval_mode = "approve"/);
+  assert.match(config, /env_vars = \["LEMMACOMPUTER_AGENT_INSTANCE_ID"\]/);
   assert.match(config, /LEMMACOMPUTER_CONNECTORS_BROKER = "http:\/\/127.0.0.1:4317"/);
   assert.equal(await readFile(path.join(home, "history.jsonl"), "utf8"), "saved session\n");
   execFileSync("python3", [configurator, home, "auto", "balanced", "disposable-open"]);
