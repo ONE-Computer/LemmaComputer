@@ -144,8 +144,12 @@ Provider qualification uses the pinned LiteLLM 1.93.0 image, disposable database
 and fixture credentials. Network-disabled tests check the private catalog's
 master authorization, pagination, metadata projection, redaction, and destination
 boundaries, plus actual Azure OpenAI/Claude and Vertex Gemini/Claude/DeepSeek
-wire translation. Cloud inference/token acquisition is mocked. This is not
-live cloud entitlement, quota, or newest-model availability qualification.
+wire translation. The qualification also sends simultaneous allowed and denied
+requests through two tenant-scoped virtual keys, repeats disable and delete to
+prove idempotent revocation, and scans API results, gateway logs, and database
+dumps for every submitted fixture credential. Cloud inference/token acquisition
+is mocked. This is not live cloud entitlement, quota, or newest-model availability
+qualification.
 
 ## Integration references
 

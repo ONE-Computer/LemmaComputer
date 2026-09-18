@@ -226,9 +226,9 @@ const main = async () => {
       key_type: "llm_api",
       duration: "5m",
       models: [accessGroup],
-      rpm_limit: 5,
-      tpm_limit: 16_000,
-      max_parallel_requests: 1,
+      rpm_limit: 500,
+      tpm_limit: 1_000_000,
+      max_parallel_requests: 128,
       metadata: { lemmacomputer_purpose: "provider-settings-qualification" },
     });
     assert.equal(generated.response.ok, true, "LiteLLM must issue a group-scoped virtual key");
@@ -403,6 +403,19 @@ const main = async () => {
     assert.equal((await modelCall(alphaVirtualKey, alphaBedrockGroup)).response.ok, false, "An OpenAI scoped key must not reach the Bedrock route");
     assert.equal((await modelCall(alphaBedrockVirtualKey, alphaGroup)).response.ok, false, "A Bedrock scoped key must not reach an OpenAI route");
 
+    const isolationLoad = Array.from({ length: 12 }, (_, index) => [
+      { label: `alpha allowed request ${index + 1}`, expected: true, request: modelCall(alphaVirtualKey, alphaGroup) },
+      { label: `beta allowed request ${index + 1}`, expected: true, request: modelCall(betaVirtualKey, betaGroup) },
+      { label: `alpha-to-beta denied request ${index + 1}`, expected: false, request: modelCall(alphaVirtualKey, betaGroup) },
+      { label: `beta-to-alpha denied request ${index + 1}`, expected: false, request: modelCall(betaVirtualKey, alphaGroup) },
+    ]).flat();
+    const isolationResults = await Promise.all(isolationLoad.map(({ request }) => request));
+    for (const [index, result] of isolationResults.entries()) {
+      assert.equal(result.response.ok, isolationLoad[index]!.expected,
+        `Concurrent tenant isolation failed for ${isolationLoad[index]!.label}`);
+    }
+    process.stdout.write(`Concurrent tenant isolation passed for ${isolationResults.length} simultaneous allowed and denied requests.\n`);
+
     const beforeRejectedRotation = processSignature();
     const rejected = await configure(alphaTenant, rejectedKey, "alpha-rejected-rotation");
     assert.equal(rejected.statusCode, 422, "A rejected candidate key must fail through Control with a safe credential error");
@@ -429,6 +442,14 @@ const main = async () => {
     assert.equal(disabled.statusCode, 200, "Control must disable an active provider route without restart");
     assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, false, "A disabled provider must fail the old scoped virtual key closed");
     assert.equal((await modelCall(betaVirtualKey, betaGroup)).response.ok, true, "Disabling alpha must not affect beta's isolated provider route");
+    const disabledAgain = await control.inject({
+      method: "POST",
+      url: "/v1/admin/provider-settings/openai/disable",
+      headers: headersFor(alphaTenant, "alpha-disable-repeat"),
+    });
+    assert.equal(disabledAgain.statusCode, 200, "Repeating provider revocation must be idempotent");
+    assert.equal((await modelCall(alphaVirtualKey, alphaGroup)).response.ok, false, "Repeated revocation must keep the old tenant route closed");
+    assert.equal((await modelCall(betaVirtualKey, betaGroup)).response.ok, true, "Repeated alpha revocation must not affect beta's route");
 
     const alphaReconfigured = await configure(alphaTenant, alphaReconfiguredKey, "alpha-reconfigure");
     assert.equal(alphaReconfigured.statusCode, 200, "Control must reconfigure a disabled provider route without restart");
@@ -441,6 +462,12 @@ const main = async () => {
     });
     assert.equal(deleted.statusCode, 200, "Control must delete an active provider route without restart");
     assert.equal((await modelCall(alphaReconfiguredVirtualKey, alphaGroup)).response.ok, false, "A deleted provider must fail the scoped virtual key closed");
+    const deletedAgain = await control.inject({
+      method: "DELETE",
+      url: "/v1/admin/provider-settings/openai",
+      headers: headersFor(alphaTenant, "alpha-delete-repeat"),
+    });
+    assert.equal(deletedAgain.statusCode, 200, "Repeating provider deletion must be idempotent");
 
     const beforeRejectedBedrockRotation = processSignature();
     const rejectedBedrock = await configureBedrock(alphaTenant, rejectedBedrockKey, "bedrock-alpha-rejected-rotation");
@@ -494,8 +521,10 @@ const main = async () => {
       rejected.payload,
       acceptedRotation.payload,
       disabled.json(),
+      disabledAgain.json(),
       alphaReconfigured.payload,
       deleted.json(),
+      deletedAgain.json(),
       rejectedBedrock.payload,
       alphaBedrockAfterRejectedRotation,
       acceptedBedrockRotation.payload,
