@@ -1491,7 +1491,9 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
   async getOwnedChannelConnection(identity: IdentityContext, adapter: "telegram", workspaceId: string) {
     const result = await this.pool.query(
       `${channelConnectionSelect}
-       WHERE c.tenant_id=$1 AND c.subject_id=$2 AND c.adapter=$3 AND c.workspace_id=$4 AND c.state='active'`,
+       LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=c.tenant_id
+       WHERE c.tenant_id=$1 AND c.subject_id=$2 AND c.adapter=$3 AND c.workspace_id=$4 AND c.state='active'
+         AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')`,
       [identity.tenantId, identity.subjectId, adapter, workspaceId],
     );
     return result.rowCount ? mapChannelConnectionRow(result.rows[0]) : null;
@@ -1546,7 +1548,11 @@ export class PostgresWorkspaceStore implements WorkspaceStore, GovernanceStore, 
 
   async listActiveChannelConnections(adapter: "telegram") {
     const result = await this.pool.query(
-      `${channelConnectionSelect} WHERE c.adapter=$1 AND c.state='active' ORDER BY c.updated_at,c.id`,
+      `${channelConnectionSelect}
+       LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=c.tenant_id
+       WHERE c.adapter=$1 AND c.state='active'
+         AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
+       ORDER BY c.updated_at,c.id`,
       [adapter],
     );
     return result.rows.map(mapChannelConnectionRow);

@@ -121,6 +121,41 @@ assignment, and manage sandbox and egress security-group configuration.
 A returning user does not automatically regain a policy that an administrator
 revoked.
 
+#### Tenant suspension and closure
+
+The platform-operator tenant lifecycle is an access and workspace-runtime
+control for Phase 0.5; it is not a tenant-data erasure workflow.
+
+- **Suspend** revokes active product sessions, fences every affected workspace
+  generation, and queues retryable workspace destruction and gateway
+  revocation. Reactivation is refused until every cleanup job completes, and
+  it never restarts customer compute automatically.
+- **Offboarding** records operator intent but does not itself revoke access or
+  start cleanup. Use **Suspend** when access must stop immediately.
+- **Close** performs the same immediate revocation and fences, then also purges
+  workspace-owned runtime storage. Closing is terminal because that storage
+  purge is destructive; restore from a backup into a new tenant instead of
+  editing lifecycle rows or trying to reactivate the closed tenant.
+
+During suspension or closure, the scheduler does not claim tenant runs and the
+channel broker does not poll tenant connections. A run claimed just before the
+lifecycle transaction cannot enter the running state afterward. Control also
+denies product, connector, tool, and workspace authorization through the same
+tenant lifecycle and workspace-generation checks.
+
+Inspect `GET /v1/platform/tenant-cleanup` until all affected jobs are
+`completed`. `retry` means the dispatcher will resume from its recorded stage;
+`escalated` means automatic attempts were exhausted and service health remains
+degraded until an operator resolves the dependency and deliberately retries
+through supported tooling. Do not delete or rewrite cleanup or audit rows.
+
+Phase 0.5 closure does not claim physical deletion of canonical chats,
+artifacts, audit/history, provider or OAuth records, indexes, or backups. Legal
+hold, configurable retention, tenant export, and verified tenant-wide erasure
+remain separate post-0.5 data-governance work. Operator reasons and diagnostic
+evidence must never contain credentials, tokens, prompts, provider payloads,
+signed URLs, or hidden reasoning.
+
 #### Company SSO lifecycle
 
 Company SSO uses `@better-auth/sso` in the local authentication database for

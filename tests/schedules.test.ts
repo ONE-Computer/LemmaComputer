@@ -608,7 +608,8 @@ test("the migration enforces ownership lifecycle, unique occurrences, and leased
   assert.match(migration, /UNIQUE \(schedule_id, scheduled_for\)/);
   assert.match(preferencesMigration, /requested_service_class text NOT NULL DEFAULT 'balanced'/);
   assert.match(preferencesMigration, /reasoning_effort text NULL/);
-  assert.match(store, /FOR UPDATE SKIP LOCKED/);
+  assert.match(store, /FOR UPDATE OF (?:schedule|r) SKIP LOCKED/);
+  assert.match(store, /COALESCE\(lifecycle\.lifecycle_state,'active'\) NOT IN \('suspended','closed'\)/);
   assert.match(store, /SCHEDULE_RUN_OUTCOME_UNKNOWN/);
 });
 

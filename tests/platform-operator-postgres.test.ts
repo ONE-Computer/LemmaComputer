@@ -688,33 +688,19 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     const repeatedCleanup = (await store.listTenantCleanupJobs()).filter((job) => job.tenantId === tenantId && job.workspaceId === workspaceId);
     assert.equal(repeatedCleanup.length, 1, "repeat suspend does not create an orphan cleanup job");
     assert.equal(repeatedCleanup[0]!.id, initialCleanup[0]!.id);
-    await store.updateTenantLifecycle(administratorSession, {
-      tenantId,
-      lifecycleState: "closed",
-      reason: "Offboarding supersedes the pending suspension cleanup",
-      correlationId: `lifecycle-close-pending-suspend-${suffix}`,
-      now: new Date("2026-08-09T07:00:02.000Z"),
-    });
-    workspace = await pool.query("SELECT state,failure_code,access_generation FROM workspaces WHERE id=$1", [workspaceId]);
-    assert.deepEqual(workspace.rows[0], { state: "stopping", failure_code: "TENANT_CLOSED", access_generation: 2 }, "suspend to close reuses the fenced generation");
-    const supersededCleanup = (await store.listTenantCleanupJobs()).filter((job) => job.tenantId === tenantId && job.workspaceId === workspaceId);
-    assert.equal(supersededCleanup.length, 1);
-    assert.equal(supersededCleanup[0]!.id, initialCleanup[0]!.id);
-    assert.equal(supersededCleanup[0]!.action, "close");
     await assert.rejects(() => store.updateTenantLifecycle(administratorSession, {
       tenantId,
       lifecycleState: "active",
-      reason: "Reactivation must wait for every superseded cleanup stage",
+      reason: "Reactivation must wait for every suspension cleanup stage",
       correlationId: `lifecycle-reactivate-pending-${suffix}`,
       now: new Date("2026-08-09T07:00:03.000Z"),
     }), { code: "PLATFORM_TENANT_CLEANUP_PENDING" });
     const suspendCleanup = (await store.claimTenantCleanupJobs({ limit: 100, now: new Date("2026-08-09T07:00:02.000Z") })).filter((job) => job.tenantId === tenantId);
     assert.ok(suspendCleanup.length >= 1);
     for (const job of suspendCleanup) {
-      assert.equal(job.action, "close");
+      assert.equal(job.action, "suspend");
       await store.recordTenantCleanupProgress(job.id, job.leaseToken, "controller", now);
       await store.recordTenantCleanupProgress(job.id, job.leaseToken, "gateway", now);
-      await store.recordTenantCleanupProgress(job.id, job.leaseToken, "storage", now);
       await store.completeTenantCleanupJob(job.id, job.leaseToken, now);
     }
 
@@ -754,6 +740,22 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     assert.deepEqual(workspace.rows[0], { state: "open", access_generation: 2 }, "offboarding alone does not destroy customer compute");
     await store.updateTenantLifecycle(administratorSession, {
       tenantId,
+      lifecycleState: "active",
+      reason: "Customer offboarding was cancelled before closure",
+      correlationId: `lifecycle-offboarding-cancelled-${suffix}`,
+      now: new Date("2026-08-09T07:08:30.000Z"),
+    });
+    await store.updateTenantLifecycle(administratorSession, {
+      tenantId,
+      lifecycleState: "suspended",
+      reason: "Final closure begins with immediate access suspension",
+      correlationId: `lifecycle-final-suspend-${suffix}`,
+      now: new Date("2026-08-09T07:08:45.000Z"),
+    });
+    workspace = await pool.query("SELECT state,failure_code,access_generation FROM workspaces WHERE id=$1", [workspaceId]);
+    assert.deepEqual(workspace.rows[0], { state: "stopping", failure_code: "TENANT_SUSPENDED", access_generation: 3 });
+    await store.updateTenantLifecycle(administratorSession, {
+      tenantId,
       lifecycleState: "closed",
       reason: "Customer offboarding completed and tenant is now closed",
       correlationId: `lifecycle-close-${suffix}`,
@@ -761,7 +763,7 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     });
     assert.equal(await identity.getSession(tokenHash(`replacement-${suffix}`), new Date("2026-08-09T07:09:30.000Z")), null);
     workspace = await pool.query("SELECT state,failure_code,access_generation FROM workspaces WHERE id=$1", [workspaceId]);
-    assert.deepEqual(workspace.rows[0], { state: "stopping", failure_code: "TENANT_CLOSED", access_generation: 3 });
+    assert.deepEqual(workspace.rows[0], { state: "stopping", failure_code: "TENANT_CLOSED", access_generation: 3 }, "suspend to close reuses the fenced generation");
     const closeClaims = (await store.claimTenantCleanupJobs({ limit: 100, now: new Date("2026-08-09T07:09:00.000Z") })).filter((job) => job.tenantId === tenantId);
     const firstCloseClaim = closeClaims.find((job) => job.workspaceId === workspaceId);
     for (const job of closeClaims.filter((candidate) => candidate.id !== firstCloseClaim?.id)) {
@@ -791,6 +793,30 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     workspace = await pool.query("SELECT state,failure_code,access_generation FROM workspaces WHERE id=$1", [workspaceId]);
     assert.deepEqual(workspace.rows[0], { state: "stopped", failure_code: "TENANT_CLOSED", access_generation: 3 });
     assert.equal(await workspaces.authorizeWorkspaceAccess({ tenantId, subjectId: userId, audience: "lemmacomputer-control", workspaceId, accessGeneration: 2 }), false);
+    assert.ok(await store.markSessionStepUp({
+      operatorSessionId: administratorSession.principal.operatorSessionId,
+      operatorId: administratorSession.principal.operatorId,
+      authenticatedAt: new Date("2026-08-09T07:14:30.000Z"),
+      authenticationContext: "terminal-lifecycle-test",
+      correlationId: `lifecycle-terminal-step-up-${suffix}`,
+    }));
+    for (const lifecycleState of ["active", "offboarding", "suspended"] as const) {
+      await assert.rejects(() => store.updateTenantLifecycle(administratorSession, {
+        tenantId,
+        lifecycleState,
+        reason: "A closed tenant must remain terminal after destructive cleanup",
+        correlationId: `lifecycle-closed-terminal-${lifecycleState}-${suffix}`,
+        now: new Date("2026-08-09T07:15:00.000Z"),
+      }), { code: "PLATFORM_TENANT_LIFECYCLE_TRANSITION_INVALID" });
+    }
+    const closedAudit = (await store.listAuditEvents({ targetOrganizationId: tenantId }))
+      .find((event) => event.correlationId === `lifecycle-close-${suffix}`);
+    assert.deepEqual(closedAudit?.details, {
+      previousLifecycleState: "suspended",
+      lifecycleState: "closed",
+      result: "accepted",
+      cleanupQueued: true,
+    });
   } finally {
     await pool.end();
   }

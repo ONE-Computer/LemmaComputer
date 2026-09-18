@@ -75,6 +75,71 @@ test("PostgreSQL schedule claims are exclusive and workspace deletion cascades",
       completedAt: new Date(retryAt.getTime() + 3),
     }))?.state, "succeeded");
 
+    const credentialId = crypto.randomUUID();
+    await workspaceStore.saveChannelCredential(identity, {
+      id: credentialId,
+      kind: "telegram_bot_token",
+      credentialCiphertext: "encrypted-telegram-fixture",
+      credentialKeyVersion: 1,
+      version: 1,
+      fingerprint: `channel-${crypto.randomUUID()}`,
+      displayName: "Lifecycle fixture",
+      botUsername: "lifecycle_fixture_bot",
+    });
+    await workspaceStore.saveChannelConnection(identity, {
+      id: crypto.randomUUID(),
+      workspaceId: workspace.id,
+      adapter: "telegram",
+      credentialId,
+      allowedUserIds: ["123456"],
+      defaultAgentId: "codex-cli",
+      allowAgentSwitch: false,
+      telegramUpdateOffset: "0",
+    });
+    assert.ok(await workspaceStore.getOwnedChannelConnection(identity, "telegram", workspace.id));
+    assert.ok((await workspaceStore.listActiveChannelConnections("telegram"))
+      .some((connection) => connection.workspaceId === workspace.id));
+
+    const raceQueued = await first.queueScheduleRun(identity, scheduleId, new Date(retryAt.getTime() + 4));
+    assert.ok(raceQueued);
+    const raceClaim = (await first.claimDueScheduleRuns(new Date(retryAt.getTime() + 5), 100, 120_000))
+      .find((candidate) => candidate.run.id === raceQueued.id);
+    assert.ok(raceClaim?.run.leaseToken);
+    const operatorId = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO platform_operators (
+         id,workforce_issuer,workforce_subject,workforce_tenant_id,email,display_name
+       ) VALUES ($1,'fixture',$2,'fixture',$3,'Fixture')`,
+      [operatorId, `fixture-${operatorId}`, `fixture-${operatorId}@example.test`],
+    );
+    await pool.query(
+      `INSERT INTO platform_tenant_lifecycle (
+         tenant_id,lifecycle_state,reason,updated_by_operator_id,updated_at
+       ) VALUES ($1,'suspended','Lifecycle execution gate test',$2,now())`,
+      [identity.tenantId, operatorId],
+    );
+
+    assert.equal(await first.beginScheduleRun(
+      raceClaim!.run.id,
+      raceClaim!.run.leaseToken!,
+      new Date(retryAt.getTime() + 6),
+    ), null, "a suspension that wins after claim still blocks execution");
+    const queuedWhileSuspended = await first.queueScheduleRun(identity, scheduleId, new Date(retryAt.getTime() + 7));
+    assert.ok(queuedWhileSuspended);
+    assert.equal(
+      (await second.claimDueScheduleRuns(new Date(retryAt.getTime() + 8), 100, 120_000))
+        .some((candidate) => candidate.run.id === queuedWhileSuspended.id),
+      false,
+      "suspended tenant runs are not claimed",
+    );
+    assert.equal(await workspaceStore.getOwnedChannelConnection(identity, "telegram", workspace.id), null);
+    assert.equal(
+      (await workspaceStore.listActiveChannelConnections("telegram"))
+        .some((connection) => connection.workspaceId === workspace.id),
+      false,
+      "the channel broker cannot poll a suspended tenant",
+    );
+
     assert.equal(await workspaceStore.remove(identity, workspace.id), true);
     assert.equal(await first.getSchedule(identity, scheduleId), null);
   } finally {

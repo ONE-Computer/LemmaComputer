@@ -285,10 +285,12 @@ export class PostgresScheduleStore implements ScheduleStore {
         [now],
       );
       const due = await client.query(
-        `SELECT * FROM schedules
-         WHERE state='enabled' AND next_run_at IS NOT NULL AND next_run_at <= $1
-         ORDER BY next_run_at,id
-         FOR UPDATE SKIP LOCKED LIMIT $2`,
+        `SELECT schedule.* FROM schedules schedule
+         LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=schedule.tenant_id
+         WHERE schedule.state='enabled' AND schedule.next_run_at IS NOT NULL AND schedule.next_run_at <= $1
+           AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
+         ORDER BY schedule.next_run_at,schedule.id
+         FOR UPDATE OF schedule SKIP LOCKED LIMIT $2`,
         [now, limit],
       );
       for (const row of due.rows) {
@@ -323,9 +325,12 @@ export class PostgresScheduleStore implements ScheduleStore {
 
       const claimable = await client.query(
         `SELECT r.id FROM schedule_runs r
+         JOIN schedules schedule ON schedule.id=r.schedule_id
+         LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=schedule.tenant_id
          WHERE r.state='claimed' AND (r.lease_expires_at IS NULL OR r.lease_expires_at < $1)
+           AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
          ORDER BY r.scheduled_for,r.id
-         FOR UPDATE SKIP LOCKED LIMIT $2`,
+         FOR UPDATE OF r SKIP LOCKED LIMIT $2`,
         [now, limit],
       );
       const claimed: ClaimedScheduleRun[] = [];
@@ -358,6 +363,12 @@ export class PostgresScheduleStore implements ScheduleStore {
       const updated = await client.query(
         `UPDATE schedule_runs SET state='running',started_at=$3,updated_at=now()
          WHERE id=$1 AND lease_token=$2 AND state='claimed' AND lease_expires_at >= $3
+           AND EXISTS (
+             SELECT 1 FROM schedules schedule
+             LEFT JOIN platform_tenant_lifecycle lifecycle ON lifecycle.tenant_id=schedule.tenant_id
+             WHERE schedule.id=schedule_runs.schedule_id
+               AND COALESCE(lifecycle.lifecycle_state,'active') NOT IN ('suspended','closed')
+           )
          RETURNING *`,
         [runId, leaseToken, now],
       );

@@ -619,8 +619,12 @@ export class PostgresPlatformOperatorStore {
       const previousLifecycleState = currentLifecycle.rowCount
         ? platformTenantLifecycleStateSchema.parse(currentLifecycle.rows[0].lifecycle_state)
         : "active";
-      if (previousLifecycleState === "closed" && lifecycleState === "suspended") {
-        throw new LemmaComputerError("PLATFORM_TENANT_LIFECYCLE_TRANSITION_INVALID", "A closed tenant cannot be downgraded to suspended", 409);
+      if (previousLifecycleState === "closed" && lifecycleState !== "closed") {
+        throw new LemmaComputerError(
+          "PLATFORM_TENANT_LIFECYCLE_TRANSITION_INVALID",
+          "A closed tenant cannot be reactivated or moved to another lifecycle state",
+          409,
+        );
       }
       if (lifecycleState === "active") {
         const cleanup = await client.query(
@@ -703,7 +707,12 @@ export class PostgresPlatformOperatorStore {
         eventType: "tenant_lifecycle.updated",
         correlationId: input.correlationId,
         occurredAt: now,
-        details: { lifecycleState, reason, cleanupQueued: startsCleanup || upgradesCleanup },
+        details: {
+          previousLifecycleState,
+          lifecycleState,
+          result: "accepted",
+          cleanupQueued: startsCleanup || upgradesCleanup,
+        },
       });
       await client.query("COMMIT");
       return {
