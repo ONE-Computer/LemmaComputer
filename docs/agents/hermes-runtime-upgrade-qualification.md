@@ -1,10 +1,9 @@
 # Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
 
-The live candidate failed qualification on the user-authorized local 4174 stack.
-The exact new pins are back in `discovery`; they must not be released or merged
-as a completed upgrade. Starting Desktop kills the separately managed Hermes
-API gateway, making Web Chat fail and triggering workspace recovery. Earlier
-qualified pins retain their original registrations.
+The first live candidate failed qualification on the user-authorized local 4174
+stack. The regression fixes below are under requalification. The exact new pins
+remain in `discovery` until the complete live gates pass; earlier qualified pins
+retain their original registrations.
 
 ## Source and installation
 
@@ -210,3 +209,38 @@ passed again: 907 passed, 39 normal quick-suite skips, zero failures. The first
 sandboxed invocation could not open the test runner IPC socket; the permitted
 rerun completed. This branch is a rejected qualification candidate with a
 recorded follow-up plan, not a completed Hermes upgrade eligible for release.
+
+## Regression fixes under requalification
+
+- Scope the upstream orphan reaper to the candidate process's actual Linux
+  `HERMES_HOME` (or `HOME/.hermes` when absent). It does not signal a process
+  with another home or unreadable ownership. This leaves the container-managed
+  API gateway outside Desktop's cleanup ownership without disabling cleanup
+  for Desktop's own home or weakening workspace health checks.
+- Copy the calling context into background title threads. Inject the immutable
+  per-turn binding and agent identity at the shared auxiliary wire seam,
+  covering sync/async, streaming and retries without modifying cached SDK
+  clients. A governed auxiliary request cannot forward those headers outside
+  the fixed loopback broker endpoints. Native side tasks still request their
+  own effort semantics; Control remains their authorization authority.
+- If the native safety gate needs a human decision in Product Chat, return a
+  definite blocked tool result explaining that native approval is unavailable.
+  Do not manufacture an approval, leave an unanswerable pending action, change
+  approval settings, or interfere with Control's separate signed approvals.
+
+New reproducible checks are part of `qualify:hermes-runtime`:
+
+- `tests/hermes-lifecycle-smoke.py` runs a real API gateway and starts/stops the
+  real Desktop backend twice in separate disposable homes; API health survives
+  every transition.
+- `tests/hermes-auxiliary-smoke.py` makes six real SDK requests to a synthetic
+  broker from concurrent Lite/Pro contexts, including async calls and real
+  background title threads. It verifies route/header isolation, no retained
+  signed bindings, and fail-closed native approval behavior in Web Chat.
+- `tests/hermes-turn-context.py` covers known/unknown process ownership and
+  rejects auxiliary context forwarding to other destinations.
+
+All installed-source checks above passed. `npm run verify:quick` passed with
+907 passed, 39 normal skips, zero failures. The rebuilt image and credentialed
+live requalification are still required; these fixture results do not promote
+any runtime registration.

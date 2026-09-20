@@ -59,6 +59,7 @@ COPY --chmod=0755 docker/workspace/lemmacomputer-libreoffice /usr/local/libexec/
 COPY docker/workspace/hermes-agent-lemmacomputer.patch /tmp/hermes-agent-lemmacomputer.patch
 COPY docker/workspace/hermes-agent-instance.patch /tmp/hermes-agent-instance.patch
 COPY docker/workspace/hermes-agent-activity.patch /tmp/hermes-agent-activity.patch
+COPY docker/workspace/hermes-managed-lifecycle.patch /tmp/hermes-managed-lifecycle.patch
 COPY docker/workspace/lemmacomputer_hermes_mcp_identity.py /tmp/lemmacomputer_hermes_mcp_identity.py
 COPY --from=hermes_desktop_builder /tmp/hermes-agent.tar.gz /tmp/hermes-agent.tar.gz
 
@@ -133,6 +134,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-agent-lemmacomputer.patch \
     && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-agent-instance.patch \
     && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-agent-activity.patch \
+    && patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-managed-lifecycle.patch \
     && install -d -o root -g root -m 0755 /tmp/hermes-office-skills \
     && tar -xzf /tmp/hermes-office-skills.tar.gz -C /tmp/hermes-office-skills --strip-components=1 \
     && rm -rf \

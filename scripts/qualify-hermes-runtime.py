@@ -198,5 +198,11 @@ if __name__ == '__main__':
             capture_output=True, text=True, check=True, timeout=90,
         )
         print(model_smoke.stdout.strip())
+        for smoke in ('hermes-auxiliary-smoke.py', 'hermes-lifecycle-smoke.py'):
+            result = subprocess.run(
+                [sys.executable, str(ROOT/'tests'/smoke)],
+                capture_output=True, text=True, check=True, timeout=150,
+            )
+            print(result.stdout.strip())
         if args.previous_source:
             qualify_history(args.previous_source.resolve(), args.previous_python)

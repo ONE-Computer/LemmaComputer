@@ -7,6 +7,9 @@ from pathlib import Path
 import threading
 import unittest
 import sys
+import subprocess
+import tempfile
+from types import SimpleNamespace
 sys.dont_write_bytecode = True
 from unittest.mock import patch
 
@@ -22,6 +25,34 @@ def context(identity, turn):
     return h.parse_turn_context({IH: identity, BH: 'fixture' + str(turn) + 'a'*24 + '.signature'})
 
 class TurnContextTests(unittest.TestCase):
+    def test_process_cleanup_never_claims_another_home_or_unknown_owner(self):
+        with tempfile.TemporaryDirectory() as home:
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
+                                     env={**os.environ, 'HERMES_HOME': home})
+            try:
+                self.assertTrue(h.gateway_process_matches_home(child.pid, home))
+                self.assertFalse(h.gateway_process_matches_home(child.pid, home + '-other'))
+                self.assertFalse(h.gateway_process_matches_home(999999999, home))
+                self.assertIsNone(child.poll())
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
+
+    def test_auxiliary_headers_are_request_local_and_cannot_leave_broker(self):
+        shared = {'model':'lemmacomputer-balanced', 'extra_headers':{BH:'stale', IH:'stale', 'keep':'yes'}}
+        with h.bind_turn_context(context(A, 0)):
+            for port in (4314, 4316):
+                result = h.auxiliary_request_overrides(SimpleNamespace(base_url=f'http://127.0.0.1:{port}/v1/'), shared)
+                self.assertEqual(result['extra_headers'][IH], A)
+                self.assertEqual(result['extra_headers'][BH], context(A, 0).binding)
+                self.assertEqual(result['extra_headers']['keep'], 'yes')
+            for url in ('https://example.com/v1', 'http://127.0.0.1:9999/v1', 'http://user@127.0.0.1:4314/v1'):
+                with self.assertRaises(ValueError):
+                    h.auxiliary_request_overrides(SimpleNamespace(base_url=url), shared)
+            self.assertTrue(h.native_approval_unavailable())
+        self.assertFalse(h.native_approval_unavailable())
+        self.assertEqual(shared['extra_headers'][BH], 'stale')
+
     def test_rejects_incomplete_or_malformed_browser_context(self):
         for headers in ({IH:A}, {BH:'a'*32+'.b'}, {IH:'invalid', BH:'a'*32+'.b'},
                         {IH:A, BH:'short.x'}, {IH:A, BH:'a'*4096+'.b'},

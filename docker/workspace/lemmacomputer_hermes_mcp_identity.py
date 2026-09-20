@@ -15,7 +15,9 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 
 _SESSION_IDENTITY_KEY = "LEMMACOMPUTER_AGENT_INSTANCE_ID"
 _TOOL_EVENTS = frozenset({"tool.started", "tool.completed", "tool.failed"})
@@ -32,6 +34,30 @@ class TurnContext(NamedTuple):
 # None is a native process; an explicitly empty context is an API request and
 # MUST NOT inherit a native process identity from the environment.
 _TURN: ContextVar[TurnContext | None] = ContextVar("lemmacomputer_hermes_turn", default=None)
+
+
+def gateway_process_matches_home(pid: int, home: Any) -> bool:
+    """Linux cleanup may only reap a process whose home it can establish.
+
+    Desktop and the container-managed API gateway deliberately have separate
+    homes. A command-line scan cannot distinguish their environment-only
+    HERMES_HOME values. Unknown ownership is not permission to send a signal.
+    This is a lifecycle guard, not an authorization boundary.
+    """
+    try:
+        entries = Path(f"/proc/{int(pid)}/environ").read_bytes().split(b"\0")
+        env = dict(entry.split(b"=", 1) for entry in entries if b"=" in entry)
+        raw = env.get(b"HERMES_HOME")
+        if not raw:
+            raw = env[b"HOME"] + b"/.hermes"
+        return Path(os.fsdecode(raw)).resolve() == Path(home).resolve()
+    except (OSError, KeyError, ValueError):
+        return False
+
+
+def native_approval_unavailable() -> bool:
+    """Product Chat has no native Hermes approval responder; never leave a pending action."""
+    return _TURN.get() is not None
 
 
 def _identity(value: Any) -> str | None:
@@ -98,6 +124,22 @@ def model_request_overrides(overrides: Any) -> dict[str, Any]:
     if headers or raw_headers is not None:
         result["extra_headers"] = headers
     return result
+
+
+def auxiliary_request_overrides(client: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Carry governance through the auxiliary wire seam, including retries.
+
+    Never mutate a cached SDK client's defaults or forward signed context to
+    a configured provider fallback outside the workspace loopback brokers.
+    """
+    context = _TURN.get()
+    if context is None and _current_identity() is None:
+        return kwargs
+    endpoint = urlsplit(str(getattr(client, "base_url", "")))
+    if (endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1"
+            or endpoint.port not in {4314, 4316} or endpoint.username or endpoint.password):
+        raise ValueError("governed auxiliary requests require the workspace broker")
+    return model_request_overrides(kwargs)
 
 
 def capture_agent_instance_meta(

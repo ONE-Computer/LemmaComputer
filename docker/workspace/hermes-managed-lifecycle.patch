@@ -1,0 +1,60 @@
+--- a/hermes_cli/gateway.py
++++ b/hermes_cli/gateway.py
+@@ -1640,11 +1640,14 @@
+             return False
+ 
+     from gateway.status import _pid_exists, get_process_start_time, write_planned_stop_marker
++    from lemmacomputer_hermes_mcp_identity import gateway_process_matches_home
+     own = _reaper_exclusion_pids(extra_exclude)
+     try:
+         # On Windows also drop Task Scheduler-owned candidates (the pidfile-less gap).
+         orphans = [
+-            p for p in find_gateway_pids(exclude_pids=own) if p and p > 0 and not _reaper_candidate_is_supervisor_owned(p)
++            p for p in find_gateway_pids(exclude_pids=own)
++            if p and p > 0 and gateway_process_matches_home(p, get_hermes_home())
++            and not _reaper_candidate_is_supervisor_owned(p)
+         ]
+     except Exception:
+         return False
+--- a/agent/title_generator.py
++++ b/agent/title_generator.py
+@@ -488,9 +488,10 @@
+         logger.debug("Auto-title skipped: auxiliary.title_generation.enabled=false")
+         return
+     apply_instant_title(session_db, session_id, user_message, title_callback)
++    from contextvars import copy_context
+     threading.Thread(
+-        target=auto_title_session,
+-        args=(session_db, session_id, user_message),
++        target=copy_context().run,
++        args=(auto_title_session, session_db, session_id, user_message),
+         kwargs=dict(failure_callback=failure_callback, main_runtime=main_runtime, title_callback=title_callback, runtime_validator=runtime_validator),
+         daemon=True,
+         name="auto-title",
+--- a/agent/auxiliary_wire.py
++++ b/agent/auxiliary_wire.py
+@@ -12,6 +12,8 @@
+     transport sanitizes its copy. The resolved SDK client identifies the wire;
+     native Messages/Responses adapters must retain their reasoning sidecars.
+     """
++    from lemmacomputer_hermes_mcp_identity import auxiliary_request_overrides
++    kwargs = auxiliary_request_overrides(client, kwargs)
+     if not isinstance(client, (OpenAI, AsyncOpenAI)) or "messages" not in kwargs:
+         return kwargs
+     messages = ChatCompletionsTransport().convert_messages(
+--- a/tools/approval.py
++++ b/tools/approval.py
+@@ -780,6 +780,13 @@
+             return _user_approved(session_key, description)
+         return _approved()
+ 
++    from lemmacomputer_hermes_mcp_identity import native_approval_unavailable
++    if native_approval_unavailable():
++        return deny(
++            "BLOCKED: this action requires native Hermes approval, which is unavailable in Web Chat. "
++            "Use the native Hermes interface or choose an action that does not require approval. "
++            "Do not change approval settings.", "denied")
++
+     if spec.transport:
+         attempt = _present_with_selected_transport(
+             command=command, description=description, pattern_key=pattern_key, pattern_keys=pattern_keys,
