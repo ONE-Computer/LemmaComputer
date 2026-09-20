@@ -16,8 +16,8 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
     source("docker/workspace/hermes-desktop-governed-effort.patch"),
     source("docker/workspace/lemmacomputer-agent-chat.py"),
   ]);
-  assert.match(dockerfile, /HERMES_AGENT_TAG=v2026\.7\.20/);
-  assert.match(dockerfile, /HERMES_AGENT_SHA256=285f3fc134ff466a90065e1517801a68993733b807158ee8f32aa01613786990/);
+  assert.match(dockerfile, /HERMES_AGENT_TAG=v2026\.9\.14/);
+  assert.match(dockerfile, /HERMES_AGENT_SHA256=47df72ebd3f9c96d806a94541163f7fe7d7ce5b84f85c1d3787e6dfeea1d7834/);
   assert.match(
     dockerfile,
     /patch --batch --forward --fuzz=0 -d \/opt\/lemmacomputer\/hermes-agent -p1 < \/tmp\/hermes-agent-lemmacomputer\.patch/,
@@ -34,19 +34,11 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
     .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
     .map((line) => line.slice(1))
     .join("\n");
-  assert.match(additions, /_parse_ai_usage_task_binding_header/);
-  assert.match(additions, /not 32 <= len\(raw\) <= 4096/);
-  assert.match(additions, /runtime_kwargs\.pop\("request_overrides", None\)/);
-  assert.match(additions, /request_overrides = dict\(raw_request_overrides or \{\}\)/);
-  assert.match(additions, /extra_headers = dict\(raw_extra_headers or \{\}\)/);
-  assert.match(additions, /extra_headers\[self\._AI_USAGE_TASK_BINDING_HEADER\] = usage_task_binding/);
-  assert.match(additions, /request_overrides=request_overrides or None/);
-  assert.equal(
-    additions.match(/usage_task_binding=usage_task_binding/g)?.length,
-    3,
-    "sync, stream, and executor-to-agent boundaries must each forward the request-local value",
-  );
-  assert.doesNotMatch(additions, /ContextVar|os\.environ[^\n]*AI_USAGE_TASK_BINDING|self\.usage_task_binding/);
+  assert.match(additions, /parse_turn_context\(request.headers\)/);
+  assert.match(additions, /model_request_overrides/);
+  assert.match(additions, /lemma_context=lemma_context/);
+  assert.match(additions, /bind_turn_context\(lemma_context\)/);
+  assert.doesNotMatch(additions, /os\.environ|self\.usage_task_binding/);
 
   assert.match(chatAdapter, /"x-lemmacomputer-ai-task-binding": usage_task_binding/);
   assert.match(chatAdapter, /f"\{HERMES_URL\}\/api\/sessions\/\{vendor_session_id\}\/chat\/stream"/);
@@ -69,16 +61,9 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
     .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
     .map((line) => line.slice(1))
     .join("\n");
-  assert.match(additions, /_parse_agent_instance_id_header/);
-  assert.match(additions, /parsed\.version != 4 or str\(parsed\) != raw/);
-  assert.match(additions, /LEMMACOMPUTER_AGENT_INSTANCE_ID.*_AGENT_INSTANCE_ID/);
-  assert.match(additions, /agent_instance_id=agent_instance_id or ""/);
-  assert.match(additions, /agent_instance_id=agent_instance_id/);
-  assert.match(additions, /extra_headers\[self\._AGENT_INSTANCE_ID_HEADER\] = agent_instance_id/);
   assert.match(additions, /agent_instance_meta = capture_agent_instance_meta\(\)/);
-  assert.match(additions, /session\.call_tool\([\s\S]*meta=agent_instance_meta/);
-  assert.doesNotMatch(identityHelper, /os\.environ(?:\[|\.get)/);
-  assert.match(identityHelper, /get_session_env/);
+  assert.match(additions, /session\.call_tool\([^\n]*meta=agent_instance_meta/);
+  assert.doesNotMatch(patch, /gateway\/session_context\.py/);
   assert.match(identityHelper, /parsed\.version != 4 or str\(parsed\) != raw/);
   assert.match(identityHelper, /\{"lemmacomputer": \{"agentInstanceId": raw\}\}/);
   assert.match(activityPatch, /tool_activity_event\(event_type, kwargs\.get\("is_error"\)\)/);
@@ -87,7 +72,7 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
   assert.match(
     dockerfile,
     /\$\{HERMES_IDENTITY_SITE_PACKAGES\}\/lemmacomputer_hermes_mcp_identity\.py/,
-    "the no-editable Hermes runtime must install the product helper into its virtualenv",
+    "the Hermes runtime must install the product helper into its virtualenv",
   );
   assert.match(
     dockerfile,
@@ -95,7 +80,7 @@ test("the pinned Hermes browser runtime binds a verified identity only to the re
     "the image build must prove the helper imports away from the Hermes source tree",
   );
   assert.match(chatAdapter, /"x-lemmacomputer-agent-instance-id": agent_instance_id/);
-  assert.match(additions, /os\.environ\.get\("LEMMACOMPUTER_AGENT_INSTANCE_ID"/);
+
 });
 
 test("Hermes MCP metadata stays turn-local and malformed identities fail closed", async () => {
@@ -467,4 +452,8 @@ test("governed OneDrive deletion carries the resolved filename into approval met
   assert.match(broker, /\/internal\/v1\/agent\/deletions/);
   assert.match(control, /safeSummary: `Delete \$\{input\.resourceName\} from OneDrive`/);
   assert.match(control, /resourceName: input\.resourceName/);
+});
+
+ test("Hermes turn context rejects downgrade and isolates concurrent/resumed requests", async () => {
+  await execFileAsync("python3", [new URL("./hermes-turn-context.py", import.meta.url).pathname]);
 });

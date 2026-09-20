@@ -1,213 +1,39 @@
---- a/gateway/session_context.py
-+++ b/gateway/session_context.py
-@@ -79,6 +79,7 @@
- _SESSION_USER_NAME: ContextVar = ContextVar("HERMES_SESSION_USER_NAME", default=_UNSET)
- _SESSION_KEY: ContextVar = ContextVar("HERMES_SESSION_KEY", default=_UNSET)
- _SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
-+_AGENT_INSTANCE_ID: ContextVar = ContextVar("LEMMACOMPUTER_AGENT_INSTANCE_ID", default=_UNSET)
- # In-process UI session/window id for multi-session desktop/TUI hosts. This is
- # intentionally separate from HERMES_SESSION_ID: the latter is the durable
- # conversation/session-db id, while the UI id is the live frontend tab/window
-@@ -130,6 +131,7 @@
-     "HERMES_SESSION_USER_NAME": _SESSION_USER_NAME,
-     "HERMES_SESSION_KEY": _SESSION_KEY,
-     "HERMES_SESSION_ID": _SESSION_ID,
-+    "LEMMACOMPUTER_AGENT_INSTANCE_ID": _AGENT_INSTANCE_ID,
-     "HERMES_UI_SESSION_ID": _SESSION_UI_SESSION_ID,
-     "HERMES_SESSION_MESSAGE_ID": _SESSION_MESSAGE_ID,
-     "HERMES_SESSION_PROFILE": _SESSION_PROFILE,
-@@ -169,6 +171,7 @@
-     cwd: str = "",
-     async_delivery: bool = True,
-     ui_session_id: str = "",
-+    agent_instance_id: str = "",
- ) -> list:
-     """Set all session context variables and return reset tokens.
+--- a/tools/mcp_tool_handlers.py
++++ b/tools/mcp_tool_handlers.py
+@@ -319,7 +319,7 @@
+             inflight.discard(task)
  
-@@ -200,6 +203,7 @@
-         _SESSION_USER_NAME.set(user_name),
-         _SESSION_KEY.set(session_key),
-         _SESSION_ID.set(session_id),
-+        _AGENT_INSTANCE_ID.set(agent_instance_id),
-         _SESSION_UI_SESSION_ID.set(ui_session_id),
-         _SESSION_MESSAGE_ID.set(message_id),
-         _SESSION_PROFILE.set(profile),
-@@ -235,6 +239,7 @@
-         _SESSION_USER_NAME,
-         _SESSION_KEY,
-         _SESSION_ID,
-+        _AGENT_INSTANCE_ID,
-         _SESSION_UI_SESSION_ID,
-         _SESSION_MESSAGE_ID,
-         _SESSION_PROFILE,
---- a/gateway/platforms/api_server.py
-+++ b/gateway/platforms/api_server.py
-@@ -1538,6 +1538,7 @@
  
-     _AI_USAGE_TASK_BINDING_HEADER = "x-lemmacomputer-ai-task-binding"
-     _AI_USAGE_TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
-+    _AGENT_INSTANCE_ID_HEADER = "x-lemmacomputer-agent-instance-id"
- 
-     def _parse_ai_usage_task_binding_header(
-         self, request: "web.Request"
-@@ -1559,6 +1560,27 @@
-             )
-         return raw, None
- 
-+    def _parse_agent_instance_id_header(
-+        self, request: "web.Request"
-+    ) -> tuple[Optional[str], Optional["web.Response"]]:
-+        """Return LemmaComputer's canonical server-generated v4 UUID."""
-+        raw = request.headers.get(self._AGENT_INSTANCE_ID_HEADER, "").strip()
-+        if not raw:
-+            return None, None
-+        try:
-+            parsed = uuid.UUID(raw)
-+        except (ValueError, AttributeError):
-+            parsed = None
-+        if parsed is None or parsed.version != 4 or str(parsed) != raw:
-+            return None, web.json_response(
-+                _openai_error(
-+                    "Invalid agent instance identity",
-+                    code="invalid_agent_instance_identity",
-+                ),
-+                status=400,
-+            )
-+        return raw, None
-+
-     def _parse_session_key_header(
-         self, request: "web.Request"
-     ) -> tuple[Optional[str], Optional["web.Response"]]:
-@@ -1778,6 +1800,7 @@
-         gateway_session_key: Optional[str] = None,
-         route: Optional[Dict[str, Any]] = None,
-         usage_task_binding: Optional[str] = None,
-+        agent_instance_id: Optional[str] = None,
-     ) -> Any:
-         """
-         Create an AIAgent instance using the gateway's runtime config.
-@@ -1814,12 +1837,20 @@
-         if raw_request_overrides is not None and not isinstance(raw_request_overrides, dict):
-             raise TypeError("runtime request_overrides must be a mapping")
-         request_overrides = dict(raw_request_overrides or {})
-+        # Interactive CLI/Desktop launches receive this value from the
-+        # server-issued process wrapper. API turns use the request-local
-+        # ContextVar above and the long-lived gateway has no ambient value.
-+        if not agent_instance_id:
-+            agent_instance_id = os.environ.get("LEMMACOMPUTER_AGENT_INSTANCE_ID", "").strip() or None
--        if usage_task_binding:
-+        if usage_task_binding or agent_instance_id:
-             raw_extra_headers = request_overrides.get("extra_headers")
-             if raw_extra_headers is not None and not isinstance(raw_extra_headers, dict):
-                 raise TypeError("runtime request_overrides.extra_headers must be a mapping")
-             extra_headers = dict(raw_extra_headers or {})
--            extra_headers[self._AI_USAGE_TASK_BINDING_HEADER] = usage_task_binding
-+            if usage_task_binding:
-+                extra_headers[self._AI_USAGE_TASK_BINDING_HEADER] = usage_task_binding
-+            if agent_instance_id:
-+                extra_headers[self._AGENT_INSTANCE_ID_HEADER] = agent_instance_id
-             request_overrides["extra_headers"] = extra_headers
-         reasoning_config = GatewayRunner._load_reasoning_config()
-         model = _resolve_gateway_model()
-@@ -2520,6 +2546,9 @@
-         usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
-         if binding_err is not None:
-             return binding_err
-+        agent_instance_id, instance_err = self._parse_agent_instance_id_header(request)
-+        if instance_err is not None:
-+            return instance_err
-         session_id = request.match_info["session_id"]
-         _, err = await self._get_existing_session_or_404(session_id)
-         if err:
-@@ -2541,6 +2570,7 @@
-             session_id=session_id,
-             gateway_session_key=gateway_session_key,
-             usage_task_binding=usage_task_binding,
-+            agent_instance_id=agent_instance_id,
+-async def _call_tool_racing_stdio_death(server, server_name: str, tool_name: str, args: dict):
++async def _call_tool_racing_stdio_death(server, server_name: str, tool_name: str, args: dict, agent_instance_meta=None):
+     """``session.call_tool`` that fails fast when the stdio child is/gets dead: pre-call (a dead
+     child must not hold the slot for the full timeout) and mid-call (race against
+     ``_watch_stdio_children``). Both raise :class:`_StdioChildExited` for the respawn path, which
+@@ -333,7 +333,7 @@
+             f"MCP stdio subprocess for '{server_name}' had already exited when the call was dispatched",
+             in_flight=False,
          )
-         effective_session_id = result.get("session_id") if isinstance(result, dict) else session_id
-         final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
-@@ -2566,6 +2596,9 @@
-         usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
-         if binding_err is not None:
-             return binding_err
-+        agent_instance_id, instance_err = self._parse_agent_instance_id_header(request)
-+        if instance_err is not None:
-+            return instance_err
-         session_id = request.match_info["session_id"]
-         _, err = await self._get_existing_session_or_404(session_id)
-         if err:
-@@ -2634,6 +2667,7 @@
-                     tool_progress_callback=_tool_progress,
-                     gateway_session_key=gateway_session_key,
-                     usage_task_binding=usage_task_binding,
-+                    agent_instance_id=agent_instance_id,
-                 )
-                 final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
-                 effective_session_id = result.get("session_id", session_id) if isinstance(result, dict) else session_id
-@@ -4646,6 +4680,7 @@
-         chat_id: str = "",
-         session_key: str = "",
-         session_id: str = "",
-+        agent_instance_id: str = "",
-     ) -> list:
-         """Bind session contextvars for an API-server agent run.
+-    _call_coro = server.session.call_tool(tool_name, arguments=args)
++    _call_coro = server.session.call_tool(tool_name, arguments=args, meta=agent_instance_meta)
+     _watch_children = getattr(server, "_watch_stdio_children", None)
+     if not (inspect.iscoroutinefunction(_watch_children) and asyncio.iscoroutine(_call_coro)):
+         # Stubbed sessions return a non-awaitable, or there is no child-watcher to race: plain await.
+@@ -480,6 +480,9 @@
+     op = f"tools/call {tool_name}"
  
-@@ -4669,6 +4704,7 @@
-             chat_id=chat_id,
-             session_key=session_key,
-             session_id=session_id,
-+            agent_instance_id=agent_instance_id,
-             async_delivery=False,
-         )
- 
-@@ -4686,6 +4722,7 @@
-         gateway_session_key: Optional[str] = None,
-         route: Optional[Dict[str, Any]] = None,
-         usage_task_binding: Optional[str] = None,
-+        agent_instance_id: Optional[str] = None,
-     ) -> tuple:
-         """
-         Create an agent and run a conversation in a thread executor.
-@@ -4716,6 +4753,7 @@
-                     chat_id=session_id or "",
-                     session_key=gateway_session_key or session_id or "",
-                     session_id=session_id or "",
-+                    agent_instance_id=agent_instance_id or "",
-                 )
-                 try:
-                     agent = self._create_agent(
-@@ -4728,6 +4766,7 @@
-                         gateway_session_key=gateway_session_key,
-                         route=route,
-                         usage_task_binding=usage_task_binding,
-+                        agent_instance_id=agent_instance_id,
-                     )
-                     if agent_ref is not None:
-                         agent_ref[0] = agent
-diff --git a/tools/mcp_tool.py b/tools/mcp_tool.py
-index a8ff189..cadcd2a 100644
---- a/tools/mcp_tool.py
-+++ b/tools/mcp_tool.py
-@@ -4109,4 +4109,8 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
      def _handler(args: dict, **kwargs) -> str:
-+        # Capture before crossing onto the shared MCP event-loop thread. The
-+        # returned value is request-local and closed over by only this call.
++        # Capture before crossing the shared MCP loop; retries retain this call's identity.
 +        from lemmacomputer_hermes_mcp_identity import capture_agent_instance_meta
 +        agent_instance_meta = capture_agent_instance_meta()
-         # Circuit breaker: if this server has failed too many times
-         # consecutively, short-circuit with a clear message so the model
-         # stops retrying and uses alternative approaches (#10447).
-@@ -4180,7 +4184,11 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
-                 # it and detect the gateway platform / session for routing.
-                 server._pending_call_context = contextvars.copy_context()
+         # Security boundary: untrusted-server write tools need approval before ANY transport work (incl. lazy spawn).
+         error = _trust_gate_check(server_name, tool_name) or _check_circuit_breaker(server_name)
+         if error is not None:
+@@ -492,7 +495,7 @@
+             async with server._rpc_lock, _track_inflight_rpc(server, server_name, op):
+                 server._pending_call_context = contextvars.copy_context()  # for the elicitation callback
                  try:
--                    result = await server.session.call_tool(tool_name, arguments=args)
-+                    result = await server.session.call_tool(
-+                        tool_name,
-+                        arguments=args,
-+                        meta=agent_instance_meta,
-+                    )
+-                    result = await _call_tool_racing_stdio_death(server, server_name, tool_name, args)
++                    result = await _call_tool_racing_stdio_death(server, server_name, tool_name, args, agent_instance_meta)
                  finally:
                      server._pending_call_context = None
-             # MCP CallToolResult has .content (list of content blocks) and .isError
+             if getattr(server, "_mark_session_proven", None) is not None:  # round-trip done: transport healthy

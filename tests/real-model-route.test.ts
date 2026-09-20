@@ -382,10 +382,10 @@ test("the Hermes sandbox gateway includes its pinned private API runtime without
   const dockerfile = await source("docker/Dockerfile.workspace");
   const entrypoint = await source("docker/workspace/lemmacomputer-workspace-entrypoint.sh");
   const profileConfig = await source("docker/workspace/lemmacomputer-hermes-config.py");
-  assert.match(dockerfile, /aiohttp==3\.14\.1/);
+  assert.match(dockerfile, /aiohttp==3\.14\.3/);
   assert.match(dockerfile, /import aiohttp/);
-  assert.match(dockerfile, /uv pip install[\s\S]*mcp==1\.26\.0[\s\S]*starlette==1\.0\.1/);
-  assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*1\.26\.0/);
+  assert.match(dockerfile, /uv pip install[\s\S]*mcp==2\.0\.0[\s\S]*starlette==1\.3\.1/);
+  assert.match(dockerfile, /importlib\.metadata\.version\("mcp"\).*2\.0\.0/);
   assert.match(entrypoint, /hermes gateway run/);
   assert.match(profileConfig, /managed_office_toolsets = \["file", "skills", "terminal", "vision"\]/);
   assert.match(profileConfig, /cli_toolsets = managed_office_toolsets \+ \["lemmacomputer_connectors"\]/);

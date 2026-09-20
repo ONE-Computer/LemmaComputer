@@ -1,120 +1,59 @@
-diff --git a/gateway/platforms/api_server.py b/gateway/platforms/api_server.py
-index 65d5b32..0faa6bd 100644
 --- a/gateway/platforms/api_server.py
 +++ b/gateway/platforms/api_server.py
-@@ -1536,6 +1536,29 @@ class APIServerAdapter(BasePlatformAdapter):
-     # that the sanitized form is safe to pass into Honcho / state.db.
-     _MAX_SESSION_HEADER_LEN = 256
- 
-+    _AI_USAGE_TASK_BINDING_HEADER = "x-lemmacomputer-ai-task-binding"
-+    _AI_USAGE_TASK_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
+@@ -26,6 +26,10 @@
+ import uuid
+ from pathlib import Path
+ from typing import Any, Dict, List, Optional
 +
-+    def _parse_ai_usage_task_binding_header(
-+        self, request: "web.Request"
-+    ) -> tuple[Optional[str], Optional["web.Response"]]:
-+        """Return LemmaComputer's bounded signed per-turn usage binding."""
-+        raw = request.headers.get(self._AI_USAGE_TASK_BINDING_HEADER, "").strip()
-+        if not raw:
-+            return None, None
-+        if (
-+            not 32 <= len(raw) <= 4096
-+            or self._AI_USAGE_TASK_BINDING_PATTERN.fullmatch(raw) is None
-+        ):
-+            return None, web.json_response(
-+                _openai_error(
-+                    "Invalid AI usage task binding",
-+                    code="invalid_ai_usage_task_binding",
-+                ),
-+                status=400,
-+            )
-+        return raw, None
-+
-     def _parse_session_key_header(
-         self, request: "web.Request"
-     ) -> tuple[Optional[str], Optional["web.Response"]]:
-@@ -1754,6 +1777,7 @@ class APIServerAdapter(BasePlatformAdapter):
-         tool_complete_callback=None,
-         gateway_session_key: Optional[str] = None,
-         route: Optional[Dict[str, Any]] = None,
-+        usage_task_binding: Optional[str] = None,
-     ) -> Any:
-         """
-         Create an AIAgent instance using the gateway's runtime config.
-@@ -1786,6 +1810,17 @@ class APIServerAdapter(BasePlatformAdapter):
-         from hermes_cli.tools_config import _get_platform_tools
- 
-         runtime_kwargs = _resolve_runtime_agent_kwargs()
-+        raw_request_overrides = runtime_kwargs.pop("request_overrides", None)
-+        if raw_request_overrides is not None and not isinstance(raw_request_overrides, dict):
-+            raise TypeError("runtime request_overrides must be a mapping")
-+        request_overrides = dict(raw_request_overrides or {})
-+        if usage_task_binding:
-+            raw_extra_headers = request_overrides.get("extra_headers")
-+            if raw_extra_headers is not None and not isinstance(raw_extra_headers, dict):
-+                raise TypeError("runtime request_overrides.extra_headers must be a mapping")
-+            extra_headers = dict(raw_extra_headers or {})
-+            extra_headers[self._AI_USAGE_TASK_BINDING_HEADER] = usage_task_binding
-+            request_overrides["extra_headers"] = extra_headers
-         reasoning_config = GatewayRunner._load_reasoning_config()
-         model = _resolve_gateway_model()
- 
-@@ -1872,6 +1907,7 @@ class APIServerAdapter(BasePlatformAdapter):
-             session_db=self._ensure_session_db(),
-             fallback_model=fallback_model,
-             reasoning_config=reasoning_config,
-+            request_overrides=request_overrides or None,
-             gateway_session_key=gateway_session_key,
-         )
-         return agent
-@@ -2472,6 +2508,9 @@ class APIServerAdapter(BasePlatformAdapter):
++from lemmacomputer_hermes_mcp_identity import (
++    bind_turn_context, model_request_overrides, parse_turn_context,
++)
+
+ # _resolve_request_profile result for a /p/<profile>/ prefix this gateway does not serve (-> 404);
+ # distinct from None (no prefix / multiplexing off -> default profile).
+@@ -2159,6 +2163,8 @@
+         # after the precedence chain settles; an explicit request wins.
+         if request_reasoning_config is None:
+             request_reasoning_config = GatewayRunner._load_reasoning_config(model)
++        runtime_kwargs["request_overrides"] = model_request_overrides(
++            runtime_kwargs.get("request_overrides"))
+         agent_kwargs = {
+             "model": model, **runtime_kwargs, **_checkpoint_agent_kwargs(user_config),
+             "max_iterations": max_iterations, "quiet_mode": True, "verbose_logging": False,
+@@ -3011,6 +3017,10 @@
+         persisted lock) wins; else the session-persisted model routes via model_routes when an
+         alias or threads through as ``session_model`` when raw, then body values.
+         Returns ``(ctx, None)`` or ``(None, error)``; ``ctx["run_kwargs"]`` feeds ``_run_agent``."""
++        try:
++            lemma_context = parse_turn_context(request.headers)
++        except ValueError as exc:
++            return None, _error_response(str(exc), 400, code="invalid_governed_turn_context")
          gateway_session_key, key_err = self._parse_session_key_header(request)
          if key_err is not None:
-             return key_err
-+        usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
-+        if binding_err is not None:
-+            return binding_err
-         session_id = request.match_info["session_id"]
-         _, err = await self._get_existing_session_or_404(session_id)
-         if err:
-@@ -2492,6 +2531,7 @@ class APIServerAdapter(BasePlatformAdapter):
-             ephemeral_system_prompt=system_prompt,
-             session_id=session_id,
-             gateway_session_key=gateway_session_key,
-+            usage_task_binding=usage_task_binding,
-         )
-         effective_session_id = result.get("session_id") if isinstance(result, dict) else session_id
-         final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
-@@ -2514,6 +2554,9 @@ class APIServerAdapter(BasePlatformAdapter):
-         gateway_session_key, key_err = self._parse_session_key_header(request)
-         if key_err is not None:
-             return key_err
-+        usage_task_binding, binding_err = self._parse_ai_usage_task_binding_header(request)
-+        if binding_err is not None:
-+            return binding_err
-         session_id = request.match_info["session_id"]
-         _, err = await self._get_existing_session_or_404(session_id)
-         if err:
-@@ -2581,6 +2624,7 @@ class APIServerAdapter(BasePlatformAdapter):
-                     stream_delta_callback=_delta,
-                     tool_progress_callback=_tool_progress,
-                     gateway_session_key=gateway_session_key,
-+                    usage_task_binding=usage_task_binding,
-                 )
-                 final_response = _resolve_media_to_data_urls(result.get("final_response", "") if isinstance(result, dict) else "")
-                 effective_session_id = result.get("session_id", session_id) if isinstance(result, dict) else session_id
-@@ -4632,6 +4676,7 @@ class APIServerAdapter(BasePlatformAdapter):
-         agent_ref: Optional[list] = None,
-         gateway_session_key: Optional[str] = None,
-         route: Optional[Dict[str, Any]] = None,
-+        usage_task_binding: Optional[str] = None,
-     ) -> tuple:
-         """
-         Create an agent and run a conversation in a thread executor.
-@@ -4673,6 +4718,7 @@ class APIServerAdapter(BasePlatformAdapter):
-                         tool_complete_callback=tool_complete_callback,
-                         gateway_session_key=gateway_session_key,
-                         route=route,
-+                        usage_task_binding=usage_task_binding,
-                     )
-                     if agent_ref is not None:
-                         agent_ref[0] = agent
+             return None, key_err
+@@ -3067,6 +3077,7 @@
+             requested_runtime=runtime_request.get("requested") or {},
+             route_source=runtime_request.get("route_source") or "global",
+             confirmed_runtime_lock=lock_active, turn_author=turn_author,
++            lemma_context=lemma_context,
+             # #98619: the client addresses this session by construction — the id is in the
+             # request path (/api/sessions/{session_id}/chat) — so a wake self-post lands where
+             # the client will read it. The audited native-session opt-in.
+@@ -3673,7 +3684,7 @@
+         requested_runtime: Optional[Dict[str, Any]] = None, route_source: str = "global",
+         confirmed_runtime_lock: bool = False, bind_declared_conversation: bool = False,
+         session_history_delivery: str = "", turn_author: Optional[Dict[str, Any]] = None,
+-        relay_metadata: Optional[Dict[str, Any]] = None) -> tuple:
++        relay_metadata: Optional[Dict[str, Any]] = None, lemma_context=None) -> tuple:
+         """Create an agent and run one turn in a thread executor -> ``(result, usage)``.
+         ``agent_ref[0]`` receives the agent so SSE writers can interrupt it; ``active_run_id``
+         registers it in ``_active_run_agents``. Under a confirmed model lock the actual
+@@ -3690,7 +3701,7 @@
+
+         def _run():
+             from gateway.session_context import clear_session_vars
+-            with self._profile_scope(request_profile):
++            with self._profile_scope(request_profile), bind_turn_context(lemma_context):
+                 tokens = self._bind_api_server_session(
+                     chat_id=session_id or "", session_key=gateway_session_key or session_id or "",
+                     session_id=session_id or "", profile=request_profile or "",

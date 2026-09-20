@@ -118,7 +118,15 @@ test("managed OpenAI reasoning routes use the qualified Responses transport", ()
   }
 });
 
-test("the pinned Claude and Hermes runtimes expose exact qualified adapters", () => {
+test("new Hermes pins remain discovery until credentialed qualification passes", () => {
+  for (const [agentCatalogId, clientVersion] of [["hermes-claw", "0.21.3"], ["hermes-desktop", "0.17.2"]]) {
+    const input = { agentCatalogId, clientVersion };
+    assert.equal(agentReasoningAdapterReview(input)?.reviewStatus, "discovery");
+    assert.equal(qualifiedAgentReasoningAdapter(input), null);
+  }
+});
+
+test("the previously qualified Claude and Hermes pins retain their exact adapters", () => {
   assert.deepEqual(qualifiedAgentReasoningAdapter({
     agentCatalogId: "claude-desktop",
     clientVersion: "1.22209.3",

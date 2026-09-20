@@ -1,25 +1,32 @@
 --- a/apps/desktop/src/app/shell/model-edit-submenu.tsx
 +++ b/apps/desktop/src/app/shell/model-edit-submenu.tsx
-@@ -111,6 +111,13 @@
-   const activeSessionId = useStore(view.$runtimeId)
-   const touchesPrimary = view.kind === 'primary'
- 
-+  // LemmaComputer exposes one provider-neutral effort contract. The broker
-+  // validates these values with Control and LiteLLM translates them to the
-+  // selected provider; Hermes-only levels must not imply unsupported choices.
-+  const effortOptions = provider === 'custom' && model.startsWith('lemmacomputer-')
-+    ? EFFORT_OPTIONS.filter(option => ['low', 'medium', 'high'].includes(option.value))
-+    : EFFORT_OPTIONS
+@@ -111,12 +111,20 @@
+   effort,
+   fastControl,
+   isActive,
++  model,
++  provider,
+   onSelectModel,
+   onSetOptions,
+   reasoning
+ }: ModelEditSubmenuProps) {
+   const { t } = useI18n()
+   const copy = t.shell.modelOptions
 +
-   const effortValue = normalizeEffort(effort)
-   const thinkingOn = isThinkingEnabled(effort)
++  // Both the model picker and composer pill share this component.
++  // These are intent choices; Control still authorizes the actual effort.
++  const effortOptions = provider === 'custom' && model.startsWith('lemmacomputer-')
++    ? REASONING_EFFORTS.filter(value => ['low', 'medium', 'high'].includes(value))
++    : REASONING_EFFORTS
  
-@@ -240,7 +247,7 @@
-               <DropdownMenuSeparator className="mx-0" />
-               <DropdownMenuLabel className={dropdownMenuSectionLabel}>{copy.effort}</DropdownMenuLabel>
-               <DropdownMenuRadioGroup onValueChange={value => void patchReasoning(value)} value={effortValue}>
--                {EFFORT_OPTIONS.map(option => (
-+                {effortOptions.map(option => (
-                   <DropdownMenuRadioItem
-                     className={dropdownMenuRow}
-                     key={option.value}
+   const effortValue = resolveReasoningEffort(effort, defaultEffort)
+   const thinkingOn = isThinkingEnabled(effort, defaultEffort)
+@@ -171,7 +179,7 @@
+           <DropdownMenuSeparator className="mx-0" />
+           <DropdownMenuLabel className={dropdownMenuSectionLabel}>{copy.effort}</DropdownMenuLabel>
+           <DropdownMenuRadioGroup onValueChange={value => onSetOptions({ effort: value })} value={effortValue}>
+-            {REASONING_EFFORTS.map(value => (
++            {effortOptions.map(value => (
+               <DropdownMenuRadioItem
+                 className={dropdownMenuRow}
+                 key={value}
