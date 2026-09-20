@@ -1,10 +1,10 @@
 # Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
 
-This task branch contains the exact new runtime registrations in discovery.
-They are NOT evidence of a completed live qualification. Do not deploy this
-candidate as a finished upgrade: the new pins deliberately do not expose
-thinking controls until the gates in reasoning-adapter-qualification.md pass.
-A temporary promotion may be staged on this branch for local live testing.
+This task branch temporarily promotes the exact new runtime registrations for
+the user-authorized live qualification on the existing local 4174 stack.
+They are NOT evidence of a completed live qualification. Do not integrate or
+release this candidate until the gates in reasoning-adapter-qualification.md
+pass. Revert to discovery if the live qualification fails or is left incomplete.
 The earlier qualified pins remain registered; their evidence is not widened.
 
 ## Source and installation
