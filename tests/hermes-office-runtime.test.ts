@@ -27,7 +27,8 @@ test("the pinned Hermes runtime forwards each AI usage binding without shared st
     /patch --batch --forward --fuzz=0 -d \/src -p1 < \/tmp\/hermes-desktop-governed-effort\.patch/,
   );
   assert.match(desktopPatch, /\['low', 'medium', 'high'\]/);
-  assert.match(desktopPatch, /provider === 'custom' && model\.startsWith\('lemmacomputer-'\)/);
+  assert.ok(desktopPatch.includes('/^lemmacomputer-(lite|balanced|pro)$/.test(model)'));
+  assert.doesNotMatch(desktopPatch, /provider === 'custom'/);
 
   const additions = patch
     .split("\n")

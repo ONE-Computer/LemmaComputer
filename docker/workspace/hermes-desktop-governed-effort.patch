@@ -5,7 +5,6 @@
    fastControl,
    isActive,
 +  model,
-+  provider,
    onSelectModel,
    onSetOptions,
    reasoning
@@ -14,8 +13,9 @@
    const copy = t.shell.modelOptions
 +
 +  // Both the model picker and composer pill share this component.
-+  // These are intent choices; Control still authorizes the actual effort.
-+  const effortOptions = provider === 'custom' && model.startsWith('lemmacomputer-')
++  // The named custom provider can change its slug after a turn. Match the
++  // reserved route aliases; Control still authorizes the actual effort.
++  const effortOptions = /^lemmacomputer-(lite|balanced|pro)$/.test(model)
 +    ? REASONING_EFFORTS.filter(value => ['low', 'medium', 'high'].includes(value))
 +    : REASONING_EFFORTS
  

@@ -133,7 +133,10 @@ async def qualify():
                     body = await response.text()
                     assert response.status == 200, (response.status, body[:200])
                     if index:
-                        assert 'tool.failed' in body and 'assistant.completed' in body
+                        # This server has only synthetic fixture data. Retain a
+                        # bounded failure tail so event-order regressions are
+                        # distinguishable from fixture setup failures.
+                        assert 'tool.failed' in body and 'assistant.completed' in body, body[-2000:]
                     record = next(row for row in captured if row[0] == f'fixture-{index}' and row[1]['extra_headers'].get(binding_header) == binding)
                     assert record[1]['extra_headers'] == {'fixture-header':'preserved', binding_header:binding, identity_header:identities[index]}
                     assert record[2] == {'lemmacomputer':{'agentInstanceId':identities[index]}}
