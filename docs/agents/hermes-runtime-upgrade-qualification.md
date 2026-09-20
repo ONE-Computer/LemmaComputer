@@ -1,10 +1,13 @@
 # Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
 
-The first live candidate failed qualification on the user-authorized local 4174
-stack. The lifecycle and request-context fixes now pass installed-image checks
-and bounded live CLI/Desktop-backend tests. Final browser and policy-revocation
-gates remain incomplete. The exact new pins remain in `discovery`; earlier
-qualified pins retain their original registrations.
+The initial lifecycle, request-context, and Desktop effort-menu regressions are
+fixed. Installed-image checks and credentialed Web Chat, CLI, Desktop-backend,
+and actual Desktop UI smoke tests now pass on the user-authorized 4174 stack.
+Live route revocation, complete retained-surface inspection, and strict
+commit-bound acceptance records remain incomplete. The exact new pins remain
+in `discovery`; earlier qualified pins retain their original registrations.
+The final section below records the current deployed state; earlier rollback
+sections describe completed historical runs.
 
 ## Source and installation
 
@@ -350,3 +353,119 @@ for all seven pre-existing sandbox/egress containers and both PostgreSQL
 containers. The local `.env` hash is unchanged. The qualification workspace's
 synthetic records and home were retained. `npm run verify:quick` passed on the
 final task source/report with 907 passed, 39 normal skips, zero failures.
+
+
+## Main-Chrome UI requalification and login usability, 2026-09-20
+
+The user reauthenticated main Chrome and authorized fixing regressions. This
+run reused only the dedicated qualification workspace and the existing local
+provider configuration. It also delivered the separately requested login
+usability change in its own branch; no credentials or database rows were
+copied between stacks.
+
+### Additional Desktop regression fixed
+
+After the first successful native Desktop response, Hermes resolves the
+provider label from `custom` to the configured custom-provider name. Our old
+menu filter depended on the literal `custom`, so unsupported effort choices
+reappeared. Commit `f3137cf17d3841e77290deb831a748c5e3d46216` keys the filter to
+the exact governed Lite/Balanced/Pro model aliases instead. Control still
+authorizes effort and routing; this is a UI compatibility fix, not an
+alternative security boundary. The contract test checks this label-independent
+filter. It changes no shared agent adapter or broker implementation.
+
+The rebuilt workspace image is
+`sha256:c93b8b11ded78914578db0ff0766e0aaf9badb4c47d4dce2b81950852df945d3`.
+`npm run image:workspace` and `npm run verify:quick` passed (907 passed,
+39 normal skips, zero failures). The first installed-image qualifier invocation
+failed its failed-tool SSE assertion. A bounded synthetic-response diagnostic
+was added, then the diagnostic rerun and three consecutive complete reruns
+passed. The initial failure did not reproduce; its cause is not established.
+It is not being described as a separately diagnosed product fix.
+
+### Actual browser observations
+
+| Surface | Observation | Result and limit |
+| --- | --- | --- |
+| Web Chat Low/Medium/High | Terminal tools, final answers, and completed Activity records | Passed on the preceding `87f422...` image, whose Python integration is unchanged in the final image |
+| Web Chat resume/concurrency | Medium resumed; Low and High conversations overlapped, keeping distinct effort and signed-binding provenance | Passed bounded live smoke |
+| Web Chat Auto | Both the earlier fixed image and final `c93b8b...` image completed real tool turns; ledger resolves Auto to organization maximum High | Passed; final-image turn overlapped native Desktop Low |
+| Native Desktop Low/Medium/High | Actual Electron UI selections, terminal tools and correct final answers; saved session reopened and resumed on the final image | Passed bounded UI smoke; same-session effort changes are supplementary, not substitutes for separate-conversation qualification records |
+| Native Desktop route changes | UI-selected Lite and Pro reached Luna and Sol respectively; Balanced reached Terra | Passed and verified against actual usage admissions |
+| Native Desktop effort menu | Only Low/Medium/High after saved-session resume and completed turns with the named custom provider | New menu regression fixed and visually verified |
+| Native approval path | A harmless Python command completed through smart approval without hanging | Live auxiliary/approved path passed; human-required blocked fallback is fixture-tested, not established by this live prompt |
+| API/Desktop coexistence | Web Chat Auto completed while Desktop was running; API health remained HTTP 200 | Previous lifecycle failure did not recur |
+
+The bounded UI batch contains 46 successful provider admissions, zero explicit
+effort mismatches, and nine completed Web Chat turns. All Web Chat admissions
+have `explicit_signed` provenance. Provider-call latency ranges from 1,050 to
+4,897 ms; this is not full-turn latency or a comparative benchmark. Thirty-eight
+calls have estimated costs and eight remain unpriced. No provider-confirmed
+cost is claimed.
+
+Product transcript part types were text, progress and terminal; Activity
+contains tool, plan, progress and terminal records. All inspected reasoning
+columns were empty across 91 CLI/API and 56 Desktop messages in the synthetic
+home. Twelve native log files contained no nonempty structured reasoning or
+think/analysis-tag markers. These bounded checks do not establish absence of
+all unlabelled content across every retained surface. No product artifacts were
+created in this batch. Hermes Desktop's automatic self-improvement did create a
+native skill after repeated synthetic arithmetic turns. A bounded scan of all
+621 native skill files, including that generated file, found no structured or
+tagged reasoning markers; this remains a marker-based inspection, not proof
+against every possible unlabelled content format.
+
+Credential-free admission IDs, usage units, terminal states and preservation
+checks are retained in the local worktree's ignored
+`.artifacts/hermes-ui-requalification-20260920/` directory. The live mapping
+remains `2db28c83-9d04-48fd-9795-135542162daa` throughout this run.
+
+### Login change delivered independently
+
+Commit `7a1c7dc34786b3cbafc4c7b9787500ba902b112d` on
+`mike/login-form-usability` makes Enter submit the active sign-in/account form,
+including company SSO, while retaining browser validation and preventing
+submission during an in-progress action. Password inputs have accessible
+Show/Hide eye buttons. Visibility resets when switching account-form modes;
+toggling visibility does not submit the form. Account-security password fields
+use the same component. Authentication requirements are unchanged.
+
+Validation:
+
+- `CHOKIDAR_USEPOLLING=1 npm run test:e2e -- tests/e2e/customer-authentication.spec.ts tests/e2e/customer-invitation.spec.ts`: 29 passed.
+- `CHOKIDAR_USEPOLLING=1 npm run test:customer-auth:e2e`: one real Better Auth/passkey fixture passed.
+- Login branch `npm run verify:quick`: 905 passed, 39 normal skips, zero failures.
+- Combined local source `npm run verify:quick`: 907 passed, 39 normal skips, zero failures.
+- The password-visibility screenshot was inspected. The initial non-polling
+  browser invocation hit the host's file-watcher limit; polling resolved it.
+  Label-selector ambiguities introduced by the accessible eye button were
+  fixed before the final passing browser runs.
+
+No schema/migration or deployment-profile changes; `verify:db` was not required.
+
+### Current local state and remaining acceptance
+
+Local source is `80ab30f906c8f2ff5ccc2acd84c97715b1d9d323`, combining temporary
+candidate registrations, Hermes fixes and the login change. Control image
+`sha256:9d44adbe8212b62b15cde9818cc53253ccf6f4561cdee89d25b6d73e0c6a0dd9`
+is deployed on 4174. The dedicated test sandbox is healthy on `c93b8b...`, with
+its original home volume. The previous Control/workspace images remain
+available. The ordinary local workspace tag was restored to original
+`sha256:da90f915fa05df4f2a920afa695a363ef3a53169564f0dc94ec2bc85a27c1659`
+after testing; the running test container retains the candidate. A future
+candidate restart must explicitly stage the retained candidate tag
+`lemmacomputer/workspace:hermes-ui-candidate-cbf2f9ac06-20260920` again.
+
+All seven pre-existing sandbox/egress containers and both PostgreSQL containers
+retain their original IDs, start times and volume identities. The local `.env`
+hash is unchanged. No unrelated workspace was restarted.
+
+Publishing routing, even identical assignments, invokes
+`reconcileTenantWorkspaceRoutePolicies` and restarts every ready/open workspace.
+The live revoke/alter-route check therefore needs an interruption decision for
+the other local workspaces. That specific confirmation was requested; no route
+publication occurred during this run. Remaining work is that live denial gate,
+complete retained-surface/approval evidence, and strict commit-bound records
+including the required separate-conversation observations. The validator has
+not been run on an incomplete record. The task registrations stay discovery.
+No main merge, remote push, release tag or demo deployment occurred.
