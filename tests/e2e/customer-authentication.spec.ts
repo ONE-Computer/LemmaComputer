@@ -412,8 +412,10 @@ test("an authenticated customer explicitly selects an active organization before
         account: { id: "11111111-1111-4111-8111-111111111111" },
         user: { id: "11111111-1111-4111-8111-111111111111", name: "Alex Morgan", email: "alex@example.test" },
         memberships: [
-          { membershipId: activeMembershipId, organizationId: "organization-1", organizationDisplayName: "Example Organization", status: "active", role: "member" },
-          { membershipId: "44444444-4444-4444-8444-444444444444", organizationId: "organization-2", organizationDisplayName: "Suspended Organization", status: "suspended", role: "member" },
+          { membershipId: activeMembershipId, organizationId: "organization-1", organizationDisplayName: "Example Organization", organizationStatus: "active", status: "active", role: "member" },
+          { membershipId: "44444444-4444-4444-8444-444444444444", organizationId: "organization-2", organizationDisplayName: "Suspended Organization", organizationStatus: "suspended", status: "active", role: "member" },
+          { membershipId: "55555555-5555-4555-8555-555555555555", organizationId: "organization-3", organizationDisplayName: "Closed Organization", organizationStatus: "closed", status: "active", role: "owner" },
+          { membershipId: "66666666-6666-4666-8666-666666666666", organizationId: "organization-4", organizationDisplayName: "Suspended Membership", organizationStatus: "active", status: "suspended", role: "member" },
         ],
       }),
     });
@@ -425,10 +427,44 @@ test("an authenticated customer explicitly selects an active organization before
   await expect(page.getByText("alex@example.test")).toBeVisible();
   await expect(page.getByRole("button", { name: /Example Organization/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /Suspended Organization/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Suspended Organization/ })).toContainText("suspended");
+  await expect(page.getByRole("button", { name: /Closed Organization/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Closed Organization/ })).toContainText("closed");
+  await expect(page.getByRole("button", { name: /Suspended Membership/ })).toBeDisabled();
+  expect(selectedBody).toBeNull();
   await page.getByRole("button", { name: /Example Organization/ }).click();
   await expect(page.getByRole("button", { name: /Alex Morgan/ })).toBeVisible();
   expect(selectedBody).toEqual({ membershipId: activeMembershipId });
 });
+
+for (const organizationStatus of ["closed", "suspended", undefined]) {
+  test(`an unavailable personal organization is not automatically selected (${organizationStatus ?? "missing status"})`, async ({ page }) => {
+    let selectionRequests = 0;
+    await page.unroute("**/api/v1/auth/product-session");
+    await page.route("**/api/v1/auth/product-session", async (route) => {
+      if (route.request().method() === "PUT") selectionRequests += 1;
+      await route.fulfill({
+        status: 200,
+        json: {
+          status: "membership-required",
+          user: { email: "alex@example.test" },
+          personalTenantAvailable: true,
+          memberships: [{
+            membershipId: "33333333-3333-4333-8333-333333333333",
+            organizationDisplayName: "Alex's personal workspace",
+            tenantKind: "personal", organizationStatus, status: "active", role: "owner",
+          }],
+        },
+      });
+    });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Choose an organization" })).toBeVisible();
+    const membership = page.getByRole("button", { name: /Alex's personal workspace/ });
+    await expect(membership).toBeDisabled();
+    await expect(membership).toContainText(organizationStatus ?? "Unavailable");
+    expect(selectionRequests).toBe(0);
+  });
+}
 
 test("a verified customer with no memberships creates an organization and enters it as owner", async ({ page }) => {
   let created = false;

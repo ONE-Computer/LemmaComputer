@@ -1544,6 +1544,7 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
   const personalIdempotencyKey = useRef(crypto.randomUUID());
   const automaticSelectionStarted = useRef("");
   const memberships = customerSession?.memberships ?? [];
+  const canSelectMembership = (membership) => membership.status === "active" && membership.organizationStatus === "active";
   const selectMembership = async (membershipId) => {
     setBusyMembershipId(membershipId);
     setSelectionError("");
@@ -1567,7 +1568,7 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
       setBusyMembershipId("");
     }
   };
-  const automaticMembership = memberships.length === 1 && memberships[0]?.tenantKind === "personal"
+  const automaticMembership = memberships.length === 1 && memberships[0]?.tenantKind === "personal" && canSelectMembership(memberships[0])
     ? memberships[0]
     : null;
   const provisionPersonalTenant = async () => {
@@ -1610,11 +1611,11 @@ function OrganizationSelectionScreen({ customerSession, error, onSelected, onSig
           {memberships.map((membership) => <button
             key={membership.membershipId}
             type="button"
-            disabled={membership.status !== "active" || Boolean(busyMembershipId)}
+            disabled={!canSelectMembership(membership) || Boolean(busyMembershipId)}
             onClick={() => selectMembership(membership.membershipId)}
           >
             <span><strong>{membership.organizationDisplayName}</strong><small>{membership.role}</small></span>
-            <span>{busyMembershipId === membership.membershipId ? "Opening…" : membership.status}</span>
+            <span>{busyMembershipId === membership.membershipId ? "Opening…" : membership.organizationStatus === "active" ? membership.status : membership.organizationStatus ?? "Unavailable"}</span>
           </button>)}
         </div>
         : <form className="signin-form organization-creation-form" onSubmit={createOrganization}>

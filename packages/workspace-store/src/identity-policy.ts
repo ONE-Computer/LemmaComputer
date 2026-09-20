@@ -307,6 +307,7 @@ export type CustomerProductMembership = {
   membershipId: string;
   organizationId: string;
   organizationDisplayName: string;
+  organizationStatus: "active" | "suspended" | "closed";
   tenantKind: TenantKind;
   userId: string;
   status: OrganizationMembershipStatus;
@@ -1260,6 +1261,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
     const result = await this.pool.query(
       `SELECT membership.id AS membership_id,membership.organization_id,
          organization.display_name AS organization_display_name,
+         organization.status AS organization_status,
          tenant.kind AS tenant_kind,membership.subject_user_id AS user_id,
          membership.status,membership.role
        FROM organization_memberships membership
@@ -1273,6 +1275,7 @@ export class PostgresIdentityPolicyStore implements IdentityPolicyStore, Custome
       membershipId: String(row.membership_id),
       organizationId: String(row.organization_id),
       organizationDisplayName: String(row.organization_display_name),
+      organizationStatus: z.enum(["active", "suspended", "closed"]).parse(row.organization_status),
       tenantKind: tenantKindSchema.parse(row.tenant_kind),
       userId: String(row.user_id),
       status: String(row.status) as OrganizationMembershipStatus,

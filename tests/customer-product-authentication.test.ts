@@ -79,6 +79,7 @@ const fixture = () => {
       membershipId,
       organizationId: "organization-1",
       organizationDisplayName: "Example Organization",
+      organizationStatus: "active",
       tenantKind: "organization",
       userId: "tenant-user-1",
       status: "active",

@@ -634,6 +634,7 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     });
 
     assert.equal((await identity.getSession(tokenHash(sessionToken), now))?.tenantId, tenantId);
+    assert.equal((await identity.listCustomerMemberships(account.rows[0].id))[0]?.organizationStatus, "active");
     assert.equal(await workspaces.authorizeWorkspaceAccess({ tenantId, subjectId: userId, audience: "lemmacomputer-control", workspaceId, accessGeneration: 1 }), true);
     const [raceCreate, raceSuspend] = await Promise.allSettled([
       workspaces.createOrGet(
@@ -676,6 +677,8 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
     const initialCleanup = (await store.listTenantCleanupJobs()).filter((job) => job.tenantId === tenantId && job.workspaceId === workspaceId);
     assert.equal(initialCleanup.length, 1);
     assert.equal(initialCleanup[0]!.action, "suspend");
+    assert.equal((await identity.listCustomerMemberships(account.rows[0].id))[0]?.organizationStatus, "suspended");
+    assert.equal((await identity.listCustomerMemberships(account.rows[0].id))[0]?.status, "active", "membership and organization status remain distinct");
     await store.updateTenantLifecycle(administratorSession, {
       tenantId,
       lifecycleState: "suspended",
@@ -762,6 +765,11 @@ test("suspended and closed tenants revoke customer sessions and invalidate activ
       now: new Date("2026-08-09T07:09:00.000Z"),
     });
     assert.equal(await identity.getSession(tokenHash(`replacement-${suffix}`), new Date("2026-08-09T07:09:30.000Z")), null);
+    assert.equal((await identity.listCustomerMemberships(account.rows[0].id))[0]?.organizationStatus, "closed");
+    await assert.rejects(() => identity.selectCustomerProductSession({
+      authenticationSessionId: randomUUID(), accountUserId: account.rows[0].id,
+      membershipId: membership.rows[0].id, expiresAt: new Date("2026-08-10T07:00:00.000Z"), now,
+    }), { code: "MEMBERSHIP_NOT_ACTIVE" });
     workspace = await pool.query("SELECT state,failure_code,access_generation FROM workspaces WHERE id=$1", [workspaceId]);
     assert.deepEqual(workspace.rows[0], { state: "stopping", failure_code: "TENANT_CLOSED", access_generation: 3 }, "suspend to close reuses the fenced generation");
     const closeClaims = (await store.claimTenantCleanupJobs({ limit: 100, now: new Date("2026-08-09T07:09:00.000Z") })).filter((job) => job.tenantId === tenantId);
