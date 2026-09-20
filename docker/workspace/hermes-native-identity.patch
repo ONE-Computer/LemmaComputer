@@ -1,0 +1,12 @@
+--- a/agent/transports/chat_completions.py
++++ b/agent/transports/chat_completions.py
+@@ -301,7 +301,8 @@
+         api_kwargs, messages=sanitized, tools=api_kwargs.get("tools"), supports_prompt_cache_key=supports_prompt_cache_key,
+         session_id=params.get("session_id"), cache_scope_id=params.get("cache_scope_id"),
+     )
+-    return api_kwargs
++    from lemmacomputer_hermes_mcp_identity import model_request_overrides
++    return model_request_overrides(api_kwargs)
+ 
+ 
+ def _sanitize_message(msg: Any, strip_extra_content: bool) -> dict | None:

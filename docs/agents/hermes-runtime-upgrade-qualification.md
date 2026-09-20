@@ -244,3 +244,12 @@ All installed-source checks above passed. `npm run verify:quick` passed with
 907 passed, 39 normal skips, zero failures. The rebuilt image and credentialed
 live requalification are still required; these fixture results do not promote
 any runtime registration.
+
+Native main-model requests also now attach their registered process identity at
+Hermes' final Chat Completions kwargs seam. This survives model switching and
+avoids relying on the broker's single-active-process inference when CLI
+sessions overlap. The helper still replaces reserved headers with the current
+API turn context when present. The real AIAgent HTTP smoke verifies both API
+binding transport and native identity without caller-supplied overrides.
+This additional patch is installed after dependency layers, allowing its
+rebuild to reuse the desktop/runtime installation.

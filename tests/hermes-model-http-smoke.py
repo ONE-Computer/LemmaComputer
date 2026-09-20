@@ -40,19 +40,26 @@ with tempfile.TemporaryDirectory(prefix='hermes-real-agent-') as home:
     identity = '11111111-1111-4111-8111-111111111111'
     binding = 'fixture' + 'a'*32 + '.signature'
     try:
-        with bind_turn_context(TurnContext(binding,identity)):
-            agent = AIAgent(base_url=f'http://127.0.0.1:{server.server_port}/v1',api_key='fixture',provider='custom',
-                api_mode='chat_completions',model='lemmacomputer-balanced',max_iterations=2,enabled_toolsets=[],
-                skip_memory=True,skip_background_review=True,skip_context_files=True,quiet_mode=True,
-                reasoning_config={'enabled':False},request_overrides=model_request_overrides(None))
-            result = agent.run_conversation('Return the fixture response.')
-        assert result.get('final_response') == 'Fixture completed.', list(result.keys())
-        assert captured
-        for captured_headers, _ in captured:
-            headers = {k.lower():v for k,v in captured_headers.items()}
-            assert headers.get('x-lemmacomputer-ai-task-binding') == binding
-            assert headers.get('x-lemmacomputer-agent-instance-id') == identity
-        print(json.dumps({'realAIAgent':True,'syntheticProvider':True,'requests':len(captured),'governedHeadersReceived':True}))
-        agent.close()
+        for native in (False, True):
+            expected_identity = '22222222-2222-4222-8222-222222222222' if native else identity
+            context = None if native else TurnContext(binding, identity)
+            if native:
+                os.environ['LEMMACOMPUTER_AGENT_INSTANCE_ID'] = expected_identity
+            offset = len(captured)
+            with bind_turn_context(context):
+                agent = AIAgent(base_url=f'http://127.0.0.1:{server.server_port}/v1',api_key='fixture',provider='custom',
+                    api_mode='chat_completions',model='lemmacomputer-balanced',max_iterations=2,enabled_toolsets=[],
+                    skip_memory=True,skip_background_review=True,skip_context_files=True,quiet_mode=True,
+                    reasoning_config={'enabled':False},request_overrides=None)
+                result = agent.run_conversation('Return the fixture response.')
+            assert result.get('final_response') == 'Fixture completed.', list(result.keys())
+            assert len(captured)>offset
+            for captured_headers, _ in captured[offset:]:
+                headers = {k.lower():v for k,v in captured_headers.items()}
+                assert headers.get('x-lemmacomputer-ai-task-binding') == (None if native else binding)
+                assert headers.get('x-lemmacomputer-agent-instance-id') == expected_identity
+            agent.close()
+        print(json.dumps({'realAIAgent':True,'syntheticProvider':True,'requests':len(captured),
+                          'governedHeadersReceived':True,'nativeIdentityExplicit':True}))
     finally:
         server.shutdown()

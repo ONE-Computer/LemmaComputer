@@ -305,6 +305,11 @@ COPY docker/workspace/hermes-desktop.desktop /usr/local/share/lemmacomputer/appl
 COPY docker/workspace/lemmacomputer-crontab /usr/local/bin/lemmacomputer-crontab
 COPY docker/workspace/lemmacomputer-cron-run /usr/local/bin/lemmacomputer-cron-run
 COPY docker/workspace/SCHEDULING.md /usr/local/share/lemmacomputer/SCHEDULING.md
+# Keep this small transport correction after dependency installation for cached rebuilds.
+COPY docker/workspace/hermes-native-identity.patch /tmp/hermes-native-identity.patch
+RUN patch --batch --forward --fuzz=0 -d /opt/lemmacomputer/hermes-agent -p1 < /tmp/hermes-native-identity.patch \
+    && rm /tmp/hermes-native-identity.patch
+
 # The Kasm profile is immutable image content copied into a fresh volume by
 # UID/GID 1000. Normalize it once at build time instead of repairing every
 # persistent-home entry on every workspace start.
