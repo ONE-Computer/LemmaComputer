@@ -1,9 +1,10 @@
 # Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
 
 The first live candidate failed qualification on the user-authorized local 4174
-stack. The regression fixes below are under requalification. The exact new pins
-remain in `discovery` until the complete live gates pass; earlier qualified pins
-retain their original registrations.
+stack. The lifecycle and request-context fixes now pass installed-image checks
+and bounded live CLI/Desktop-backend tests. Final browser and policy-revocation
+gates remain incomplete. The exact new pins remain in `discovery`; earlier
+qualified pins retain their original registrations.
 
 ## Source and installation
 
@@ -241,9 +242,9 @@ New reproducible checks are part of `qualify:hermes-runtime`:
   rejects auxiliary context forwarding to other destinations.
 
 All installed-source checks above passed. `npm run verify:quick` passed with
-907 passed, 39 normal skips, zero failures. The rebuilt image and credentialed
-live requalification are still required; these fixture results do not promote
-any runtime registration.
+907 passed, 39 normal skips, zero failures. The same expanded checks also pass
+inside the rebuilt image below with networking disabled. These fixture results
+do not promote any runtime registration.
 
 Native main-model requests also now attach their registered process identity at
 Hermes' final Chat Completions kwargs seam. This survives model switching and
@@ -253,3 +254,99 @@ API turn context when present. The real AIAgent HTTP smoke verifies both API
 binding transport and native identity without caller-supplied overrides.
 This additional patch is installed after dependency layers, allowing its
 rebuild to reuse the desktop/runtime installation.
+
+## Fixed-image live requalification, 2026-09-20
+
+Implementation commits are `60efa873b5df047ca1f1b3cb172058b2e65fb3be` and
+`9646541a604ed9e96c9f5f33b285537c4205cf57`. The tested workspace image is
+`sha256:87f422def86572e329d0375576d0de1c259fab876e729ff11a2a5756d62239fc`.
+The local stack temporarily staged the candidate registrations in `a336232`
+and the native identity fix in `291609b`; the Control image was
+`sha256:4ab8f2dd70eb8aa5da2b4ab5fd758bfdb5a70cae8c60ab0d4d9625f3ad5d56ba`.
+The task branch retains discovery registrations throughout.
+
+The expanded image qualifier passed using the installed Hermes Python and
+`docker run --network none`, including real API/Desktop process coexistence,
+real SDK auxiliary requests, concurrent API context isolation, actual MCP 2
+transport calls, failed tool events, and native model identity. The repository
+gate passed again after the final code change: 907 passed, 39 normal skips,
+zero failures. No schema, migration, deployment-profile, or shared broker
+implementation changed. No Web source changed.
+
+Live tests used only the dedicated synthetic workspace
+`aecaaa2e-26b5-4403-bb01-ce907ed1e1e5` on the authorized 4174 stack:
+
+| Check | Observation | Scope |
+| --- | --- | --- |
+| CLI Low/Lite, Medium/Balanced, High/Pro | Terminal tools and expected answers completed; requested/resolved effort matched | Real provider smoke passed |
+| CLI concurrency and resume | Low/High overlapped with distinct registered process identities; Medium resumed the same stored session successfully | Passed bounded smoke |
+| Actual Desktop startup alongside API | Electron started its real backend; original API PID 98 stayed alive and healthy throughout all native tests; sandbox did not restart | Original lifecycle blocker fixed in live image |
+| Desktop backend Low/Lite and High/Pro | Concurrent JSON-RPC sessions streamed text and completed terminal tools with expected answers | Backend protocol smoke passed; not a UI test |
+| Desktop backend Medium/Balanced | Tool returned the correct result, but the first final sentence gave the wrong number; resumed session completed a new tool turn with the expected answer | Route/tool transport and resume passed; initial answer correctness failed |
+| Auxiliary calls | Live title requests completed without the earlier HTTP 400; ledger records successful auxiliary admissions | Bounded native auxiliary smoke passed; Web Chat auxiliary live gate still pending |
+
+The Desktop checks used its documented loopback bootstrap and WebSocket
+session API. They did not extract browser credentials or bypass application
+login. Chrome's existing 4174 tab remained signed out after reload, so this
+fixed image has **not** passed actual Desktop UI interactions or Web Chat
+Low/Medium/High/Auto, native-approval projection, and resume/concurrency gates.
+
+All 32 recorded provider admissions completed successfully, with zero
+requested/resolved effort mismatches. Explicit levels reached the existing
+Lite/Luna, Balanced/Terra, and Pro/Sol mapping. Native auxiliary requests may
+have no selected effort; they are not counted as explicit-level proofs.
+Provider-call latency ranged from 1,152 to 11,932 ms, not full-turn latency or
+an effort benchmark. Twenty-three calls were estimated/priced and nine were
+unpriced/unknown; none is claimed as provider-confirmed cost.
+
+No raw reasoning callback or final reasoning field was observed in the
+corrected Desktop protocol checks. All inspected reasoning-column lengths
+were zero across the five new Desktop sessions, including resume. The first
+harness incorrectly counted upstream `thinking.delta` spinner/status events
+as reasoning; source inspection distinguishes them from `reasoning.delta`.
+Upstream also names ordinary assistant-content progress `reasoning.available`.
+This bounded observation does not prove suppression across all retained logs,
+artifacts, product Activity, or other provider routes.
+
+The CLI harness initially missed the upstream `session_id:` label; extracting
+the actual stored ID and resuming it succeeded. Neither harness issue changed
+the product. The Medium Desktop answer discrepancy is retained as an observed
+model-output failure, not silently converted into a passing accuracy result.
+The transcript contains the correct terminal result; routing and tools did not
+fail in that turn. The cause of the incorrect final sentence is not established.
+
+Credential-free IDs, usage, terminal states, field-length totals, and
+preservation checks are retained in the ignored
+`.artifacts/hermes-requalification-20260920/` directory. No signed bindings,
+provider credentials, prompts, responses, or raw reasoning were added to the
+committed report or bounded JSON evidence.
+
+### Remaining acceptance gates
+
+- Reauthenticate the existing main-Chrome 4174 tab, then run the actual Web
+  Chat and native Desktop UI flows against this exact candidate image.
+- Verify Web Chat Auto resolution and native-approval failure projection live.
+- Complete live stale-route/policy denial without modifying unrelated
+  workspaces, and check hidden-reasoning suppression across retained surfaces.
+- Produce and validate complete, commit-bound qualification records before
+  promoting either pin. Existing fixtures are not substitutes for these gates.
+
+No passing strict evidence record, runtime promotion, merge, push, release tag,
+or demo deployment is claimed. This task has fixed and tested the identified
+integration regressions; release acceptance remains incomplete.
+
+### Local stack restored after the bounded run
+
+The temporary staging commits were explicitly reverted; local source commit
+`9ee82d9398666960119003e4054a37253653cd63` has the exact original baseline tree.
+The retained original Control and workspace images from the earlier rollback
+were restored with `docker compose up -d --no-build --wait --wait-timeout 300`.
+The qualification sandbox recovered on the original workspace image and is
+healthy, retaining its existing home volume. The candidate image remains
+available under the task worktree's image tag for the next qualification run.
+
+Final inspection confirms unchanged IDs, start times, and volume identities
+for all seven pre-existing sandbox/egress containers and both PostgreSQL
+containers. The local `.env` hash is unchanged. The qualification workspace's
+synthetic records and home were retained. `npm run verify:quick` passed on the
+final task source/report with 907 passed, 39 normal skips, zero failures.
