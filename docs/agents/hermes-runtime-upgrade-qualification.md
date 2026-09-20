@@ -469,3 +469,52 @@ complete retained-surface/approval evidence, and strict commit-bound records
 including the required separate-conversation observations. The validator has
 not been run on an incomplete record. The task registrations stay discovery.
 No main merge, remote push, release tag or demo deployment occurred.
+
+## User-authorized workspace cleanup and CP upgrade, 2026-09-20
+
+The user requested deletion of every workspace except **CP Workspace**, then
+explicitly included the four workspaces in other local test organizations.
+Seven live/stopped workspace records were deleted: the Hermes and Codex
+qualification workspaces, Issue 85 Lite Traces, and four older test workspaces.
+The three METECH workspaces used the signed-in product deletion flow. The four
+other test-organization workspaces used an exact-ID local maintenance operation
+through the installed store, controller and gateway lifecycle interfaces:
+claim stop, revoke access and gateway grants, destroy runtime, purge home,
+end agent instances, and tombstone with `contentDisposition=preserve`.
+No raw SQL deletion, organization closure, provider removal or database-volume
+cleanup was used. Durable chats/artifacts were retained separately from the
+removed workspace homes. A final database read found only CP undeleted; Docker
+found only CP's sandbox/egress/relay and its single workspace-home volume.
+
+CP Workspace `a447eeeb-6bd2-43b0-90a3-f545bb67b634` had no queued/running Chat
+turns before its restart. Its SQLite database was consistently backed up to
+`/home/kasm-user/.local/state/lemmacomputer/hermes-upgrade-20260920/hermes-state-before.db`
+inside its existing home. The backup integrity check passed. The source
+contained 703 messages.
+
+The tested `c93b8b...` workspace image is now the local default, and CP was
+restarted through the product onto that exact image. Its original volume
+`lemmacomputer-cbf2f9ac06-workspace-home-a447eeeb-6bd2-43b0-90a3-f545bb67b634-g1`
+was retained. Installed Hermes CLI is `0.21.3`, Python `3.13.15`, SQLite
+`3.53.1`; the Desktop installation stamp retains upstream commit
+`345cd2b057a452236de401d3534b8502a7465e8d`. CP's existing agent assignment is
+CLI only; this operation did not add Desktop to its selected agents.
+
+Post-upgrade API health returned 200 and SQLite integrity passed. All 703
+original messages retained matching IDs, session IDs, roles and content.
+A real browser Chat turn in conversation
+`a4916708-9289-4dc3-b9c2-51a0b1e3361b` completed a terminal calculation with
+the correct answer. All three associated provider admissions succeeded with
+Balanced/Terra, Medium requested/resolved, and `explicit_signed` provenance.
+The UI still exposes Auto/Low/Medium/High. This verifies the CP upgrade; it is
+not a substitute for full runtime qualification.
+
+No route mapping was republished in this operation. The remaining acceptance
+work is the live stale-route denial test, live human-required approval fallback,
+complete retained-surface checks and the required final-build conversation
+observations, followed by strict commit-bound evidence validation and runtime
+promotion. With the other workspaces removed, route publication would now
+interrupt only CP. It has not been performed or claimed as passed. Temporary
+local registrations remain in Control; task-source registrations remain
+`discovery`. No schema, application-code, main-branch, remote or demo change
+was made during this cleanup/CP-upgrade operation.
