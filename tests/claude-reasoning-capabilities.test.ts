@@ -118,13 +118,11 @@ test("managed OpenAI reasoning routes use the qualified Responses transport", ()
   }
 });
 
-test("local Hermes qualification candidates match only the staged exact pins", () => {
+test("new Hermes pins remain discovery until credentialed qualification passes", () => {
   for (const [agentCatalogId, clientVersion] of [["hermes-claw", "0.21.3"], ["hermes-desktop", "0.17.2"]]) {
     const input = { agentCatalogId, clientVersion };
-    assert.equal(agentReasoningAdapterReview(input)?.reviewStatus, "qualified");
-    assert.equal(qualifiedAgentReasoningAdapter(input)?.qualificationId,
-      `${agentCatalogId}-${clientVersion}-governed-effort-candidate-2026-09-20`);
-    assert.equal(qualifiedAgentReasoningAdapter({ ...input, clientVersion: `${clientVersion}-unreviewed` }), null);
+    assert.equal(agentReasoningAdapterReview(input)?.reviewStatus, "discovery");
+    assert.equal(qualifiedAgentReasoningAdapter(input), null);
   }
 });
 

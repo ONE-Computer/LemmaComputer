@@ -1,11 +1,10 @@
 # Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
 
-This task branch temporarily promotes the exact new runtime registrations for
-the user-authorized live qualification on the existing local 4174 stack.
-They are NOT evidence of a completed live qualification. Do not integrate or
-release this candidate until the gates in reasoning-adapter-qualification.md
-pass. Revert to discovery if the live qualification fails or is left incomplete.
-The earlier qualified pins remain registered; their evidence is not widened.
+The live candidate failed qualification on the user-authorized local 4174 stack.
+The exact new pins are back in `discovery`; they must not be released or merged
+as a completed upgrade. Starting Desktop kills the separately managed Hermes
+API gateway, making Web Chat fail and triggering workspace recovery. Earlier
+qualified pins retain their original registrations.
 
 ## Source and installation
 
@@ -115,14 +114,99 @@ of the shared adapter.
   upstream commit above. Desktop remained running for 20 seconds in a
   disposable container with a ready Xvnc display. This is launch evidence,
   not visual or credentialed Desktop acceptance.
-- No running local service, provider credential, existing workspace home,
-  database, or `.env` was replaced. No deployment-profile behavior changed.
+- The credentialed run below temporarily replaced the local application image
+  and the default image for new workspaces. Existing workspace containers and
+  homes remained on their original image. No provider credentials, `.env`, or
+  database volumes were copied or replaced.
 
-Credentialed CLI/Desktop/product Chat runs at Low/Medium/High, governed tools,
-resume/concurrency, stale-policy denial, usage evidence, and hidden-reasoning
-checks remain outstanding. The local stack at `http://localhost:4174` is the
-authorized live target; it does not require provider credentials to be copied
-into the new worktree. Browser access was blocked by an open Chrome extension
-panel. No commit-bound live qualification record or release promotion has
-been produced. This candidate is not eligible for integration as the completed
-upgrade.
+## Credentialed local run and rejection, 2026-09-20
+
+The user explicitly authorized the existing `http://localhost:4174` stack and
+signed-in main Chrome profile. Candidate source was
+`be0f1cee7c547bf0fa53768f18a8612da9a1f850` in `local-stateful-test`, with the same
+source tree as qualification commit `2126d1a0512feb6a573d7e1b29209549a4d657b1`.
+The workspace image was the exact `c8df108...` content ID above. A new restricted
+workspace, **Hermes 0 21 3 Qualification**, held only synthetic arithmetic tests.
+
+| Surface | Observation | Result |
+| --- | --- | --- |
+| Web Chat Low / Lite | Three admitted calls, Luna, Low requested/resolved, terminal tool and final answer | Passed bounded smoke |
+| Web Chat Medium / Balanced | Five admitted calls across initial/resumed turns, Terra, Medium requested/resolved | Passed bounded smoke and resume |
+| Web Chat High / Pro | Two admitted calls, Sol, High requested/resolved, terminal tool and final answer | Passed bounded smoke |
+| Native CLI Low / Lite | Real terminal result and final answer, Low requested/resolved | Passed bounded smoke |
+| Native CLI High / Pro | Real terminal result and final answer, High requested/resolved | Passed bounded smoke |
+| Native Desktop | Opened successfully; model menu has Lite/Balanced/Pro; effort menu has Low/Medium/High | Visual controls passed; inference not qualified |
+| Web Chat Auto | Failed after Desktop startup terminated its API gateway; no inference admission | Failed availability gate; Auto resolution unproven |
+
+The route mapping was `2db28c83-9d04-48fd-9795-135542162daa`, using the separately
+qualified OpenAI Responses effort route. Every admitted Web Chat call carried
+`explicit_signed` task-binding provenance and matched its conversation effort.
+Provider-call latency samples ranged from 1,763 to 4,746 ms; these are not full
+turn latency or comparative effort benchmarks. Ledger units included input,
+output, cache reads, and diagnostic provider reasoning/total tokens. Web Chat
+costs were estimated, not provider-confirmed; unpriced native auxiliary calls
+remain unpriced. Missing units are not treated as zero.
+
+The first Medium prompt used Python `-c`, which correctly encountered a native
+approval gate. A resumed arithmetic-only `expr` command completed without
+changing approval settings. The pending native approval was not actionable in
+Web Chat. Auxiliary title generation and smart-approval requests also returned
+HTTP 400; their routing/context propagation needs investigation. Some native
+auxiliary usage records have no selected effort, so this run does not establish
+that every auxiliary request inherits the conversation selection.
+
+### Blocking lifecycle regression
+
+At 13:49:00 UTC, Desktop's `hermes_cli/web_server.py::_lifespan` called
+`_reap_unsupervised_gateway_orphans()`. The new reaper scans gateway processes
+but excludes PID/lock records only from the Desktop home. Our API gateway lives
+in the separate `.hermes` home and is launched by the container entrypoint,
+not systemd. The reaper sent it SIGTERM. Its log records graceful shutdown of
+port 8652 immediately after Desktop startup. The next Web Chat turn failed.
+The workspace controller subsequently reported `WORKSPACE_HEALTHCHECK_FAILED`
+and recreated only the qualification sandbox at access generation 2, preserving
+its home volume. There was no container OOM.
+
+The fix should remain Hermes-specific: make cleanup respect verified ownership
+of separately managed gateways in other Hermes homes, and add a process-level
+regression test that launches CLI/API and Desktop together. Do not weaken the
+shared broker, route signing, or workspace health checks. Re-run against a new
+immutable image; a runtime-only hot patch would not qualify the release image.
+
+Then qualify auxiliary calls and approval projection, all Desktop effort/tool
+turns, Auto resolution, simultaneous different-effort conversations, stale
+route/policy denial, and hidden-reasoning suppression across retained surfaces.
+These gates remain unpassed. No passing strict qualification record was
+produced; the evidence validator was not run on an incomplete record.
+
+Bounded, credential-free observations were saved outside version control at
+`/tmp/hermes-live-qualification-20260920.json` and retained in the task's ignored
+`.artifacts/hermes-qualification-20260920/` directory. They contain IDs, usage,
+and terminal states, not prompts, responses, tool payloads, or signed bindings.
+
+The candidate promotions were removed after this failure. No main merge,
+remote push, release tag, or demo deployment is part of this qualification.
+
+## Rollback verified
+
+The local stack source was restored to its original tree through explicit
+revert commits (final local commit `7781e66866987e825c55f3c65a54c61c96b92432`).
+Its original Control image `sha256:cb001d593ac88c7ac0bf667f9a9be846433349c7e4e3e36a19f19da524c588a7`
+and workspace image `sha256:da90f915fa05df4f2a920afa695a363ef3a53169564f0dc94ec2bc85a27c1659`
+were restored with `docker compose up -d --no-build --wait --wait-timeout 300`.
+All 14 services became healthy. Existing sandbox/egress containers and both
+PostgreSQL containers retained their IDs, start times and volume identities;
+the local `.env` hash is unchanged.
+
+The new qualification sandbox was stopped and normal workspace recovery
+recreated it using the original workspace image, retaining the same home
+volume. No candidate runtime remains deployed in that sandbox. The synthetic
+chat records and test home remain available for inspection. The main Chrome
+session had returned to the sign-in page before the final Auto retry, so no
+successful Auto result is claimed.
+
+After reverting the candidate registrations to discovery, `npm run verify:quick`
+passed again: 907 passed, 39 normal quick-suite skips, zero failures. The first
+sandboxed invocation could not open the test runner IPC socket; the permitted
+rerun completed. This branch is a rejected qualification candidate with a
+recorded follow-up plan, not a completed Hermes upgrade eligible for release.
