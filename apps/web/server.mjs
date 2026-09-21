@@ -90,7 +90,11 @@ const sendFile = async (request, response, filename, fallback = true) => {
 };
 
 const proxy = (request, response, requestUrl) => {
-  const upstreamUrl = new URL(`${requestUrl.pathname.slice(4) || "/"}${requestUrl.search}`, controlUrl);
+  // Assign the path instead of resolving it: a leading // must never replace
+  // Control's origin and receive the proxy credential or browser cookies.
+  const upstreamUrl = new URL(controlUrl);
+  upstreamUrl.pathname = requestUrl.pathname.slice(4) || "/";
+  upstreamUrl.search = requestUrl.search;
   const transport = upstreamUrl.protocol === "https:" ? https : http;
   const headers = {
     ...request.headers,
