@@ -145,11 +145,11 @@ test("organization administrator invites a person and manages member access", as
     await expect(policyDialog.getByRole("group", { name: "Agents" }).getByText(agent, { exact: true })).toBeVisible();
   }
   await expect(policyDialog.getByRole("group", { name: "Agents" }).getByRole("checkbox")).toHaveCount(4);
-  for (const agent of ["Codex Desktop", "Codex CLI"]) {
-    const planned = policyDialog.locator(".workspace-policy-choice.unavailable").filter({ hasText: agent });
-    await expect(planned).toContainText("Coming soon");
-    await expect(planned.getByRole("checkbox")).toHaveCount(0);
-  }
+  const planned = policyDialog.locator(".workspace-policy-choice.unavailable");
+  await expect(planned).toHaveCount(1);
+  await expect(planned).toContainText("Codex Desktop");
+  await expect(planned).toContainText("Coming soon");
+  await expect(planned.getByRole("checkbox")).toHaveCount(0);
   await policyDialog.locator(".workspace-policy-choice").filter({ hasText: "Claude Desktop" }).getByRole("checkbox").uncheck();
   await policyDialog.getByLabel("Change summary").fill("Use Claude CLI for organization workspaces");
   await policyDialog.getByRole("button", { name: "Save guardrails" }).click();
