@@ -518,3 +518,63 @@ interrupt only CP. It has not been performed or claimed as passed. Temporary
 local registrations remain in Control; task-source registrations remain
 `discovery`. No schema, application-code, main-branch, remote or demo change
 was made during this cleanup/CP-upgrade operation.
+
+## CP final-image qualification continuation, 2026-09-21
+
+The user authorized the remaining validations on the running 4174 stack. CP
+remained healthy on workspace image
+`sha256:c93b8b11ded78914578db0ff0766e0aaf9badb4c47d4dce2b81950852df945d3`.
+Only the qualification report changed after runtime commit
+`f3137cf17d3841e77290deb831a748c5e3d46216`; the workspace-image source tree is
+otherwise identical.
+
+Fresh product-chat observations against CP passed:
+
+| Gate | Bounded result |
+| --- | --- |
+| Low | Conversation `d2e34833-291e-4f27-962b-13ddd301b393` completed a terminal tool and returned `2870`; requested and resolved effort were Low |
+| Medium and resume | Conversation `d4bc921e-67b0-4182-9572-f3770286cf06` completed two terminal-tool turns and returned `4095` then `4466`; both turns retained Medium |
+| High | Conversation `c4334362-bc4a-4006-b569-ce4bc467812a` completed a terminal tool and returned `3795`; requested and resolved effort were High |
+| Auto | Conversation `75770aa9-7ff2-4739-96e0-91c70cdc6db2` completed a terminal tool and returned `4900`; the ledger resolved Auto to the organization maximum High |
+| Concurrency | Low ran from `02:16:41.665Z` to `02:17:17.424Z`; High ran from `02:16:42.065Z` to `02:16:47.255Z`. Distinct conversation, task and usage-attempt IDs retained their requested efforts and `explicit_signed` provenance |
+
+Every observed turn has ordered tool `running` and terminal tool `completed`
+Activity followed by terminal `completed`. The selected final provider attempt
+for each explicit level reports input, output and cache-read units. The provider
+does not report reasoning-token or cache-write units. Costs are rate-card
+estimates rather than provider-confirmed charges.
+
+The live human-required approval fallback also passed. CP was temporarily set
+to Hermes `manual` approval mode through the supported approval command. A
+harmless terminal request failed deterministically in Web Chat with a visible
+explanation that native Hermes approval is unavailable there; the turn itself
+completed and did not hang. The configuration was restored byte-for-byte:
+SHA-256 `553b2064a954cbab2bbdcc15316f3093e1bff3c4aab314ec26bc5a3ecb2a371a`,
+and Hermes reports persistent mode `smart`.
+
+Retained-surface checks found only `text`, `data-progress`, and `data-terminal`
+parts in the four final conversations; Activity contained only plan, tool,
+progress and terminal records. No product artifacts were linked. In CP's native
+Hermes state, `reasoning`, `reasoning_content`, `reasoning_details`, and
+`codex_reasoning_items` are all empty. Nine native log files contained zero
+known structured reasoning markers. Token counts and finish reasons remain
+ordinary metadata, not hidden reasoning content. These are marker- and
+field-based checks and do not prove the absence of arbitrary unlabelled prose.
+
+The bounded external record
+`/tmp/hermes-cli-qualification-20260921.json` passes
+`npm run qualify:reasoning-adapter`. It includes no prompts, responses, tool
+payloads, signed bindings, credentials, or hidden reasoning. The record
+explicitly states that the live route-revocation gate is still missing, so this
+validator pass is a schema and commit-binding check and is not promotion
+evidence.
+
+After the earlier cleanup, a new ready/open **Test Agents** workspace appeared
+in the same tenant. It has no queued or running Chat turn, but its interactive
+workspace remains open. Publishing even an identical route mapping invokes
+tenant-wide workspace-policy reconciliation and restarts both CP and Test
+Agents. No route was republished and Test Agents was not restarted, modified,
+or deleted. The one remaining live gate is route revocation or alteration after
+capability projection, followed by confirmation that stale execution fails
+closed. Hermes CLI `0.21.3` and Desktop `0.17.2` therefore remain discovery and
+are not promoted.
