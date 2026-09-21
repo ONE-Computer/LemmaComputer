@@ -23,7 +23,7 @@
     "@lemmacomputer/workspace-store": "*",
     "ai": "7.0.37",
     "better-auth": "1.6.26",
-    "fastify": "5.10.0",
+    "fastify": "5.12.5",
     "jose": "6.1.3",
     "pg": "8.22.0",
     "web-push": "3.6.7",
