@@ -120,10 +120,14 @@ the exact Claude pin and route record.
 
 ## Hermes adapter
 
-Hermes Agent CLI is pinned to `0.19.0` from upstream tag `v2026.7.20` and Hermes
-Desktop is pinned to `0.17.0`. Source inspection showed that Hermes already had
-model and reasoning settings, but its upstream choices and request lifecycle did
-not directly implement LemmaComputer's governed contract.
+Hermes Agent CLI is currently pinned to `0.21.3` and Hermes Desktop to `0.17.2`.
+Both are discovery registrations while the final live denial gate remains
+incomplete; they must not inherit the historical qualifications for CLI `0.19.0`
+and Desktop `0.17.0`. Source inspection showed that Hermes already had model and
+reasoning settings, but its upstream choices and request lifecycle did not
+directly implement LemmaComputer's governed contract. See
+[Hermes runtime upgrade qualification](hermes-runtime-upgrade-qualification.md)
+for the current evidence and remaining gate.
 
 ### Model and effort presentation
 
@@ -134,7 +138,7 @@ points its custom provider at a root-owned loopback broker and chooses one of
 The Desktop patch in
 [`hermes-desktop-governed-effort.patch`](../../docker/workspace/hermes-desktop-governed-effort.patch)
 narrows upstream Minimal, Low, Medium, High, Extra High, Max, and Ultra choices
-to the qualified product values Low, Medium, and High on LemmaComputer routes.
+to the candidate product values Low, Medium, and High on LemmaComputer routes.
 
 The profile deliberately keeps Hermes's global `reasoning_effort` disabled.
 That does **not** disable governed provider reasoning. It prevents mutable

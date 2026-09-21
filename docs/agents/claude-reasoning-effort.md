@@ -15,18 +15,20 @@ Agent-adapter qualification ID: `claude-cli-2.1.215-governed-effort-adapter-2026
 | Amazon Bedrock | Current Sonnet 4.5 profile | None | Not assumed equivalent to the direct Anthropic effort contract | Unsupported; fail closed |
 | Any other provider or model | Any | None | Unknown | Unsupported; fail closed |
 
-## Qualified agent adapters
+## Current agent adapter pins
 
 | Agent runtime | Pinned version | Product levels | Status |
 | --- | --- | --- | --- |
 | Claude CLI | `2.1.215` | Auto, Low, Medium, High | Qualified for signed, conversation-pinned propagation |
 | Claude Desktop | `1.22209.3` | Low, Medium, High | Native effort intent uses `output_config.effort`; separate exact-version registration and [recovery evidence](claude-desktop-recovery.md) |
-| Hermes Agent CLI | `0.19.0` | Low, Medium, High | Qualified separately under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13`; route capability still intersects independently |
-| Hermes Desktop | `0.17.0` | Low, Medium, High | Qualified separately under `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13`; unsupported upstream levels are hidden on LemmaComputer routes |
+| Hermes Agent CLI | `0.21.3` | None until promotion | Discovery under `hermes-claw-0.21.3-governed-effort-discovery-2026-09-20`; the remaining live denial gate is tracked in [Hermes runtime upgrade qualification](hermes-runtime-upgrade-qualification.md) |
+| Hermes Desktop | `0.17.2` | None until promotion | Discovery under `hermes-desktop-0.17.2-governed-effort-discovery-2026-09-20`; native controls are present, but governed effort remains unavailable until promotion |
 | Codex CLI | `0.154.0` | Low, Medium, High | Staged local candidate; retain only after the Codex-specific credentialed evidence contract passes; see [CLI integration](codex-cli-integration.md) |
 | Any other runtime or version | Any | None | No reviewed registration; fail closed |
 
 `Auto` is a LemmaComputer product setting, not a provider effort value. Control resolves it to the organization maximum (`low`, `medium`, or `high`) before route selection. The protected maximum `max` is deliberately clipped to product `high`; `xhigh` and `max` are not user-selectable in this phase.
+
+Hermes CLI `0.19.0` and Desktop `0.17.0` are historical qualified pins. Their qualification IDs do not extend to the current versions.
 
 This is Auto **thinking effort**, not Auto **model mode**. Employee Web Chat exposes only the explicit `Lite`, `Balanced`, and `Pro` model tiers from #68.
 
@@ -51,4 +53,4 @@ Adding an agent does not add a new Web or Control conditional. Exact runtime pin
 
 Higher effort can increase latency and reasoning-token cost. Changing effort can also invalidate prompt-cache reuse, which is why the phase-0.5 control is stable for the life of a conversation. The Activity panel continues to show only allow-listed summaries and actions, never hidden chain-of-thought.
 
-This record qualifies the documented direct-Anthropic request/response contract, the Claude CLI adapter, and the local gateway behavior. Hermes is qualified by its own exact adapter registrations and separately qualified organization route, not merely because its upstream runtime has a similarly named setting. Codex and any other agent remain unqualified until their own gates pass. This record also does not claim a live Anthropic account smoke test or comparative latency/cost benchmark; those require an explicitly provisioned direct Anthropic route and provider credentials. See the [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md) for the Claude/Hermes implementation comparison and failure lessons.
+This record qualifies the documented direct-Anthropic request/response contract, the Claude CLI adapter, and the local gateway behavior. Each Hermes version is qualified by its own exact adapter registration and a separately qualified organization route, not merely because its upstream runtime has a similarly named setting. The current Hermes pins remain discovery. Codex and any other agent remain unqualified until their own gates pass. This record also does not claim a live Anthropic account smoke test or comparative latency/cost benchmark; those require an explicitly provisioned direct Anthropic route and provider credentials. See the [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md) for the Claude/Hermes implementation comparison and failure lessons.

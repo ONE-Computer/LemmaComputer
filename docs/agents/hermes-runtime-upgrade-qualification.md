@@ -124,8 +124,8 @@ of the shared adapter.
 
 ## Credentialed local run and rejection, 2026-09-20
 
-The user explicitly authorized the existing `http://localhost:4174` stack and
-signed-in main Chrome profile. Candidate source was
+The user explicitly authorized the existing local 4174 stack and signed-in
+main Chrome profile. Candidate source was
 `be0f1cee7c547bf0fa53768f18a8612da9a1f850` in `local-stateful-test`, with the same
 source tree as qualification commit `2126d1a0512feb6a573d7e1b29209549a4d657b1`.
 The workspace image was the exact `c8df108...` content ID above. A new restricted
@@ -182,10 +182,10 @@ route/policy denial, and hidden-reasoning suppression across retained surfaces.
 These gates remain unpassed. No passing strict qualification record was
 produced; the evidence validator was not run on an incomplete record.
 
-Bounded, credential-free observations were saved outside version control at
-`/tmp/hermes-live-qualification-20260920.json` and retained in the task's ignored
-`.artifacts/hermes-qualification-20260920/` directory. They contain IDs, usage,
-and terminal states, not prompts, responses, tool payloads, or signed bindings.
+Bounded, credential-free observations were saved outside version control and
+retained in the task's ignored `.artifacts/hermes-qualification-20260920/`
+directory. They contain IDs, usage, and terminal states, not prompts, responses,
+tool payloads, or signed bindings.
 
 The candidate promotions were removed after this failure. No main merge,
 remote push, release tag, or demo deployment is part of this qualification.
@@ -422,8 +422,8 @@ remains `2db28c83-9d04-48fd-9795-135542162daa` throughout this run.
 
 ### Login change delivered independently
 
-Commit `7a1c7dc34786b3cbafc4c7b9787500ba902b112d` on
-`mike/login-form-usability` makes Enter submit the active sign-in/account form,
+Commit `7a1c7dc34786b3cbafc4c7b9787500ba902b112d` on the dedicated login-form
+usability task branch makes Enter submit the active sign-in/account form,
 including company SSO, while retaining browser validation and preventing
 submission during an in-progress action. Password inputs have accessible
 Show/Hide eye buttons. Visibility resets when switching account-form modes;
@@ -487,10 +487,9 @@ removed workspace homes. A final database read found only CP undeleted; Docker
 found only CP's sandbox/egress/relay and its single workspace-home volume.
 
 CP Workspace `a447eeeb-6bd2-43b0-90a3-f545bb67b634` had no queued/running Chat
-turns before its restart. Its SQLite database was consistently backed up to
-`/home/kasm-user/.local/state/lemmacomputer/hermes-upgrade-20260920/hermes-state-before.db`
-inside its existing home. The backup integrity check passed. The source
-contained 703 messages.
+turns before its restart. Its SQLite database was consistently backed up inside
+the workspace user's existing local-state directory. The backup integrity check
+passed. The source contained 703 messages.
 
 The tested `c93b8b...` workspace image is now the local default, and CP was
 restarted through the product onto that exact image. Its original volume
@@ -561,13 +560,12 @@ known structured reasoning markers. Token counts and finish reasons remain
 ordinary metadata, not hidden reasoning content. These are marker- and
 field-based checks and do not prove the absence of arbitrary unlabelled prose.
 
-The bounded external record
-`/tmp/hermes-cli-qualification-20260921.json` passes
-`npm run qualify:reasoning-adapter`. It includes no prompts, responses, tool
-payloads, signed bindings, credentials, or hidden reasoning. The record
-explicitly states that the live route-revocation gate is still missing, so this
-validator pass is a schema and commit-binding check and is not promotion
-evidence.
+The bounded external record passed `npm run qualify:reasoning-adapter` against
+qualification commit `9223fa877c89b995a5aad126d57955327cd48d05`. It includes
+no prompts, responses, tool payloads, signed bindings, credentials, or hidden
+reasoning. The record explicitly states that the live route-revocation gate is
+still missing, so this validator pass is a schema and historical commit-binding
+check and is not promotion evidence for later review commits.
 
 After the earlier cleanup, a new ready/open **Test Agents** workspace appeared
 in the same tenant. It has no queued or running Chat turn, but its interactive

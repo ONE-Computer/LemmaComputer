@@ -455,6 +455,6 @@ test("governed OneDrive deletion carries the resolved filename into approval met
   assert.match(control, /resourceName: input\.resourceName/);
 });
 
- test("Hermes turn context rejects downgrade and isolates concurrent/resumed requests", async () => {
+test("Hermes turn context rejects downgrade and isolates concurrent/resumed requests", async () => {
   await execFileAsync("python3", [new URL("./hermes-turn-context.py", import.meta.url).pathname]);
 });
