@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { passkey } from "@better-auth/passkey";
 import { LemmaComputerError, type AuthenticationAssurance } from "@lemmacomputer/contracts";
-import type { PlatformOperatorSession, PostgresPlatformOperatorStore } from "@lemmacomputer/workspace-store";
+import type { PostgresPlatformOperatorStore } from "@lemmacomputer/workspace-store";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { fromNodeHeaders } from "better-auth/node";

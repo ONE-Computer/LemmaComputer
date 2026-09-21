@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { approvedBedrockApiKeyModelProfiles, type ProviderModelCatalog, type ProviderModelMetadata } from "@lemmacomputer/contracts";
 import type { FoundryConfiguration, VertexConfiguration, FoundryProviderModelId, VertexProviderModelId } from "@lemmacomputer/contracts";
 import { LemmaComputerError, providerSettingMetadataSchema, type AnthropicProviderModelId, type BedrockApiKeyModelProfileId, type BedrockApiKeyRegion, type GlmProviderModelId, type OpenAiProviderModelId, type ProviderEmissionsRegion, type ProviderModelId } from "@lemmacomputer/contracts";
-import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModelOptions, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
+import { managedProviderDeploymentDescriptors, managedProviderDisplayMetadata, managedProviderForAlias, managedProviderModel, managedProviderModels, managedProviderNames, managedProviderSelectedModelIds, type ManagedProviderConfiguration, type ManagedProviderDeploymentDescriptor, type ManagedProviderModelCapabilities, type ManagedProviderName, type ProviderAdministrationGateway } from "@lemmacomputer/litellm-adapter";
 import type { ProviderLifecycleExpectation, ProviderLifecycleRecord, ProviderSettingRecord, ProviderSettingsStore, SessionPrincipal } from "@lemmacomputer/workspace-store";
 import { modelLimitsSchema } from "@lemmacomputer/contracts";
 

@@ -1,4 +1,4 @@
-import { approvedBedrockApiKeyModelProfiles, dynamicProviderModelIdSchema, providerModelIdSetSchema } from "@lemmacomputer/contracts";
+import { approvedBedrockApiKeyModelProfiles, providerModelIdSetSchema } from "@lemmacomputer/contracts";
 import { foundryConfigurationSchema, vertexConfigurationSchema, foundryProviderModelIdSchema, vertexProviderModelIdSchema } from "@lemmacomputer/contracts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";

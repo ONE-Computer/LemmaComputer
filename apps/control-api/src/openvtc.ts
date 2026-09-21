@@ -131,7 +131,6 @@ export class OpenVtcApprovalCoordinator {
     if (!await this.store.consumeOpenVtcEnrollmentChallenge(identity, challenge.id, challenge.challenge, now)) {
       throw new LemmaComputerError("OPENVTC_ENROLLMENT_CHALLENGE_INVALID", "The enrollment challenge is missing, expired, or already used", 409);
     }
-    const payload = isObject(document) && isObject(document.payload) ? document.payload : {};
     const transportToken = `ocvta_${randomBytes(32).toString("base64url")}`;
     const approver = await this.store.enrollOpenVtcApprover({
       id: randomUUID(),

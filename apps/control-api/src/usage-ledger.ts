@@ -8,7 +8,6 @@ import {
 } from "@lemmacomputer/contracts";
 import {
   AllowUsageAttemptAdmission,
-  type AttemptAdmissionInput,
   type AttemptAdmissionSemanticInput,
   type AttemptBudgetBounds,
   type PostgresUsageLedgerStore,

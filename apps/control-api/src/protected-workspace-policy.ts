@@ -14,7 +14,6 @@ import {
   type SignedProtectedBaselineTemplate,
 } from "@lemmacomputer/contracts";
 import {
-  resolveProtectedBaselinePolicy,
   verifyProtectedBaselineTemplate,
   type VerifiedProtectedBaselineTemplate,
 } from "@lemmacomputer/policy-integrity";

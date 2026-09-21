@@ -272,14 +272,6 @@ export class HttpAgentChatClient implements AgentChatClient {
     }
   }
 
-  private async json(access: AgentChatAccess, path: string, init?: RequestInit) {
-    const response = await this.response(access, path, init);
-    if (response.status === 204) return {};
-    return response.json().catch(() => {
-      throw new LemmaComputerError("CHAT_INVALID_RESPONSE", "The agent returned an invalid response", 502, true);
-    });
-  }
-
   async health(access: AgentChatAccess) {
     await this.response(access, "/health");
   }
