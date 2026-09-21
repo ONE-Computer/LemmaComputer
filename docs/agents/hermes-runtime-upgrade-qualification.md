@@ -1,4 +1,4 @@
-# Hermes 0.21.3 / Desktop 0.17.2 qualification candidate
+# Hermes 0.21.3 / Desktop 0.17.2 qualification
 
 The initial lifecycle, request-context, and Desktop effort-menu regressions are
 fixed. Installed-image checks and credentialed Web Chat, CLI, Desktop-backend,
