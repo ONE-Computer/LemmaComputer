@@ -101,6 +101,8 @@ export const claudeDesktopReasoningAdapterQualificationId = "claude-desktop-1.22
 export const hermesReasoningAdapterDiscoveryId = "hermes-claw-0.19.0-governed-effort-discovery-2026-08-13";
 export const hermesReasoningAdapterQualificationId = "hermes-claw-0.19.0-governed-effort-adapter-2026-08-13";
 export const hermesDesktopReasoningAdapterQualificationId = "hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13";
+export const hermes0213ReasoningAdapterQualificationId = "hermes-claw-0.21.3-governed-effort-adapter-2026-09-21";
+export const hermesDesktop0172ReasoningAdapterQualificationId = "hermes-desktop-0.17.2-governed-effort-adapter-2026-09-21";
 export const codexReasoningAdapterQualificationId = "codex-cli-0.154.0-governed-effort-adapter-2026-09-17";
 
 const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
@@ -131,21 +133,26 @@ const reviewedReasoningRoutes: readonly ReasoningRouteReview[] = Object.freeze([
 ]);
 
 const reviewedAgentReasoningAdapters: readonly AgentReasoningAdapterReview[] = Object.freeze([
-  // Installed-runtime fixtures are not credentialed live evidence. Keep new
-  // exact pins unavailable to ordinary product controls until that gate passes.
-  ...([
-    ["hermes-claw", "0.21.3"],
-    ["hermes-desktop", "0.17.2"],
-  ] as const).map(([agentCatalogId, clientVersion]) => Object.freeze({
-    reviewStatus: "discovery" as const,
-    discoveryId: `${agentCatalogId}-${clientVersion}-governed-effort-discovery-2026-09-20`,
-    blockingEvidence: ["credentialed-cli-desktop-chat-levels-tools-resume-concurrency-and-denial"],
-    agentCatalogId, clientVersion,
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: hermes0213ReasoningAdapterQualificationId,
+    agentCatalogId: "hermes-claw",
+    clientVersion: "0.21.3",
     effortLevels: resolvedReasoningEfforts,
-    conversationPinned: true as const,
-    signedTaskBinding: true as const,
-    providerEffortAuthority: "governed-route" as const,
-  })),
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  }),
+  Object.freeze({
+    reviewStatus: "qualified",
+    qualificationId: hermesDesktop0172ReasoningAdapterQualificationId,
+    agentCatalogId: "hermes-desktop",
+    clientVersion: "0.17.2",
+    effortLevels: resolvedReasoningEfforts,
+    conversationPinned: true,
+    signedTaskBinding: true,
+    providerEffortAuthority: "governed-route",
+  }),
   Object.freeze({
     reviewStatus: "qualified",
     qualificationId: claudeDesktopReasoningAdapterQualificationId,

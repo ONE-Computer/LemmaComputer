@@ -2,10 +2,10 @@
 
 The initial lifecycle, request-context, and Desktop effort-menu regressions are
 fixed. Installed-image checks and credentialed Web Chat, CLI, Desktop-backend,
-and actual Desktop UI smoke tests now pass on the user-authorized 4174 stack.
-Live route revocation, complete retained-surface inspection, and strict
-commit-bound acceptance records remain incomplete. The exact new pins remain
-in `discovery`; earlier qualified pins retain their original registrations.
+actual Desktop UI, retained-surface, and live route-revocation checks pass on
+the user-authorized 4174 stack. The exact CLI and Desktop pins are registered
+as qualified after the final fail-closed gate below; earlier qualified pins
+retain their original registrations.
 The final section below records the current deployed state; earlier rollback
 sections describe completed historical runs.
 
@@ -560,19 +560,55 @@ known structured reasoning markers. Token counts and finish reasons remain
 ordinary metadata, not hidden reasoning content. These are marker- and
 field-based checks and do not prove the absence of arbitrary unlabelled prose.
 
-The bounded external record passed `npm run qualify:reasoning-adapter` against
-qualification commit `9223fa877c89b995a5aad126d57955327cd48d05`. It includes
+The earlier bounded external record passed `npm run qualify:reasoning-adapter`
+against qualification commit `9223fa877c89b995a5aad126d57955327cd48d05`. It includes
 no prompts, responses, tool payloads, signed bindings, credentials, or hidden
 reasoning. The record explicitly states that the live route-revocation gate is
 still missing, so this validator pass is a schema and historical commit-binding
 check and is not promotion evidence for later review commits.
 
 After the earlier cleanup, a new ready/open **Test Agents** workspace appeared
-in the same tenant. It has no queued or running Chat turn, but its interactive
-workspace remains open. Publishing even an identical route mapping invokes
+in the same tenant. It had no queued or running Chat turn, but its interactive
+workspace remained open. Publishing even an identical route mapping invokes
 tenant-wide workspace-policy reconciliation and restarts both CP and Test
-Agents. No route was republished and Test Agents was not restarted, modified,
-or deleted. The one remaining live gate is route revocation or alteration after
-capability projection, followed by confirmation that stale execution fails
-closed. Hermes CLI `0.21.3` and Desktop `0.17.2` therefore remain discovery and
-are not promoted.
+Agents. The next section records the user-authorized interruption and the
+resulting final gate.
+
+## Live stale-route denial and restoration, 2026-09-21
+
+Before the route change, Chat projected CP Workspace with Hermes CLI,
+Balanced, and Auto/Low/Medium/High. Low was selected. Control had no streaming
+Chat run or claimed/running schedule run. The four inspected SQLite databases
+in CP's persistent Hermes home returned `integrity_check=ok`. The primary state
+contained 791 messages and 41 sessions.
+
+The supported Models & routing flow published immutable empty mapping
+`cd361422-e580-457a-af93-e86308bdb6fa`. Both ready/open workspaces stopped as
+their projected route became unavailable. A previously valid CP Balanced/Low
+conversation remained readable, but its composer and Send action were disabled
+and no workspace agent could start. During the revoked interval, Control
+recorded zero routing decisions, zero usage admissions, and zero Chat runs.
+This is the required fail-closed result: the stale projection could not reach
+the provider.
+
+The same three reviewed routes were then republished as immutable mapping
+`0b306487-2e04-4f74-b9b6-4885b0393f54`: Lite/Luna, Balanced/Terra, and Pro/Sol.
+A normalized comparison of provider, model, deployment, pricing record,
+capabilities, approval, evaluation, service class, and currency matched the
+pre-test mapping. CP and Test Agents returned to Ready. CP remained on the same
+volume, all four SQLite integrity checks still passed, and every pre-test table
+count matched, including 791 messages and 41 sessions.
+
+Post-restoration conversation `d1ec8e4d-9a62-4892-aefb-6450e3a2859f`
+completed through Hermes CLI `0.21.3` and returned the requested bounded marker.
+Its immutable evidence records Balanced requested/selected, Low
+requested/resolved, OpenAI `gpt-5.6-terra`, restored mapping
+`0b306487-2e04-4f74-b9b6-4885b0393f54`, explicit signed task provenance, and a
+completed turn. No prompt, response, credential, signed binding, or tool
+payload is retained in this report.
+
+This closes the last live gate. The final bounded CLI and native Desktop
+records are validated outside the repository against the exact promotion
+commit with `npm run qualify:reasoning-adapter`; those records contain only the
+strict identifiers, states, token counts, latency/cost status, and limitations
+allowed by the qualification schema.

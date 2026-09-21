@@ -6,6 +6,8 @@ import {
   claudeReasoningAdapterQualificationId,
   claudeDesktopReasoningAdapterQualificationId,
   codexReasoningAdapterQualificationId,
+  hermes0213ReasoningAdapterQualificationId,
+  hermesDesktop0172ReasoningAdapterQualificationId,
   hermesDesktopReasoningAdapterQualificationId,
   hermesReasoningAdapterQualificationId,
   openAiReasoningRouteQualificationId,
@@ -118,11 +120,20 @@ test("managed OpenAI reasoning routes use the qualified Responses transport", ()
   }
 });
 
-test("new Hermes pins remain discovery until credentialed qualification passes", () => {
-  for (const [agentCatalogId, clientVersion] of [["hermes-claw", "0.21.3"], ["hermes-desktop", "0.17.2"]]) {
-    const input = { agentCatalogId, clientVersion };
-    assert.equal(agentReasoningAdapterReview(input)?.reviewStatus, "discovery");
-    assert.equal(qualifiedAgentReasoningAdapter(input), null);
+test("the credentialed Hermes pins expose their exact qualified adapters", () => {
+  for (const [agentCatalogId, clientVersion, qualificationId] of [
+    ["hermes-claw", "0.21.3", hermes0213ReasoningAdapterQualificationId],
+    ["hermes-desktop", "0.17.2", hermesDesktop0172ReasoningAdapterQualificationId],
+  ] as const) {
+    assert.deepEqual(qualifiedAgentReasoningAdapter({ agentCatalogId, clientVersion }), {
+      qualificationId,
+      agentCatalogId,
+      clientVersion,
+      effortLevels: ["low", "medium", "high"],
+      conversationPinned: true,
+      signedTaskBinding: true,
+      providerEffortAuthority: "governed-route",
+    });
   }
 });
 
