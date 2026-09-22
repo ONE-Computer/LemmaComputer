@@ -6,7 +6,7 @@ import { PostgresToolAuditStore, PostgresWorkspaceStore } from "@lemmacomputer/w
 
 const connectionString = process.env.WORKSPACE_SETTINGS_TEST_DATABASE_URL;
 
-test("PostgreSQL tool audit persists one partitioned terminal, rolls up, redacts, and isolates tenants", {
+(["preserve", "delete"] as const).forEach((contentDisposition) => test(`PostgreSQL tool audit stays immutable and tenant-isolated after workspace deletion (${contentDisposition})`, {
   skip: !connectionString,
 }, async () => {
   const migrationStore = PostgresWorkspaceStore.fromConnectionString(connectionString!);
@@ -192,6 +192,12 @@ test("PostgreSQL tool audit persists one partitioned terminal, rolls up, redacts
       sourceInvocationId: crypto.randomUUID(),
       correlationId: "request-stale",
     });
+    const owner = { tenantId, subjectId, audience: "lemmacomputer-control" as const };
+    assert.equal(await migrationStore.tombstone({ ...owner, tenantId: outsiderTenantId }, workspaceId, contentDisposition), false);
+    assert.equal(await migrationStore.tombstone(owner, workspaceId, contentDisposition), true);
+    assert.equal(await migrationStore.getOwned(owner, workspaceId), null);
+    assert.ok(await store.getPending(tenantId, stale.admission.invocationId));
+    assert.equal((await store.getTerminal(tenantId, terminal.record.invocationId))?.outcome, "succeeded");
     await pool.query(
       `UPDATE tool_audit_pending_admissions SET admitted_at=$3
        WHERE tenant_id=$1 AND invocation_id=$2`,
@@ -199,6 +205,21 @@ test("PostgreSQL tool audit persists one partitioned terminal, rolls up, redacts
     );
     assert.equal(await store.reconcileUnconfirmed(new Date("2026-08-13T01:30:00.000Z"), now), 1);
     assert.equal((await store.getTerminal(tenantId, stale.admission.invocationId))?.outcome, "unconfirmed");
+
+    const retainedQuery = {
+      tenantId,
+      workspaceId,
+      from: "2026-08-13T00:00:00.000Z",
+      to: "2026-08-14T00:00:00.000Z",
+      pageSize: 10,
+      asOf: now,
+      after: null,
+    };
+    const retained = await store.queryTerminal(retainedQuery);
+    assert.equal(retained.total, 3);
+    assert.deepEqual(retained.events.map((event) => event.outcome).sort(), ["denied", "succeeded", "unconfirmed"]);
+    assert.ok(retained.events.every((event) => event.workspaceId === workspaceId && event.agentInstanceId === agentInstanceId));
+    assert.equal((await store.queryTerminal({ ...retainedQuery, tenantId: outsiderTenantId })).total, 0);
 
     const evidence = await pool.query(
       `SELECT tableoid::regclass::text AS partition,target_summary,
@@ -223,4 +244,4 @@ test("PostgreSQL tool audit persists one partitioned terminal, rolls up, redacts
   } finally {
     await Promise.all([store.close(), migrationStore.close(), pool.end()]);
   }
-});
+}));
