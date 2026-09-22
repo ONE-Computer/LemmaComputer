@@ -3390,6 +3390,13 @@ function ToolActivityView({ users, workspaceMembers, operations, onOpenOperation
   })))];
   const memberById = new Map(users.map((user) => [user.userId, user]));
   const workspaceById = new Map(workspaceMembers.flatMap((member) => member.workspaces.map((workspace) => [workspace.id, workspace])));
+  const eventWorkspaceLabel = (event) => {
+    const current = workspaceById.get(event.workspaceId);
+    if (current?.name) return current.name;
+    return event.workspaceDisplayName || event.workspaceGrantId
+      ? workspaceName({ displayName: event.workspaceDisplayName, grantId: event.workspaceGrantId })
+      : `${event.workspaceId.slice(0, 8)}…`;
+  };
 
   const requestPage = useCallback(async (cursor = null, append = false) => {
     setLoading(true);
@@ -3470,11 +3477,11 @@ function ToolActivityView({ users, workspaceMembers, operations, onOpenOperation
       <thead><tr><th>Time</th><th>Member</th><th>Workspace and agent</th><th>Connector and tool</th><th>Decision</th><th>Outcome</th><th>Target</th></tr></thead>
       <tbody>{events.map((event) => {
         const member = memberById.get(event.subjectId);
-        const workspace = workspaceById.get(event.workspaceId);
+        const workspaceLabel = eventWorkspaceLabel(event);
         return <tr key={event.invocationId} className={selectedId === event.invocationId ? "selected" : ""}>
           <td data-label="Time"><time dateTime={event.completedAt}>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.completedAt))}</time></td>
           <td data-label="Member"><strong>{member?.displayName ?? event.subjectId}</strong>{member?.email && <small>{member.email}</small>}</td>
-          <td data-label="Workspace and agent"><strong>{workspace?.name ?? `${event.workspaceId.slice(0, 8)}…`}</strong><small>{event.agentId} · {event.agentInstanceId.slice(0, 8)}…</small></td>
+          <td data-label="Workspace and agent"><strong>{workspaceLabel}{event.workspaceDeletedAt ? " · Deleted" : ""}</strong><small>{event.agentId} · {event.agentInstanceId.slice(0, 8)}…</small></td>
           <td data-label="Connector and tool"><strong>{event.connectorId}</strong><button type="button" onClick={() => setSelectedId(selectedId === event.invocationId ? "" : event.invocationId)} aria-expanded={selectedId === event.invocationId}>{event.toolName}</button></td>
           <td data-label="Decision"><span className={`tool-audit-badge ${event.policyDecision}`}>{toolAuditPolicyLabel[event.policyDecision]}</span></td>
           <td data-label="Outcome"><span className={`tool-audit-badge ${event.outcome}`}>{toolAuditOutcomeLabel[event.outcome]}</span></td>
@@ -3485,7 +3492,8 @@ function ToolActivityView({ users, workspaceMembers, operations, onOpenOperation
     {selected && <aside className="tool-audit-detail" aria-label="Tool call evidence">
       <div><strong>Compliance evidence</strong><button type="button" onClick={() => setSelectedId("")} aria-label="Close tool call evidence"><Dismiss16Regular aria-hidden="true" /></button></div>
       <dl>
-        <div><dt>Invocation</dt><dd>{selected.invocationId}</dd></div><div><dt>Agent instance</dt><dd>{selected.agentInstanceId}</dd></div>
+        <div><dt>Invocation</dt><dd>{selected.invocationId}</dd></div><div><dt>Workspace</dt><dd>{eventWorkspaceLabel(selected)}{selected.workspaceDeletedAt ? " · Deleted" : ""}<small>{selected.workspaceId}</small></dd></div>
+        <div><dt>Agent instance</dt><dd>{selected.agentInstanceId}</dd></div>
         <div><dt>Policy version</dt><dd>{selected.policyVersionId ?? "Not available"}</dd></div><div><dt>Policy code</dt><dd>{selected.policyCode}</dd></div>
         <div><dt>Latency</dt><dd>{selected.latencyMs.toLocaleString()} ms</dd></div><div><dt>Failure class</dt><dd>{selected.failureClass ?? "None"}</dd></div>
         <div><dt>Correlation ID</dt><dd>{selected.correlationId}</dd></div><div><dt>Completed</dt><dd>{new Date(selected.completedAt).toLocaleString()}</dd></div>

@@ -3,6 +3,7 @@ import http from "node:http";
 const port = Number(process.env.UI_FIXTURE_PORT ?? 4199);
 const now = new Date().toISOString();
 const workspaceId = "b4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
+const deletedAuditWorkspaceId = "d4a2ea8c-cc94-46e3-b6c8-59ae4ebee508";
 const digest = "a".repeat(64);
 const bundleDigest = "b".repeat(64);
 
@@ -263,7 +264,7 @@ const operation = {
 const fixtureToolAuditEvents = [{
   tenantId: session.tenant.id,
   subjectId: session.user.id,
-  workspaceId,
+  workspaceId: deletedAuditWorkspaceId,
   agentId: "agent-alex:claude",
   agentInstanceId: "11111111-1111-4111-8111-111111111111",
   context: { kind: "chat", taskId: "quarterly-review", sessionId: "fixture-session-1", turnId: "fixture-turn-1" },
@@ -286,6 +287,9 @@ const fixtureToolAuditEvents = [{
   latencyMs: 640,
   failureClass: null,
   completedAt: now,
+  workspaceDisplayName: "Deleted Finance Workspace",
+  workspaceGrantId: "workspace-deleted-finance",
+  workspaceDeletedAt: now,
 }, {
   tenantId: session.tenant.id,
   subjectId: "example-admin",
@@ -312,6 +316,9 @@ const fixtureToolAuditEvents = [{
   latencyMs: 0,
   failureClass: null,
   completedAt: new Date(Date.now() - 1_200).toISOString(),
+  workspaceDisplayName: null,
+  workspaceGrantId: null,
+  workspaceDeletedAt: null,
 }];
 
 const companionActivity = {

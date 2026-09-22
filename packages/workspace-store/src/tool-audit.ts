@@ -8,6 +8,7 @@ import {
   toolAuditAdmissionSchema,
   toolAuditTerminalInputSchema,
   toolAuditTerminalRecordSchema,
+  toolAuditViewEventSchema,
   toolAuditTargetSummarySchema,
   type ToolAuditAdmission,
   type ToolAuditAdmissionInput,
@@ -19,6 +20,7 @@ import {
   type ManagedToolAuditTargetType,
   type ToolAuditTerminalInput,
   type ToolAuditTerminalRecord,
+  type ToolAuditViewEvent,
 } from "@lemmacomputer/contracts";
 
 const secretAssignments = /\b(password|passwd|secret|token|api[-_ ]?key|client[-_ ]?secret|authorization)\s*[:=]\s*([^\s,;]+)/giu;
@@ -116,7 +118,7 @@ export type ToolAuditStoreQuery = Omit<ToolAuditQuery, "cursor"> & {
 };
 
 export type ToolAuditStorePage = {
-  events: ToolAuditTerminalRecord[];
+  events: ToolAuditViewEvent[];
   hasMore: boolean;
   total: number;
   summary: ToolAuditSummaryBucket[];
@@ -323,6 +325,15 @@ const rowToTerminal = (row: Record<string, unknown>): ToolAuditTerminalRecord =>
   latencyMs: Number(row.latency_ms),
   failureClass: row.failure_class,
   completedAt: new Date(String(row.completed_at)).toISOString(),
+});
+
+const rowToViewEvent = (row: Record<string, unknown>): ToolAuditViewEvent => toolAuditViewEventSchema.parse({
+  ...rowToTerminal(row),
+  workspaceDisplayName: row.workspace_display_name,
+  workspaceGrantId: row.workspace_grant_id,
+  workspaceDeletedAt: row.workspace_deleted_at == null
+    ? null
+    : new Date(String(row.workspace_deleted_at)).toISOString(),
 });
 
 const persistedAdmission = (inputValue: ToolAuditAdmissionInput): ToolAuditAdmissionRecordInput => {
@@ -545,15 +556,15 @@ export class PostgresToolAuditStore implements ToolAuditStore {
   async queryTerminal(input: ToolAuditStoreQuery): Promise<ToolAuditStorePage> {
     const values: unknown[] = [input.tenantId, new Date(input.from), new Date(input.to), input.asOf];
     const where = [
-      "tenant_id=$1",
-      "completed_at >= $2",
-      "completed_at < $3",
-      "completed_at <= $4",
+      "event.tenant_id=$1",
+      "event.completed_at >= $2",
+      "event.completed_at < $3",
+      "event.completed_at <= $4",
     ];
     const filter = (column: string, value: unknown) => {
       if (value === null || value === undefined) return;
       values.push(value);
-      where.push(`${column}=$${values.length}`);
+      where.push(`event.${column}=$${values.length}`);
     };
     filter("subject_id", input.subjectId);
     filter("workspace_id", input.workspaceId);
@@ -564,18 +575,24 @@ export class PostgresToolAuditStore implements ToolAuditStore {
     filter("outcome", input.outcome);
     if (input.after) {
       values.push(input.after.completedAt, input.after.invocationId);
-      where.push(`(completed_at,invocation_id) < ($${values.length - 1},$${values.length})`);
+      where.push(`(event.completed_at,event.invocation_id) < ($${values.length - 1},$${values.length})`);
     }
     values.push(input.pageSize + 1);
     const page = await this.pool.query(
-      `SELECT * FROM tool_audit_events
+      `SELECT event.*,
+         workspace.display_name AS workspace_display_name,
+         workspace.grant_id AS workspace_grant_id,
+         workspace.deleted_at AS workspace_deleted_at
+       FROM tool_audit_events event
+       LEFT JOIN workspaces workspace
+         ON workspace.tenant_id=event.tenant_id AND workspace.id=event.workspace_id
        WHERE ${where.join(" AND ")}
-       ORDER BY completed_at DESC,invocation_id DESC
+       ORDER BY event.completed_at DESC,event.invocation_id DESC
        LIMIT $${values.length}`,
       values,
     );
     const hasMore = page.rows.length > input.pageSize;
-    const events = page.rows.slice(0, input.pageSize).map(rowToTerminal);
+    const events = page.rows.slice(0, input.pageSize).map(rowToViewEvent);
 
     const summary = await this.querySummary(input);
     const detailRange = await this.pool.query(

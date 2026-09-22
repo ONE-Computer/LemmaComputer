@@ -10,10 +10,13 @@ test("organization auditors can review and filter identified agent tool calls", 
   await expect(page.getByRole("columnheader", { name: "Workspace and agent" })).toBeVisible();
   await expect(page.getByText("send-teams-message", { exact: true })).toBeVisible();
   await expect(page.getByText("planning-draft.docx", { exact: false })).toBeVisible();
+  await expect(page.getByText("Deleted Finance Workspace · Deleted", { exact: true })).toBeVisible();
 
   await page.getByText("send-teams-message", { exact: true }).click();
   const evidence = page.getByRole("complementary", { name: "Tool call evidence" });
   await expect(evidence).toContainText("Compliance evidence");
+  await expect(evidence).toContainText("Deleted Finance Workspace · Deleted");
+  await expect(evidence).toContainText("d4a2ea8c-cc94-46e3-b6c8-59ae4ebee508");
   await expect(evidence).toContainText("11111111-1111-4111-8111-111111111111");
   await expect(evidence.getByRole("button", { name: "Open protected action" })).toBeVisible();
 

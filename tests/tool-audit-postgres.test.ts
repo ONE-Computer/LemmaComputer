@@ -64,9 +64,9 @@ const connectionString = process.env.WORKSPACE_SETTINGS_TEST_DATABASE_URL;
     );
     await pool.query(
       `INSERT INTO workspaces (
-         id,tenant_id,subject_id,grant_id,state,provider_id,failure_code,operation_token,
+         id,tenant_id,subject_id,grant_id,display_name,state,provider_id,failure_code,operation_token,
          access_generation,created_at,updated_at
-       ) VALUES ($1,$2,$3,$4,'ready','provider-tool-audit',NULL,NULL,1,$5,$5)`,
+       ) VALUES ($1,$2,$3,$4,'Audit Workspace','ready','provider-tool-audit',NULL,NULL,1,$5,$5)`,
       [workspaceId, tenantId, subjectId, `grant-${suffix}`, now],
     );
     await pool.query(
@@ -219,6 +219,8 @@ const connectionString = process.env.WORKSPACE_SETTINGS_TEST_DATABASE_URL;
     assert.equal(retained.total, 3);
     assert.deepEqual(retained.events.map((event) => event.outcome).sort(), ["denied", "succeeded", "unconfirmed"]);
     assert.ok(retained.events.every((event) => event.workspaceId === workspaceId && event.agentInstanceId === agentInstanceId));
+    assert.ok(retained.events.every((event) => event.workspaceDisplayName === "Audit Workspace"));
+    assert.ok(retained.events.every((event) => event.workspaceDeletedAt !== null));
     assert.equal((await store.queryTerminal({ ...retainedQuery, tenantId: outsiderTenantId })).total, 0);
 
     const evidence = await pool.query(

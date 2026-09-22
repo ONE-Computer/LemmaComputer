@@ -203,6 +203,16 @@ export const toolAuditTerminalRecordSchema = toolAuditAdmissionSchema.safeExtend
 });
 export type ToolAuditTerminalRecord = z.infer<typeof toolAuditTerminalRecordSchema>;
 
+// Presentation context is resolved when history is read. It is deliberately
+// separate from the append-only compliance record, so a mutable human label
+// never becomes part of the immutable evidence semantics.
+export const toolAuditViewEventSchema = toolAuditTerminalRecordSchema.safeExtend({
+  workspaceDisplayName: z.string().trim().min(1).max(120).nullable().default(null),
+  workspaceGrantId: boundedIdentifier.nullable().default(null),
+  workspaceDeletedAt: z.iso.datetime().nullable().default(null),
+});
+export type ToolAuditViewEvent = z.infer<typeof toolAuditViewEventSchema>;
+
 export const toolAuditQuerySchema = z.strictObject({
   from: z.iso.datetime(),
   to: z.iso.datetime(),
@@ -234,7 +244,7 @@ export const toolAuditSummaryBucketSchema = z.strictObject({
 export type ToolAuditSummaryBucket = z.infer<typeof toolAuditSummaryBucketSchema>;
 
 export const toolAuditPageSchema = z.strictObject({
-  events: z.array(toolAuditTerminalRecordSchema).max(100),
+  events: z.array(toolAuditViewEventSchema).max(100),
   nextCursor: z.string().max(1_024).nullable(),
   total: z.number().int().nonnegative(),
   asOf: z.iso.datetime(),
