@@ -16,7 +16,7 @@ choose and initialize the correct environment using
 | Unit and contract tests | `tests/**/*.test.ts` |
 | Browser suites | `tests/e2e/` and `playwright.*.config.ts` |
 | Database change rules | `packages/workspace-store/AGENTS.md` and `docs/guides/database-migrations.md` |
-| Component-specific implementation checklists | `docs/guides/extending.md` |
+| Component-specific implementation checklists | `docs/reference/extension-contracts.md` |
 | Repository-wide agent safety contract | `AGENTS.md` plus any more-specific `AGENTS.md` |
 
 Use `rg` or `rg --files` to find code and tests. Use repository-owned npm
@@ -137,7 +137,7 @@ Keep HTTP handlers thin, derive identity from authenticated server state, and
 put stable wire identifiers in `packages/contracts`. For provider, connector,
 application, agent, sandbox-adapter, egress, channel, or OpenVTC additions, use
 the concrete subsystem checklist in
-[Component extension contracts](docs/guides/extending.md). That guide describes
+[Component extension contracts](docs/reference/extension-contracts.md). That guide describes
 which catalogs, policy contracts, transports, and negative tests must move
 together; it is not a second repository setup guide.
 

@@ -4,6 +4,11 @@ These guides map LemmaComputer's logical trust boundaries onto cloud services.
 They describe proposed deployments, not deployed infrastructure, deployable
 infrastructure-as-code, or a production security sign-off.
 
+Start with the [workflow guide](../development-workflow.md) to select the right
+evaluation or development setup. For AWS go-live, follow the [deployment order](aws-initial-deployment.md#deployment-order)
+in the initial candidate. The repository does not yet provide an executable AWS
+infrastructure deployment command.
+
 - [Initial customer AWS deployment candidate](aws-initial-deployment.md) — the
   supplied overview diagram, the current product contract, and decisions to
   settle before go-live.

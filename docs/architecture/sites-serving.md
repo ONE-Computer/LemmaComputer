@@ -71,18 +71,17 @@ no access to this management authority. Source
 editing/publishing still requires the creator's bound workspace and agent bridge;
 site roles do not share workspace files or introduce collaborative source editing.
 
-This release deliberately excludes collaborative editing, shared workspaces,
+The current Sites contract excludes collaborative editing, shared workspaces,
 delegated agent execution and source checkout/push workflows. Recipients can
 interact with the published dashboard, but amendments go through the owner's
 existing workspace agent.
 
-No schema change is required. Historical migrations remain immutable; the
-earlier database constraint still permits stored `admin` values, but all grants
-are exposed and authorized as view-only. New grants and invitation acceptance
-write only `viewer`, and the API rejects `admin`, `editor` and `owner` grants.
-Existing sites, invitations and viewing access are preserved. Deploy this code
-to every Control API instance in either profile; do not roll back to code that
-interprets old grants as management authority.
+The earlier database constraint still permits stored `admin` values, but all
+grants are exposed and authorized as view-only. New grants and invitation
+acceptance write only `viewer`, and the API rejects `admin`, `editor` and
+`owner` grants. Deploy the same authorization behavior to every Control API
+instance in either profile; older code that interprets stored grants as
+management authority is incompatible.
 
 ## Invitation delivery
 

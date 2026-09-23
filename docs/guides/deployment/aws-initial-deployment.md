@@ -7,6 +7,8 @@ operate AWS or evidence that these resources exist. The repository contains no
 AWS infrastructure-as-code for this candidate. Use the broader [AWS reference
 architecture](aws-deployment.md) for security controls and alternatives, and
 the [deployment profiles](../deployment-profiles.md) for product behavior.
+Begin with the [evaluation, development, and remote workspace workflow](../development-workflow.md#choose-the-workflow-first)
+to select the right setup for development and qualification.
 
 ![Proposed AWS overview: one VPC with public ingress, private application, controlled egress, inspection, database, and workspace subnet classes.](assets/aws-architecture-overview.png)
 
@@ -14,6 +16,60 @@ the [deployment profiles](../deployment-profiles.md) for product behavior.
 subnet class represents a subnet in each of two Availability Zones; the picture
 compresses them into one box. Arrows show traffic classes, not blanket subnet
 permissions. Use the tables below for the actual service and data boundaries.*
+
+## Deployment order
+
+This is the order for turning the candidate into a deployment. It is not an
+executable AWS runbook yet: the repository has no AWS infrastructure-as-code,
+ECS task definitions, or command that provisions these resources. The
+[development workflow](../development-workflow.md) covers local evaluation and
+remote-node qualification; its Compose commands do not create hosted AWS
+infrastructure.
+
+1. **Choose the production contract.** Select `hosted` or `customer-managed`,
+   the operator, Region, origin, account/VPC split, node allocation, recovery
+   targets, and the open network and database choices below. Record the choices
+   in an infrastructure ADR. Use [deployment profiles](../deployment-profiles.md)
+   for the application contract.
+2. **Qualify the product before provisioning.** Develop in an isolated task
+   worktree and exercise the remote-node/Cowork path through the
+   [workflow guide](../development-workflow.md#remote-workspace-node-and-cowork-qualification).
+   This checks application routing and mTLS behavior, not AWS network or host
+   readiness.
+3. **Provision the selected AWS design with reviewed infrastructure code.**
+   Create the account/VPC boundary, two-AZ subnet and inspected-egress routes,
+   endpoints, security groups, DNS/certificates, WAF/ALB, two private PostgreSQL
+   trust domains, S3 artifact storage, secret custody, logging, ECS services,
+   and private workspace nodes. The [AWS reference architecture](aws-deployment.md)
+   supplies the service and network controls; the account-specific IaC and
+   operator procedure still need to be written and reviewed.
+4. **Promote one immutable application release.** On a clean, pushed `main` or
+   `release/*` commit, run `npm run verify:release`, then
+   `npm run release:tag -- --push` under the [full release procedure](../demo-release.md#full-release-path).
+   Publish the qualified first-party images to the target registry and record
+   their repository digests. Do not use the demo update command for AWS go-live.
+5. **Install and validate production configuration.** Supply the selected
+   profile's exact values from deployment secret custody, keep customer and
+   platform auth secrets distinct, pin image digests, and run the
+   [profile preflight](../deployment-profiles.md#operator-preflight) against that
+   configuration. The [deployment catalog](../../../scripts/deployment-config.mjs)
+   defines variable names and per-service projections; production secret
+   injection and ECS task definitions remain infrastructure work.
+6. **Initialize data, then start private services.** Create separate roles and
+   the databases required by the chosen profile; hosted includes all four
+   logical databases shown below. Capture a coordinated recovery set. Run the
+   explicit product and customer-auth migrations, plus the platform-auth
+   migration for hosted, as one-shot jobs before Control starts. Qualify the
+   gateway database initialization separately before LiteLLM serves traffic.
+   Deploy Control, LiteLLM, proxies, workers, and workspace-node connectivity.
+   Verify private mTLS routes, inspected egress, S3 access, and no-direct-internet
+   boundaries.
+7. **Open the single browser entry and qualify live behavior.** Attach the
+   canonical HTTPS origin to the ALB and WAF, register exact OAuth callbacks,
+   and test sign-in, model/MCP and channel flows, workspace persistence and
+   purge, backup/restore, failure recovery, and rollback on the target AWS
+   infrastructure. Apply the [release gates](aws-deployment.md#deployment-phases-and-release-gates)
+   before declaring the environment ready.
 
 ## What this candidate chooses
 
@@ -80,26 +136,5 @@ keeps a workspace on its recorded owner and has no automatic migration or
 capacity scheduler. Define recovery targets, backups, restore tests, node
 replacement, and service task counts before making an availability commitment.
 
-## Go-live decisions and evidence
-
-1. Record the chosen deployment profile, operator, public origin, Region,
-   customer/data residency, workspace VPC/account boundary, and whether tenant
-   nodes are dedicated or shared.
-2. Approve the physical database choice, four-database/role layout, backup and
-   restore set, and S3 artifact policy. Decide whether the proposed M7i node
-   meets workspace, Electron sandbox, and Cowork KVM/vsock needs.
-3. Approve the Control and channel egress placement, Postmark path, exact proxy
-   allowlists, AWS endpoint inventory, symmetric firewall routes, and private
-   mTLS relay connectivity in reviewed infrastructure code.
-4. Run the [release gate](../demo-release.md#full-release-path) and
-   [deployment-profile preflight](../deployment-profiles.md#operator-preflight)
-   on the exact candidate. Then validate the deployed AWS identities, routes,
-   task roles, secrets, database migrations, and restore path.
-5. Exercise live browser sign-in and OAuth callbacks, provider and MCP calls,
-   channel delivery, S3 artifacts, workspace persistence and purge, and
-   failure/rollback behavior on the target infrastructure. Local Compose and
-   remote-node qualification do not establish these AWS results.
-
 See [workspace node deployment](../../architecture/workspace-node.md) for the
-implemented sticky placement and remote trust contract. This page does not
-authorize provisioning or claim production readiness.
+implemented sticky placement and remote trust contract.

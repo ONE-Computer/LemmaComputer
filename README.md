@@ -390,11 +390,8 @@ The four `playwright.*.config.ts` files each drive a different suite:
 points:
 
 - [Architecture and trust model](docs/architecture/overview.md)
-- [Why LemmaComputer runs as many processes](docs/architecture/service-boundaries.md)
-- [Evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
-- [Deployment profiles](docs/guides/deployment-profiles.md)
+- [Guides: choose a task](docs/guides/README.md)
 - [Service reference](docs/reference/services.md)
-- [Configuration and operations](docs/guides/operations.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](docs/SECURITY.md)
 

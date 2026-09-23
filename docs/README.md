@@ -54,6 +54,8 @@ How the system is built and why. Read `overview.md` first.
   and the membership authorization boundary.
 - [Workspace node deployment](architecture/workspace-node.md) — the normative
   remote-node network, mTLS, storage, purge, and qualification contract.
+- [Authenticated Sites assets](architecture/sites-serving.md) — sandboxed
+  delivery, short-lived grants, and site-level sharing authority.
 - [Workspace guardrail reconciliation](architecture/workspace-guardrail-reconciliation.md)
   — the forced suspension, grant revocation, immutable publication, compatible-
   selection reconciliation, and recovery contract for organization guardrail
@@ -61,30 +63,11 @@ How the system is built and why. Read `overview.md` first.
 
 ## Guides
 
-Task-oriented instructions.
-
-- [Evaluation, development, and remote workspace workflow](guides/development-workflow.md)
-  — choose a disposable evaluation, isolated task worktree, local split-node
-  qualification, or production-profile path; includes command meanings,
-  node-local Docker authority, relays, mTLS, Cowork, and hosted gaps.
-- [Local deployment and Microsoft integration setup](guides/local-deployment.md)
-  — the runbook for the transitional Entra and Microsoft 365 integration path.
-- [Deployment profiles](guides/deployment-profiles.md) — what `customer-managed`,
-  `hosted`, and `worktree` change, and the capability contract between them.
-- [Configuration and operations](guides/operations.md) — reference Compose
-  topology, environment variables, startup, health, persistence, backup,
-  rotation, and production concerns.
-- [Database migrations](guides/database-migrations.md) — the ledger, legacy
-  baseline, expand/migrate/contract policy, and tests.
-- [Component extension contracts](guides/extending.md) — subsystem checklists
-  for model routes, MCP connectors, tools, agents, applications, sandbox
-  drivers, channels, and migrations; not a setup guide.
-- [Demo release runbook](guides/demo-release.md) — keeping the demo environment
-  pinned, backed up, and separate from development.
-- [Cloud deployment guides](guides/deployment/README.md) — mapping the logical
-  trust boundaries to provider infrastructure, including the proposed
-  [initial customer AWS deployment](guides/deployment/aws-initial-deployment.md)
-  and the broader [AWS reference architecture](guides/deployment/aws-deployment.md).
+Start with the [task-based guides index](guides/README.md). The
+[evaluation, development, and remote workspace workflow](guides/development-workflow.md)
+is the single setup authority. For go-live planning, the
+[initial customer AWS deployment candidate](guides/deployment/aws-initial-deployment.md)
+links that workflow to the release and infrastructure sequence.
 
 ## Product
 
@@ -134,8 +117,11 @@ Feature-level specifications and the authority that owns each decision.
 - [Service reference](reference/services.md) — every long-running, one-shot, and
   dynamic runtime component, its interfaces, dependencies, state, health
   contract, and extension seam.
-  — the legacy hosted adapter and its real-tenant qualification. It is not the
-  current universal customer-authentication architecture.
+- [Model provider discovery](reference/model-providers.md) — supported provider
+  protocols, metadata sources, credential custody, and validation limits.
+- [Component extension contracts](reference/extension-contracts.md) —
+  implementation checklists for models, connectors, agents, applications,
+  channels, and migrations.
 
 ## Decisions
 

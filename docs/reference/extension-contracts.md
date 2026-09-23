@@ -48,7 +48,7 @@ policy versions.
    their models dynamically and accept exact IDs through the administrator
    catalog flow. Maintain protocol adapters and bounded model metadata schemas,
    not per-release model lists. Preserve existing route identities. See
-   [Dynamic model discovery](cloud-model-providers.md) for discovery, metadata
+   [Dynamic model discovery](model-providers.md) for discovery, metadata
    provenance, credentials, and feature validation. New provider protocols still
    require transport qualification and accurate capability/usage behavior.
 2. Add or extend the strict Provider settings schemas and administrator display
@@ -94,7 +94,7 @@ Provider configuration, pricing, model limits, and route publication are separat
 ### Azure AI Foundry and Google Vertex AI
 
 The `foundry` and `vertex` managed providers use the same tenant-scoped dynamic
-credential/model lifecycle. See [Cloud model providers](cloud-model-providers.md)
+credential/model lifecycle. See [Cloud model providers](model-providers.md)
 for supported models, configuration fields, current API formats, and the boundary
 between mocked compatibility checks and live cloud qualification.
 
@@ -461,7 +461,7 @@ npm run db:migration:new -- <short-name>
 ```
 
 The one-shot migration job applies it before Control starts. Application startup only
-checks schema compatibility. Read [Database migrations](database-migrations.md) before editing SQL.
+checks schema compatibility. Read [Database migrations](../guides/database-migrations.md) before editing SQL.
 
 Guidelines:
 

@@ -142,4 +142,4 @@ confinement—not a broader version of this profile.
 
 - [Workspace node deployment](../architecture/workspace-node.md#chromium-and-electron-process-sandbox)
 - [Workspace node runtime operations](../guides/operations.md#workspace-node-runtime)
-- [Component extension contracts](../guides/extending.md)
+- [Component extension contracts](../reference/extension-contracts.md)

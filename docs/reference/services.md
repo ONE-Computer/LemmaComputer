@@ -233,7 +233,7 @@ root-owned processes, and not written into the user profile.
 
 **Extension seam:** adding an application or agent requires coordinated changes
 to the contract catalog, image, entrypoint allowlist, policy projection, UI
-catalog, and tests. See [Adding a sandbox application or agent](../guides/extending.md#add-a-sandbox-application-or-agent).
+catalog, and tests. See [Adding a sandbox application or agent](extension-contracts.md#add-a-sandbox-application-or-agent).
 
 ## Egress proxy
 
