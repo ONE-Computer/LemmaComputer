@@ -1,9 +1,13 @@
 # AWS deployment architecture
 
-Status: **reference design for production planning**. This document does not
-claim that a deployed account, firewall, secret manager, database, or identity
-configuration has been assessed. Convert the chosen design into reviewed IaC,
-threat-model it, and validate it in the target AWS organization before use.
+Status: **reference design for production planning**. The [initial customer AWS
+deployment candidate](aws-initial-deployment.md) records the supplied overview
+diagram and its specific RDS, subnet, and workspace-node choices. Those choices
+are proposals until an infrastructure ADR and live qualification approve them.
+This document does not claim that a deployed account, firewall, secret manager,
+database, or identity configuration has been assessed. Convert the chosen design
+into reviewed IaC, threat-model it, and validate it in the target AWS
+organization before use.
 
 This design supports both LemmaComputer deployment profiles:
 
@@ -16,7 +20,7 @@ This design supports both LemmaComputer deployment profiles:
 
 Run the stateless product services as separate Amazon ECS services on AWS
 Fargate, use an Application Load Balancer as the single HTTP ingress, place
-state in two private Aurora PostgreSQL trust domains, and run user workspaces
+state in two private PostgreSQL trust domains, and run user workspaces
 on Lemma-owned remote Docker/KasmVNC nodes in a separate workspace compute boundary.
 
 Do not mount the Docker socket in a control-plane ECS service. The socket is
@@ -65,8 +69,8 @@ flowchart TB
     end
 
     subgraph DbSubnets["Isolated DB subnets"]
-      ControlDB[("Control Aurora PostgreSQL")]
-      GatewayDB[("Gateway Aurora PostgreSQL")]
+      ControlDB[("Control PostgreSQL trust domain")]
+      GatewayDB[("Gateway PostgreSQL trust domain")]
     end
 
     subgraph InspectionSubnets["Inspection subnets"]
@@ -77,7 +81,7 @@ flowchart TB
   end
 
   subgraph WorkspaceBoundary["Separate workspace compute VPC/account"]
-    Kasm["Lemma workspace node API + Docker"]
+    Kasm["Lemma workspace node API + Docker/KasmVNC"]
     DesktopRelay["Per-workspace desktop relays"]
     AppRelays["Per-workspace application relays"]
     WorkspaceProxy["Per-workspace egress enforcement"]
@@ -272,18 +276,18 @@ mixed DNS, and unapproved public destinations.
 
 ## Database design
 
-Routing to **Aurora PostgreSQL full configuration** because this production
-design requires customer VPC connectivity, private DB subnet groups, security
-groups, and customer-controlled encryption/backup policy. Express
-configuration does not preserve those network boundaries.
+Use two private, separately operated PostgreSQL trust domains for hosted
+production. The initial customer candidate selects RDS for PostgreSQL Multi-AZ;
+Aurora PostgreSQL is an alternative to assess against measured load, recovery,
+extension, connection, and cost requirements:
 
-Use two private Aurora PostgreSQL clusters—or equivalently strong separately
-operated database trust domains—for hosted production:
-
-- **Control cluster:** identities, tenants, workspace records, policy,
-  approvals, schedules, audit events, channel routing, and usage/accounting.
-- **Gateway cluster:** LiteLLM routes, virtual keys, OAuth state, and encrypted
-  provider/connector credential material.
+- **Control trust domain:** three logical databases with distinct roles:
+  `lemmacomputer` for product and tenant state, `lemmacomputer_auth` for customer
+  Better Auth, and `lemmacomputer_platform_auth` for the hosted platform-operator
+  Better Auth realm. The platform realm is absent from customer-managed product
+  access, but the reference Compose initialization still creates its database.
+- **Gateway trust domain:** `litellm` for routes, virtual keys, OAuth state,
+  and encrypted provider/connector credential material.
 
 Each DB subnet group spans at least two Availability Zones and contains only
 private DB subnets with no NAT or internet-gateway route. Set database
@@ -293,13 +297,9 @@ protection, configure automated backups/PITR, export reviewed PostgreSQL logs,
 and test restore procedures. The Control task must not receive network or
 credential access to the gateway schema, and vice versa.
 
-RDS for PostgreSQL Multi-AZ is the credible lower-cost/greater-portability
-alternative when measured load does not justify Aurora's storage/failover and
-scaling characteristics. Revisit the choice with workload, recovery-time,
-recovery-point, extension, connection, and cost measurements before IaC is
-approved. Do not combine the two logical databases into one user/schema for
-hosted production merely to reduce cost; that weakens credential-custody and
-blast-radius separation.
+Do not combine these databases into one user/schema to reduce cost; that would
+weaken credential-custody and blast-radius separation. A restore set must
+include all four logical databases and matching secret versions.
 
 Application startup validates schema compatibility and never migrates. Run the
 repository's explicit migration job as a one-shot ECS task before deploying
@@ -363,7 +363,7 @@ Enable and retain, with tenant/data-residency requirements applied:
 - Network Firewall/NGFW allow and deny events;
 - ECS/CloudWatch service logs with explicit blocking delivery where audit loss
   is unacceptable;
-- Aurora events, audit/connection logs, backup and restore evidence;
+- RDS/Aurora events, audit/connection logs, backup and restore evidence;
 - LemmaComputer normalized egress and policy audit events in an append-protected
   destination.
 
@@ -405,7 +405,8 @@ external controls.
 - AWS Network Firewall or the organization's FortiGate/other NGFW standard?
 - Single application VPC or centralized Transit Gateway inspection/egress?
 - Separate workspace account/VPC and how Kasm private connectivity is exposed?
-- Aurora PostgreSQL or RDS for PostgreSQL after load and recovery modeling?
+- Confirm RDS for PostgreSQL Multi-AZ for the initial deployment, or choose
+  Aurora after load and recovery modeling?
 - One Region with tested restore, warm standby, or a formal multi-Region DR
   design?
 - Per-tenant dedicated gateway/data plane for regulated customers, or shared

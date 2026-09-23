@@ -82,8 +82,9 @@ Task-oriented instructions.
 - [Demo release runbook](guides/demo-release.md) — keeping the demo environment
   pinned, backed up, and separate from development.
 - [Cloud deployment guides](guides/deployment/README.md) — mapping the logical
-  trust boundaries to provider infrastructure, beginning with the
-  [AWS deployment architecture](guides/deployment/aws-deployment.md).
+  trust boundaries to provider infrastructure, including the proposed
+  [initial customer AWS deployment](guides/deployment/aws-initial-deployment.md)
+  and the broader [AWS reference architecture](guides/deployment/aws-deployment.md).
 
 ## Product
 

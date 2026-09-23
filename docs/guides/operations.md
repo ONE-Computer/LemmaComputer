@@ -758,13 +758,15 @@ Compose manages:
 - `lemmacomputer_control-data` for Control PostgreSQL;
 - `lemmacomputer_gateway-data` for LiteLLM PostgreSQL.
 
-Those are two PostgreSQL engines/containers but three logical databases. The
+Those are two PostgreSQL engines/containers but four logical databases. The
 control engine contains `lemmacomputer` for product authorization, policy,
 workspace, ledger, and audit state and `lemmacomputer_auth` for Better Auth
-users, sessions, authenticators, and company-SSO configuration. The gateway
-engine contains `litellm` for provider deployments, encrypted provider and MCP
-OAuth custody, virtual keys, and gateway configuration. A recoverable backup
-must include all three databases even though Docker shows only two PostgreSQL
+customer users, sessions, authenticators, and company-SSO configuration. It
+also contains `lemmacomputer_platform_auth` for the separate platform-operator
+Better Auth realm in hosted and worktree deployments. The gateway engine
+contains `litellm` for provider deployments, encrypted provider and MCP OAuth
+custody, virtual keys, and gateway configuration. A recoverable backup must
+include all four databases even though Docker shows only two PostgreSQL
 containers and two Compose volumes.
 
 The local sandbox adapter creates separately labeled volumes named
@@ -788,10 +790,12 @@ Back up these as one recovery set:
 
 1. the `lemmacomputer` product database;
 2. the `lemmacomputer_auth` Better Auth database;
-3. the `litellm` gateway database;
-4. per-workspace persistent volumes;
-5. the exact secret-manager versions active at backup time;
-6. immutable control-runtime, OpenVTC consent, Microsoft 365 MCP, and workspace
+3. the `lemmacomputer_platform_auth` platform Better Auth database;
+4. the `litellm` gateway database;
+5. per-workspace persistent volumes and the Control artifact store (`artifact-data`
+   locally or the configured S3 bucket in hosted deployments);
+6. the exact secret-manager versions active at backup time;
+7. immutable control-runtime, OpenVTC consent, Microsoft 365 MCP, and workspace
    image digests.
 
 Example logical database backups:
@@ -805,6 +809,10 @@ docker compose exec -T postgres \
   pg_dump --username lemmacomputer --dbname lemmacomputer_auth --format=custom \
   > lemmacomputer-auth.dump
 
+docker compose exec -T postgres \
+  pg_dump --username lemmacomputer --dbname lemmacomputer_platform_auth --format=custom \
+  > lemmacomputer-platform-auth.dump
+
 docker compose exec -T litellm-postgres \
   pg_dump --username litellm --dbname litellm --format=custom \
   > lemmacomputer-gateway.dump
@@ -812,9 +820,10 @@ docker compose exec -T litellm-postgres \
 
 Protect backups as credentials: they contain identity, governance, operation,
 OAuth, and audit state. Test restore in an isolated environment. Restore all
-three logical databases and matching cryptographic material before starting
-Control or LiteLLM; restoring product state without `lemmacomputer_auth` can
-leave organizations present while their users and sessions are missing.
+four logical databases and matching cryptographic material before starting
+Control or LiteLLM; restoring product state without either authentication
+database can leave customer organizations or platform administration without
+their corresponding users and sessions.
 
 ## Rotation
 
