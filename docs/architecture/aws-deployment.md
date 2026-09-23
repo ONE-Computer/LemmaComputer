@@ -1,7 +1,7 @@
 # AWS deployment architecture
 
 Status: **reference design for production planning**. The [initial customer AWS
-deployment candidate](aws-initial-deployment.md) records the supplied overview
+deployment path](../guides/aws-go-live.md) records the supplied overview
 diagram and its specific RDS, subnet, and workspace-node choices. Those choices
 are proposals until an infrastructure ADR and live qualification approve them.
 This document does not claim that a deployed account, firewall, secret manager,
@@ -428,5 +428,5 @@ Record these choices in an ADR before creating production IaC.
 - [IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
 - [Using Secrets Manager secrets in ECS tasks](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/secrets-envvar-secrets-manager.html)
 
-See [MCP networking, egress, and OAuth callbacks](../../architecture/mcp-networking.md) for the
+See [MCP networking, egress, and OAuth callbacks](mcp-networking.md) for the
 application-level flow that this AWS design must preserve.

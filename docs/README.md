@@ -54,6 +54,8 @@ How the system is built and why. Read `overview.md` first.
   and the membership authorization boundary.
 - [Workspace node deployment](architecture/workspace-node.md) — the normative
   remote-node network, mTLS, storage, purge, and qualification contract.
+- [AWS deployment architecture](architecture/aws-deployment.md) — proposed cloud
+  service placement, network controls, and release gates.
 - [Authenticated Sites assets](architecture/sites-serving.md) — sandboxed
   delivery, short-lived grants, and site-level sharing authority.
 - [Workspace guardrail reconciliation](architecture/workspace-guardrail-reconciliation.md)
@@ -63,11 +65,10 @@ How the system is built and why. Read `overview.md` first.
 
 ## Guides
 
-Start with the [task-based guides index](guides/README.md). The
-[evaluation, development, and remote workspace workflow](guides/development-workflow.md)
-is the single setup authority. For go-live planning, the
-[initial customer AWS deployment candidate](guides/deployment/aws-initial-deployment.md)
-links that workflow to the release and infrastructure sequence.
+Start with the [task-based guides index](guides/README.md). For AWS go-live,
+read the short [AWS deployment path](guides/aws-go-live.md). For local evaluation,
+development, and remote-node qualification, use the
+[development workflow](guides/development-workflow.md).
 
 ## Product
 

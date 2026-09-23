@@ -883,7 +883,7 @@ LAN exposure. Do not change `LEMMACOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
 without the controls above.
 
 For a concrete AWS mapping of these requirements, see [AWS deployment
-architecture](deployment/aws-deployment.md).
+architecture](../architecture/aws-deployment.md).
 
 ## Durable chat artifact storage
 

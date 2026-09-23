@@ -1,7 +1,9 @@
 # Evaluation, development, and remote workspace workflow
 
-This is the single setup and workflow guide for LemmaComputer. Start by choosing
-the outcome you need; do not combine commands from different rows.
+This is the single setup and workflow guide for LemmaComputer evaluation,
+development, and local remote-node qualification. For production AWS planning,
+start with the [AWS go-live path](aws-go-live.md). Choose the local outcome you
+need below; do not combine commands from different rows.
 
 ## Choose the workflow first
 
