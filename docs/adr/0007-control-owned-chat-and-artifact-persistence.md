@@ -2,7 +2,13 @@
 
 - Status: Accepted
 - Date: 2026-08-16
-- Issue: [#80](https://github.com/ONE-Computer/LemmaComputer/issues/80)
+
+## Context
+
+Workspace homes and native-agent session files are tied to a runtime node.
+Chat history and generated files must remain accessible after a workspace
+stops, moves, or is deleted, without making the node a second system of
+record.
 
 ## Decision
 

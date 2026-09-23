@@ -1,7 +1,7 @@
 # Workspace node deployment
 
 The rationale for sticky placement and the remote mutual-TLS trust boundary is
-recorded in [ADR 0006](../adr/0006-hosted-c-minus-workspace-node-placement-and-trust.md).
+recorded in [ADR 0005](../adr/0005-hosted-c-minus-workspace-node-placement-and-trust.md).
 
 LemmaComputer has one Docker/KasmVNC workspace runtime and two placements. A
 `colocated` node runs beside the reference application stack for
@@ -19,7 +19,7 @@ gateway/Control routes. The node rechecks the provider's workspace label on
 status, open, egress update, and destroy so a provider ID cannot be substituted
 across workspaces.
 
-## Hosted C-minus placement
+## Hosted placement
 
 Hosted Control uses a durable registry rather than load-balancing lifecycle
 requests across node controllers. The registry stores a stable node id, private
@@ -64,7 +64,7 @@ that option is safe only when the operator has confirmed that the registered
 node is their actual legacy owner. Every mutation and backfill count is written
 to the platform audit ledger.
 
-The C-minus scheduler deliberately has no heartbeat, capacity scoring,
+The initial hosted placement deliberately has no heartbeat, capacity scoring,
 automatic failover, or live workspace migration. An absent assignment, absent
 workspace owner, node mismatch, disabled node, or purge receipt bearing another
 node id fails closed. These omissions buy a productionizable multi-node shape
@@ -76,7 +76,7 @@ development harness resolves every lifecycle call through the persisted
 workspace owner in the node registry. `colocated` development and
 customer-managed single-node deployments retain the explicitly configured
 direct controller client. This lets local remote qualification exercise the
-same C-minus router used by hosted without pretending that local Compose is AWS.
+same persisted-owner router used by hosted without pretending that local Compose is AWS.
 
 ## Remote network contract
 
@@ -124,7 +124,7 @@ not imply an AI provider or agent runtime.
 ## Chromium and Electron process sandbox
 
 The application boundary and reasons for catalog gating are recorded in
-[ADR 0005](../adr/0005-catalog-gated-electron-sandbox.md). The profile below is
+[ADR 0004](../adr/0004-catalog-gated-electron-sandbox.md). The profile below is
 not a general-purpose compatibility mode: only release-qualified application
 identifiers can select it, and software installed inside a workspace cannot
 change the enforced container profile.
@@ -166,7 +166,7 @@ Control, the ingress client key reaches only workspace ingress, and the
 application-gateway client key reaches only the remote node controller.
 Hosted Control uses the registry endpoint and certificate name for each
 lifecycle call; the configured Control client CA/certificate/key and internal
-node token are shared C-minus credentials and should be rotated as a single
+node token are shared node-fleet credentials and should be rotated as a single
 node-fleet trust domain. Per-node credentials are a later hardening step, not a
 prerequisite for sticky routing.
 

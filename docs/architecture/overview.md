@@ -1,418 +1,141 @@
 # Architecture and trust model
 
-LemmaComputer is a policy and credential boundary around user-facing AI
-applications. Its design goal is to preserve the product experience of
-frontier AI tools while moving enterprise authority out of the employee's
-sandbox.
-
-## Design principles
-
-### Credentials stay outside the workspace
-
-The workspace must not receive provider API keys, the LiteLLM master key,
-Microsoft OAuth tokens, Control service credentials, policy-signing keys, the
-Docker socket, or external-channel credentials.
-
-Control creates a short-lived LiteLLM virtual key for a specific tenant, user,
-workspace, agent, model route, MCP server, tool set, policy version, and rate
-limit. Governed workspaces receive the single synthetic `lemmacomputer-auto`
-transport alias; the signed runtime policy and gateway metadata retain the
-policy route and service-class context. A root-owned loopback broker inside the
-managed image holds that scoped key. User applications authenticate to the
-local broker with a non-authoritative local credential.
-
-OAuth tokens for Microsoft 365 are held in the gateway boundary and persisted
-by LiteLLM using its stable salt key. OpenAI, Anthropic, GLM, and Bedrock keys are write-only
-administrator input: Control sends them directly to LiteLLM's private credential
-API, which encrypts them in the gateway database. Control persists only
-tenant-scoped route identifiers, lifecycle metadata, and a safe fingerprint—not
-the raw provider key. Telegram bot credentials are encrypted by the
-out-of-workspace channel broker before storage.
-
-### Policy is projected, signed, and re-verified
-
-Identity policy is persisted by Control. Before provisioning, Control derives
-the effective runtime policy and signs a canonical bundle with Ed25519. The
-bundle binds:
-
-- tenant, subject, and workspace;
-- policy identifier, version, and document hash;
-- workspace profile, selected applications, and agents;
-- model alias and MCP server;
-- tool decisions and egress security-group version;
-- gateway and Control endpoints;
-- issue and expiry times.
-
-The workspace controller verifies this bundle before passing it to a sandbox
-adapter. The managed workspace entrypoint verifies it again before configuring
-applications or starting credential brokers. A mismatch, unknown signing key,
-expired bundle, or missing projection fails closed.
-
-### Network reachability is capability
-
-Workspaces are attached to an internal, per-workspace Docker network. In the
-colocated topology the adapter attaches only the governed services a projected
-policy requires. In the remote topology it creates narrow per-workspace desktop
-and application relays: the sandbox sees fixed local aliases, while the relays
-alone can reach mutually authenticated private ingress, LiteLLM, and Control
-endpoints. The user environment has no general route to model providers,
-Microsoft Graph, PostgreSQL, Docker, or the OpenVTC service.
-
-The gateway data plane is subject to the same rule. LiteLLM is attached only to
-internal networks and has no route to the internet: model traffic leaves through
-the gateway egress proxy and its static provider allowlist, and custom or public
-MCP traffic leaves through the separate remote-MCP egress proxy. Keeping those
-two policies in separate processes is what prevents an MCP redirect from
-reaching a model provider, Control, or the private Microsoft connector.
-
-Egress is proxied where a tenant or a workspace user can influence the
-destination, and direct where the destination is fixed by pinned code or
-administrator configuration. Four networks carry an internet route:
-`model-egress` reaches the internet only through the two proxies above, while
-`microsoft-egress`, `channel-egress`, and `identity-egress` are used directly by
-the M365 connector, the channel broker, and Control respectively. Those three
-have no destination allowlist; their separation limits which internal peers each
-process can reach and keeps their outbound paths independent, but it does not
-constrain where they may connect. Widening any of them to accept
-tenant-supplied destinations would require putting a policy proxy in front
-first. See [Compose network topology](#compose-network-topology) for the full
-matrix.
-
-When a policy assigns web egress, the controller creates a dedicated proxy
-sidecar. The sidecar:
-
-- accepts only an HMAC grant bound to the tenant, subject, workspace, agent,
-  security-group version, and policy hash;
-- normalizes hostnames and rejects IP literals and wildcards;
-- resolves DNS before applying policy and denies private or disallowed targets;
-- enforces protocol, hostname, and port rules;
-- records allow and deny decisions without logging request bodies.
-
-### Approval is bound to an exact action
-
-An approval is not a reusable permission. A protected MCP call is canonicalized
-and bound to its identity, workspace, agent, policy version, tool schema, tool
-name, and arguments. After a verified approval, Control issues one 30-second
-execution lease. The LiteLLM callback asks Control to claim that exact lease
-before dispatching the tool. Replays, changed arguments, partial bindings, and
-expired leases are denied.
-
-## Trust boundaries
+LemmaComputer lets members run AI applications in managed workspaces. Control
+owns identity, policy, placement, authorization, and audit; user processes run
+in a separate sandbox with narrow grants. This is the starting point for the
+current architecture. Use the linked topic pages for details.
 
 ```mermaid
-flowchart TB
-  subgraph Public["Browser-facing boundary"]
-    Browser["Employee browser"]
-    Ingress["Workspace ingress :4174"]
-    OAuthRoutes["Exact /oauth/mcp/callback and /m365/authorize routes"]
-  end
-
-  subgraph Experience["Private experience plane"]
-    Web["Web static server + /api proxy"]
-  end
-
-  subgraph WorkspaceNode["Workspace compute node"]
-    Controller["Workspace controller<br/>node-local Docker authority"]
-    Relay["Per-workspace desktop relay"]
-    AppRelays["Per-workspace private application relays"]
-    Egress["Per-workspace egress proxy<br/>signed grant, default deny"]
-    subgraph WorkspaceContainer["Workspace container - one per session"]
-      Sandbox["User-controlled sandbox process<br/>runs as kasm-user, uid 1000"]
-      Loopback["Root-owned loopback brokers<br/>hold the scoped credentials"]
-      Sandbox -.->|"127.0.0.1 only; no credential crosses this line"| Loopback
-    end
-  end
-
-  subgraph ControlPlane["Private control plane"]
-    Control["Control API"]
-    Governance["Routing + usage governance"]
-    Channel["Channel broker"]
-    ControlDB[("Product + Better Auth logical databases")]
-  end
-
-  subgraph ConsentPlane["Isolated consent plane"]
-    OpenVTC["OpenVTC consent service"]
-  end
-
-  subgraph DataPlane["Gateway data plane - internal networks only"]
-    LiteLLM["LiteLLM"]
-    M365["Microsoft 365 MCP"]
-    GatewayDB[("Gateway database")]
-  end
-
-  subgraph EgressLayer["Proxied egress - tenant- or user-influenced destinations"]
-    ModelEgress["Gateway egress proxy<br/>static model-provider policy"]
-    McpEgress["Remote MCP egress proxy<br/>custom and public MCP only"]
-  end
-
-  Browser --> Ingress --> Web --> Control
-  Ingress --> OAuthRoutes
-  OAuthRoutes -->|"private callback"| LiteLLM
-  OAuthRoutes -->|"private authorization relay"| M365
-  Control --> ControlDB
-  Control --> Governance --> ControlDB
-  LiteLLM --> Governance
-  Control -->|"mTLS + token when remote"| Controller
-  Control --> OpenVTC
-  Control --> LiteLLM
-  Control --> Channel
-  Controller -->|"creates and verifies signed policy"| WorkspaceContainer
-  Ingress -->|"mTLS when remote"| Relay --> Sandbox
-  Loopback --> AppRelays
-  AppRelays -->|"mTLS when remote"| Control
-  AppRelays -->|"mTLS when remote"| LiteLLM
-  Sandbox --> Egress --> Approved["Approved web destinations"]
-  LiteLLM --> GatewayDB
-  LiteLLM --> M365 --> Graph["Microsoft Graph"]
-  LiteLLM --> ModelEgress --> Providers["Model providers"]
-  LiteLLM --> McpEgress --> RemoteMcp["Remote and public MCP servers"]
-  Channel --> ExternalChannels["External channels"]
+flowchart LR
+  Browser[Browser] --> Ingress[Workspace ingress]
+  Ingress --> Web[Web]
+  Web --> Control[Control API]
+  Control --> ProductDB[(Product and auth databases)]
+  Control -->|signed policy and mTLS when remote| Node[Workspace node]
+  Node --> Sandbox[User workspace]
+  Sandbox --> Broker[Root-owned loopback broker]
+  Broker --> Gateway[Private LiteLLM]
+  Gateway --> GatewayDB[(Gateway database)]
+  Gateway --> ModelProxy[Model egress proxy]
+  Gateway --> MCPProxy[Remote MCP egress proxy]
+  Gateway --> M365[Private Microsoft 365 connector]
+  Control --> Consent[OpenVTC consent]
 ```
 
-The reference deployment publishes one browser-facing product origin on port
-`4174`. Workspace ingress owns that origin and exposes only the exact MCP OAuth
-routes needed by browsers: `GET /oauth/mcp/callback` for private LiteLLM and
-`GET /m365/authorize` for the private Microsoft connector bridge. LiteLLM and
-the bridge do not publish host ports. A networked deployment terminates TLS at
-the public load balancer or reverse proxy and forwards this origin to workspace
-ingress; it must not expose the private upstream services directly.
+## Four rules
 
-See [MCP networking, egress, and OAuth callbacks](mcp-networking.md) for the
-complete inbound browser flow, outbound proxy decisions, redirect handling,
-and provider callback-registration contract.
+1. **Keep credentials out of user processes.** Provider keys, gateway master
+   keys, OAuth tokens, signing keys, channel secrets, and Docker authority stay
+   in their owning services. A workspace agent reaches a root-owned loopback
+   broker, which holds a short-lived, scoped gateway key.
+2. **Sign and verify runtime policy.** Control derives a bundle for the tenant,
+   member, workspace, selected apps/agents, routes, tools, egress policy,
+   version, and expiry. The controller and workspace entrypoint verify it.
+   Missing or changed policy fails closed.
+3. **Treat reachability as a permission.** Each workspace has an internal
+   network and only the relays and egress sidecars its policy requires. In a
+   remote placement the controller runs with node-local Docker authority;
+   Control calls it over mTLS and an application credential. Control never
+   receives the remote Docker socket.
+4. **Bind approvals to exact actions.** Protected tool calls carry an operation
+   digest covering the identity, workspace, policy, tool, and arguments.
+   Verified approval yields one short-lived execution lease. A replay or
+   changed request is denied.
 
-### LiteLLM is an execution boundary, not the governance authority
+## Authority by component
 
-LiteLLM has four distinct interfaces in this system:
-
-| Interface | Caller | Purpose |
+| Component | Authority | Must not become |
 | --- | --- | --- |
-| Private administrator API | Control | Create or revoke encrypted provider credentials, dynamic tenant model routes, scoped virtual keys, MCP server records, and non-authoritative Team budget projections |
-| Workspace data API | Root-owned loopback broker | Submit governed model requests and discover or call only the MCP tools allowed by the current workspace-and-agent key |
-| Browser OAuth surface | Employee browser through a Control-created connection flow | Complete per-user connector authorization while keeping access and refresh tokens inside LiteLLM |
-| LemmaComputer callback | LiteLLM internal request hooks | Ask Control to decide and verify model routes, admit usage, authorize MCP calls, claim protected-operation leases, and record completion evidence |
+| Better Auth inside Control | Verify customer identity and sessions | Product organization or role authority |
+| Product Control | Membership, policy, placement, authorization, approvals, usage and budgets | Credential store for model providers or MCP OAuth |
+| Workspace node | Local sandbox lifecycle and signed-policy enforcement | Cross-tenant scheduler or public API |
+| LiteLLM | Store encrypted provider/OAuth credentials; execute authorized model and MCP requests | Tenant policy, routing, or accounting authority |
+| Egress proxies | Enforce destination policy on user/tenant influenced traffic | Public OAuth callback listener |
+| Workspace ingress | One browser origin and exact private callback relays | General proxy to private service ports |
 
-Control remains authoritative for identity and tool policy, service-class
-routing, approval state, Team budgets, and usage accounting. LiteLLM owns
-provider and OAuth credential custody and performs the authorized upstream
-operation. Its static model list is empty: managed provider deployments are
-tenant-scoped database records created through the private API, and governed
-workspace keys expose only the synthetic `lemmacomputer-auto` alias.
-
-See [LiteLLM gateway architecture](litellm-gateway.md) for the
-full provider lifecycle, grant projections, Auto-switching sequence, MCP/OAuth
-flows, state custody, budget defense in depth, and failure matrix.
+Customer and platform authentication are separate realms. Control validates an
+authenticated customer, then resolves active product membership and resource
+ownership for every protected request. Provider groups, email, and browser
+placement hints have no product authority. See
+[Authentication](authentication.md) and [Tenant isolation](tenant-isolation-matrix.md).
 
 ## Core flows
 
-### Authentication and policy assignment
+**Workspace start.** Control validates membership and policy, creates the
+scoped gateway grant, signs the runtime bundle, and calls the owning workspace
+node. The node verifies the bundle, attaches only allowed services, creates
+persistent storage and optional egress, then starts selected applications.
+[Workspace node](workspace-node.md) records the remote trust and storage
+contract.
 
-1. The Web server proxies `/api` to Control and adds an internal proxy token.
-2. Embedded Better Auth authenticates through verified email/password,
-   passkey, configured social OAuth, or tenant OIDC/SAML and creates a
-   server-side authentication session. Protocol flows retain CSRF, state,
-   nonce, PKCE, issuer, and audience checks as applicable.
-3. Control maps the stable Better Auth account to a LemmaComputer account.
-   Provider links are authentication evidence; email is mutable contact data
-   and provider claims never create product authority.
-4. A new organization owner may create an organization through the protected
-   bootstrap transaction. Other first admission requires a pending invitation
-   whose exact verified email matches; the invitation alone fixes its
-   organization and role.
-5. Control creates a server-side product authorization context keyed to the
-   validated Better Auth session and selected active membership. Raw provider
-   and authentication tokens are not copied into product sessions.
-6. Control loads the membership role and permission union for every
-   protected route. Provider claims never grant product authority. Runtime
-   policy assignment remains separate from organization RBAC.
+**Model request.** Chat or the agent requests a service class. The workspace
+broker forwards through LiteLLM's synthetic `lemmacomputer-auto` transport
+alias with a signed task binding. Control decides the exact tenant deployment
+from policy, capability, health, price, residency, and budget; the gateway
+callback verifies it and obtains a usage admission before dispatch. LiteLLM
+cannot silently fall back to another deployment. The callback records
+completion and usage; a missing completion remains visible for reconciliation.
+See [LiteLLM gateway](litellm-gateway.md) and [Model routing](../product/model-routing.md).
 
-The Web proxy token is not a user identity. It only identifies the trusted Web
-process; the validated authentication session plus active product membership
-establish the employee principal. No direct workforce-Entra or hosted External
-ID customer route exists outside this core flow.
+**MCP tool.** A workspace key permits only the projected connector servers
+and tools. Control checks arguments against current policy. Low-risk calls may
+proceed. Protected calls require exact OpenVTC consent and a one-time lease.
+No connector token enters the workspace. See [MCP networking](mcp-networking.md).
 
-### Workspace provisioning
-
-1. The employee saves a configuration constrained to applications, agents,
-   the governed model route, and available default service classes assigned by
-   policy.
-2. Control derives the runtime policy, signs it, and creates scoped gateway and
-   agent grants.
-3. Control sends the signed bundle and grants to the controller over an
-   authenticated internal API.
-4. The controller verifies signature, expiry, policy hash, workspace binding,
-   and grant projection.
-5. The sandbox adapter creates a persistent home volume, an internal workspace
-   network, optional egress sidecar, managed desktop, and Kasm relay.
-6. The workspace entrypoint verifies policy again, writes managed application
-   configuration, starts only selected applications/agents, and reports ready.
-
-The same Lemma-owned Docker/KasmVNC adapter talks to the node-local Docker
-socket in both placements. In a remote deployment the controller itself moves
-to the private workspace node; Control calls its workspace-bound API over mTLS
-and never receives Docker authority. Workspace ingress and the node application
-relays also present workload client certificates on their cross-boundary
-routes. See the [remote workspace-node architecture](../guides/development-workflow.md#remote-workspace-node-architecture) and
-[Workspace node deployment](workspace-node.md).
-
-### Model request
-
-1. Chat or the managed AI client selects a requested service class. The
-   workspace configuration supplies the default; Chat may apply a
-   per-conversation override. Lite, Balanced, and Pro are product contracts
-   rather than provider model names. `lemmacomputer-auto` is only the internal
-   synthetic gateway transport, not a selectable employee mode.
-2. The root-owned loopback broker restricts paths, removes requester-supplied
-   LemmaComputer and LiteLLM routing metadata, and forwards
-   `lemmacomputer-auto` with its workspace-and-agent key and signed task binding.
-3. LiteLLM validates key expiry, the synthetic model allowlist, trusted
-   identity metadata, concurrency, and RPM limits. Token usage is metered
-   without a LemmaComputer-imposed per-minute allowance.
-4. The LemmaComputer callback asks Control for a routing decision. Control
-   resolves the subject's default spending Team, immutable Team and identity
-   policies, rollout mode, mapping, provider capability and health evidence,
-   effective rate card, currency, residency, and budget eligibility.
-5. Control records the decision and candidate evidence, then returns a
-   short-lived signed binding for one concrete deployment. LiteLLM verifies the
-   binding against the selected deployment immediately before dispatch and
-   admits the exact provider attempt to the usage ledger and Team budget.
-6. The callback removes governance and authentication internals from the
-   provider request. LiteLLM never falls back outside the signed concrete
-   deployment. Explicit Lite, Balanced, or Pro requests skip Auto
-   classification but remain subject to every policy, capability, price,
-   health, residency, and budget check.
-7. After completion, the callback records normalized usage, cost and routing
-   observation evidence. Provider availability failures temporarily mark that
-   deployment unavailable; a later success clears the signal. A missing final
-   usage event leaves the admission visible for reconciliation.
-
-Raw prompts and responses are not written by the configured gateway logging
-path or the governance ledger.
-
-Claude Desktop accepts only model identifiers from its built-in model catalog.
-The LiteLLM adapter therefore projects policy aliases onto a small set of
-client-compatible transport aliases. Gateway key metadata retains both the
-policy alias and client alias for auditability.
-
-### Governed Microsoft 365 operation
-
-```mermaid
-sequenceDiagram
-  participant Agent as Managed agent
-  participant Gateway as LiteLLM + policy callback
-  participant Control as Control API
-  participant Consent as OpenVTC service
-  participant Approver as Companion approver
-  participant M365 as Microsoft 365 MCP
-
-  Agent->>Gateway: Call MCP tool with scoped key
-  Gateway->>Control: Authorize identity, policy, tool, arguments
-  Control->>Control: Validate schema and persist exact operation digest
-  Control-->>Gateway: approval_required + operation ID
-  Gateway-->>Agent: Approval required
-  Control->>Consent: Sign consent request
-  Consent-->>Control: Signed OpenVTC document
-  Control-->>Approver: Content-free push hint / inbox delivery
-  Approver->>Control: Signed approve or deny document
-  Control->>Consent: Verify decision proof and bindings
-  Consent-->>Control: Verified signer and proof
-  Control->>Control: Record decision and claim 30-second execution lease
-  Control->>Gateway: Execute with operation digest + lease
-  Gateway->>Control: Re-authorize dispatch
-  Control-->>Gateway: One-time lease claimed
-  Gateway->>M365: Dispatch exact approved tool call
-  M365-->>Gateway: Result
-  Gateway-->>Control: Result
-  Control->>Control: Hash result and store receipt
-```
-
-Read operations can be assigned `allow`; protected operations use
-`approval_required`; denied or unassigned capabilities never reach the
-connector. Connector-side `confirm` fields are treated as defense in depth and
-are excluded from the user-controlled operation fingerprint.
+**Browser ingress.** One product origin reaches workspace ingress, Web, and
+Control. It exposes only exact connector callback paths to private services:
+`GET /oauth/mcp/callback` and `GET /m365/authorize`. LiteLLM and the M365 bridge
+must not be public. A load balancer or reverse proxy terminates external TLS.
 
 ## Compose network topology
 
-| Network | Members | Internet route |
+The local Compose names below describe *reachability*, not authorization. A
+cloud deployment must preserve the boundaries with workload identities,
+security groups, routes, and egress policy.
+
+| Network | Main members | Internet path |
 | --- | --- | --- |
-| `public-edge` | ingress | Yes, for the host-published product origin |
-| `web-edge` | ingress, Web, Control | No |
-| `lemmacomputer-control` | Control, controller, channel broker, scheduler worker, ingress, dynamic relays | No |
-| `consent-private` | Control, OpenVTC | No |
-| `gateway-private` | Control, LiteLLM, gateway database, M365 MCP, model egress proxy | No |
-| `identity-egress` | Control | Yes, for configured social OAuth and company SSO discovery/token exchange |
-| `model-egress` | model egress proxy, remote-MCP egress proxy | Yes, restricted by separate model and remote-MCP policies |
-| `microsoft-egress` | M365 MCP | Yes, for Microsoft identity and Graph |
-| `channel-egress` | channel broker | Yes, for configured channel providers |
-| dynamic workspace network | one sandbox plus selected gateway/control sidecars | No |
-| dynamic egress network | per-workspace egress proxies | Yes, policy enforced |
+| `public-edge` | Ingress | Product origin |
+| `web-edge` | Ingress, Web, Control | None |
+| `control-private` (Docker name from `LEMMACOMPUTER_CONTROL_NETWORK`) | Control, controller, channel broker, scheduler, ingress, relays | None |
+| `consent-private` | Control, OpenVTC | None |
+| `gateway-private` | Control, LiteLLM, gateway DB, M365, model proxy | None |
+| `mcp-client-private`, `mcp-egress-private`, `litellm-admin-private` | Narrow MCP and admin links | None |
+| `identity-egress` | Control | Configured social/SSO provider calls |
+| `model-egress` | Model and remote-MCP proxies | Separate restricted provider/MCP policies |
+| `microsoft-egress` | M365 connector | Microsoft identity and Graph |
+| `channel-egress` | Channel broker | Configured channel providers |
+| Dynamic workspace/egress networks | One sandbox and its selected sidecars | Only signed-policy egress |
 
-Docker network membership limits reachability; application authentication and
-signed bindings remain mandatory even on private networks.
-
-LiteLLM is not attached to an internet-routed network. Normal model traffic
-uses the model egress proxy and its static provider allowlist. Public MCP
-servers use a separate, version-pinned strict client: it explicitly selects the
-remote-MCP egress proxy and ignores proxy environment variables and `NO_PROXY`.
-That applies to tool discovery, calls, OAuth metadata, dynamic registration,
-token exchange, refresh, and every redirect. The proxy resolves every DNS
-answer, rejects private or mixed answers, pins the selected public IP, checks
-TLS SNI, and evaluates every redirect connection independently. The private
-Microsoft MCP connector is explicitly classified as internal and stays on its
-private route.
-
-The remote-MCP proxy has its own LiteLLM service credential, a default-deny
-empty static policy, and an authenticated Control callback that receives only
-normalized protocol/host/port values. Errors and timeouts deny the connection.
-In hosted multi-tenant mode, custom MCP origins come from the deployment-owned
-`LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` allowlist rather than tenant connector
-records, so a tenant administrator cannot create a gateway-wide destination.
+LiteLLM itself has no direct internet-routed network. Its model and public-MCP
+traffic use separate proxies. Remote-MCP destinations are resolved and
+rechecked on redirects; private and mixed public/private results deny. Hosted
+custom MCP origins also need deployment-owned approval. The M365 connector is
+a private built-in path. See [MCP networking](mcp-networking.md) for exact
+callback and egress behavior.
 
 ## State and recovery
 
-Control PostgreSQL is authoritative for identities, sessions, assignments,
-workspace records, signed-policy keys, connection metadata, OpenVTC enrollment,
-operations, execution leases, receipts, audit events, and channel routes.
-It also owns encrypted agent schedules and their content-free run metadata.
-
-A dedicated scheduler worker polls this database and leases due occurrences.
-It sends only run identifiers and lease tokens to Control. Control decrypts the
-prompt, re-evaluates current ownership and policy, and dispatches through the
-existing agent-chat bridge. The worker has no Docker socket, provider
-credential, prompt key, or direct workspace-network access.
-
-LiteLLM PostgreSQL owns gateway keys, encrypted provider credentials, model
-configuration stored by LiteLLM, and user OAuth state. Control PostgreSQL owns
-the tenant-scoped provider route metadata needed to govern those records. It is
-also authoritative for Teams and default spending assignments, rate cards,
-budgets and reservations, usage admissions/events/corrections, cost-coverage
-review baselines, routing mappings and policies, rollout reviews and modes,
-decisions and observations, and deployment-health evidence. These records are
-append-only or versioned where they form accounting or governance evidence.
-Per-workspace home directories are Docker volumes for the local sandbox driver.
-These state classes must be backed up and restored consistently for disaster recovery.
-
-Operation transitions and execution claims use database concurrency controls.
-An interrupted execution lease can be recovered, but a completed dispatch
-cannot be replayed with the same lease.
+Product Control, customer-auth, platform-auth, and LiteLLM are four logical
+databases. Product Control also owns conversations, artifact metadata,
+placement, policy, approvals, audit, usage, Teams, budgets, and schedules.
+LiteLLM owns encrypted provider credentials, scoped keys, and connector OAuth
+tokens. Workspace homes and artifact bytes are additional state. Restore a
+coordinated set with matching secret versions; see
+[Operations](../guides/operations.md#backup-and-restore).
 
 ## Security invariants
 
-Changes must preserve these invariants:
-
-- no provider, OAuth, channel, signing, or infrastructure credential enters a
-  user process;
-- every workspace grant is tenant/user/workspace/agent/policy scoped and
-  revocable;
-- every runtime policy is signed and independently verified;
-- every governed model dispatch matches a fresh signed concrete-deployment
-  decision and a durable usage admission;
-- service-class choice never bypasses Team/identity policy, price integrity,
-  budget, capability, health, currency, or residency controls;
-- MCP policy failure is a denial, never an implicit allow;
-- a protected operation executes only after verified, exact, unexpired consent;
-- an execution lease is complete, short-lived, and one-time;
-- egress defaults to deny and evaluates resolved destinations;
-- logs redact authorization headers, tokens, arguments, request bodies, launch
-  URLs, and OAuth callback query strings;
-- externally reachable routes are explicit and minimal.
+- Every customer-owned record and grant is tenant-scoped, including in a
+  customer-managed installation.
+- No user process receives a provider, OAuth, channel, signing, or
+  infrastructure credential.
+- Runtime policy is signed, scoped, revocable, and verified by each trust
+  boundary.
+- A model dispatch requires a fresh exact-deployment decision and durable
+  usage admission; policy, price, budget, or routing failure denies dispatch.
+- MCP authorization failure denies the call. Protected actions require exact,
+  unexpired consent and a one-time execution lease.
+- External routes are explicit; egress defaults to deny for user-influenced
+  destinations. Logs omit tokens, launch URLs, request bodies, tool arguments,
+  and OAuth callback query strings.

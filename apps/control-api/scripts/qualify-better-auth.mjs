@@ -17,8 +17,10 @@ const [rootPackage, controlPackage, lockfile, qualification] = await Promise.all
 
 for (const [packageName, expectedVersion] of Object.entries(qualification.packages)) {
   assert.equal(controlPackage.dependencies[packageName], expectedVersion, `${packageName} must be an exact Control API dependency`);
-  const lockPath = `apps/control-api/node_modules/${packageName}`;
-  assert.equal(lockfile.packages[lockPath]?.version, expectedVersion, `${packageName} lockfile version must match qualification contract`);
+  const workspacePath = `apps/control-api/node_modules/${packageName}`;
+  const rootPath = `node_modules/${packageName}`;
+  const lockedPackage = lockfile.packages[workspacePath] ?? lockfile.packages[rootPath];
+  assert.equal(lockedPackage?.version, expectedVersion, `${packageName} lockfile version must match qualification contract`);
 }
 
 assert.equal(rootPackage.scripts["qualify:better-auth"], "npm run qualify:better-auth -w @lemmacomputer/control-api");

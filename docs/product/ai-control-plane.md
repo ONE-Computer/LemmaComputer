@@ -12,59 +12,19 @@ and `hosted` deployment profiles.
 | View | Purpose | Authoritative state |
 | --- | --- | --- |
 | Overview | Current-month provider cost, Team budget coverage, spend trend, top Teams, and the disclosed token-emissions proxy | Usage ledger, Team budgets, and configured provider serving-grid assumptions |
-| Models & providers | Write-only provider credentials, approved model inventory, capabilities, route health, and estimated serving grid | LiteLLM credential/model APIs plus tenant-scoped lifecycle metadata in Control |
-| Model routes | Immutable Lite/Balanced/Pro deployment mappings, Team eligibility, shadow evidence, reviews, rollout mode, and kill switch | Control PostgreSQL routing records |
-| Pricing | Immutable deployment rate-card versions and pricing coverage | Control PostgreSQL rate cards and the pinned local catalogue |
+| Models & routing | Provider credentials and model inventory, pricing, and immutable Lite/Balanced/Pro route mappings | LiteLLM credential/model APIs plus Control rate-card and routing records |
 | Teams & budgets | Spend-allocation membership, default spending Team, period budgets, enforcement, overrides, and reconciliation | Control PostgreSQL Team, ledger, reservation, and budget records |
 | Data health | Active pricing gaps, admitted attempts awaiting usage, failed attempts without usage, and historical review baselines | Usage admissions/events and append-only cost-coverage acknowledgements |
 | Spend Details | Date-filtered spend, exports, Team/user/task drill-down, safe cost drivers, attempts, usage buckets, and price evidence | Frozen tenant-scoped read model over the append-only usage ledger |
 
 Spend Details opens from Overview and returns there. It is not a separate
-Settings destination. Provider configuration also lives here, under **Models &
-providers**, rather than in personal Settings.
-
-## Governed request and accounting flow
-
-```mermaid
-sequenceDiagram
-  participant Client as Chat or managed workspace agent
-  participant Broker as Root-owned loopback broker
-  participant Gateway as LiteLLM + LemmaComputer callback
-  participant Control as Control routing and usage authority
-  participant Store as Control PostgreSQL
-  participant Provider as Selected model provider
-
-  Client->>Broker: Prompt + requested service class
-  Broker->>Gateway: lemmacomputer-auto + signed task binding + scoped key
-  Gateway->>Control: Decide route from bounded signals and trusted identity
-  Control->>Store: Resolve Team, policy, rollout, mapping, price, budget, health
-  Store-->>Control: Immutable decision context
-  Control-->>Gateway: Signed concrete-deployment binding
-  Gateway->>Control: Verify binding and admit exact provider attempt
-  Control->>Store: Decision + budget reservation + usage admission
-  Gateway->>Provider: Request with governance metadata removed
-  Provider-->>Gateway: Response + provider usage
-  Gateway-->>Client: Response
-  Gateway->>Control: Normalized completion and routing observation
-  Control->>Store: Usage event, settlement, cost, health evidence
-```
-
-Admission fails closed when routing, ledger, budget, or required pricing state
-is unavailable. Completion recording is best effort after a provider response;
-an admission without a final usage event remains visible in Data health for
-reconciliation. The gateway never falls back outside the concrete deployment
-in the signed decision.
+Settings destination. Provider configuration lives under **Models & routing**.
 
 ## Model selection scopes
 
-Auto, Lite, Balanced, and Pro are service contracts, not provider models.
-Auto is labelled Beta for Phase 0.5. New Team policy setup creates a fixed
-Balanced rollout; selecting Auto or publishing a mapping does not enable
-dynamic execution. Shadow evidence records the hypothetical selection and the
-executed fixed route as distinct facts. Only a matching passed review followed
-by explicit Team enablement changes live routing, and the kill switch appends a
-disabled rollout that immediately restores the fixed route.
-There are two user selection scopes:
+Members select Lite, Balanced, or Pro. These are product service classes, not
+provider models. `lemmacomputer-auto` is an internal gateway transport alias,
+not a member-facing model choice. There are two selection scopes:
 
 - **Workspace default:** saved in the policy-bounded workspace configuration
   and used when starting a new conversation.
@@ -74,36 +34,36 @@ There are two user selection scopes:
   workspace default.
 
 Clearing site data or opening another browser loses the local conversation
-override. Unsupported saved values fall back to Auto. Regardless of the UI
-choice, governed traffic uses the single synthetic `lemmacomputer-auto` transport
-alias; the requested class is trusted only after Control evaluates the signed
-task and workspace context.
+override. Unsupported saved values fall back to the workspace default.
+Governed traffic uses the synthetic `lemmacomputer-auto` transport alias;
+Control validates the requested class against the signed task and workspace
+context.
 
-An explicit Lite, Balanced, or Pro request bypasses Auto task classification,
-but it does not bypass identity or Team policy, capabilities, residency,
-deployment health, price integrity, currency, or budget checks. A denied or
-ineligible explicit class fails closed.
+The selected class still requires identity and Team policy, capability,
+residency, health, price, currency, and budget checks. An ineligible class
+fails closed. The signed concrete deployment, admission, and completion flow
+is described in [Model routing](model-routing.md) and
+[LiteLLM gateway](../architecture/litellm-gateway.md).
 
 ## Administrator setup order
 
 1. Configure and test at least one provider and its approved models in **Models
-   & providers**.
-2. Add complete immutable rate cards in **Pricing** for every deployment that
+   & routing**.
+2. Add complete immutable rate cards there for every deployment that
    may carry governed traffic.
-3. Publish an immutable Lite/Balanced/Pro mapping in **Model routes** using the
+3. Publish an immutable Lite/Balanced/Pro mapping there using the
    provider-reported capability inventory.
 4. Create Teams, assign each active user a default spending Team, and configure
    budgets where enforcement is required.
-5. Set up each Team's routing policy in shadow mode, review a representative
-   evidence window, and explicitly enable production routing only after a
-   passing immutable review.
+5. Set up each Team's routing policy, review shadow evidence when enabling
+   dynamic routing, and explicitly enable it only after a passing review.
 6. Monitor Overview, Spend Details, and Data health. Use the kill switch to
    append a disabled rollout when production routing must return to its fixed
    deployment.
 
 Provider setup, pricing, mapping, policy, and rollout are separate authorities.
 Saving a provider key does not automatically price it, assign it to a service
-class, or enable production Auto routing.
+class, or enable dynamic routing.
 
 ## Evidence and privacy boundaries
 

@@ -1,923 +1,196 @@
-# Configuration and operations
+# Operating a local LemmaComputer stack
 
-The root `compose.yaml` is the reference deployment for a single-host
-development or evaluation environment. The checked-in deployment environment
-contract in `scripts/deployment-config.mjs` is the source of truth for every
-operator setting; it generates `.env.example`, validates profile-specific
-requirements, and renders least-privilege service environment files for Compose
-or another deployment target. Compose owns only container topology. It replaces layered infrastructure
-snapshots with one validated topology, two managed database volumes, explicit
-network boundaries, health-gated dependencies, and a separate build target for
-the workspace image.
+**Use this page after a local Compose installation exists.** It covers safe
+start/stop, health checks, persistence, and recovery. The root `compose.yaml`
+is a development and evaluation reference on one Docker host. It is not the
+hosted AWS deployment procedure. For first setup use the
+[development workflow](development-workflow.md); for an AWS installation use
+[the go-live path](aws-go-live.md). For the separately managed EC2 demo use
+[demo releases](demo-release.md), not the commands below.
 
-For a first installation, follow the ordered
-[local deployment and Microsoft integration runbook](local-deployment.md). This page is
-the ongoing configuration, recovery, and production-hardening reference.
+## Start and stop
+
+In the checkout that owns the stack, keep its existing `.env` and Docker
+volumes. For a task worktree, run `npm run dev:doctor` at the start of the
+session, then:
+
+```bash
+npm run env:check
+npm run compose:up
+```
+
+`compose:up` renders each service's limited environment, runs explicit database
+migration jobs, and waits for health. Application startup checks schema
+compatibility but does not migrate. Build the separate desktop image with
+`npm run image:workspace` before creating a managed desktop.
+
+Stop all active workspaces through LemmaComputer first. Then run:
+
+```bash
+npm run compose:down
+```
+
+The command refuses to stop while local workspace containers remain, and it
+preserves database and workspace volumes. Do not use `-- --volumes` for a stack
+with data. Never copy another checkout's `.env` or attach its writable volumes.
 
 ## Configuration lifecycle
 
-Create `.env` once:
-
-```bash
-npm ci
-npm run env:init
-```
-
-The initializer renders the canonical contract, generates local cryptographic material,
-writes the result with mode `0600`, and refuses to replace an existing file.
-Use `--force` only when intentionally invalidating all current local sessions,
-policy signatures, approvals, encrypted credentials, and service trust:
-
-```bash
-npm run env:init -- --force
-```
-
-For an alternate path:
-
-```bash
-npm run env:init -- --file=/absolute/path/to/lemmacomputer.env
-npm run env:render -- --file=/absolute/path/to/lemmacomputer.env
-docker compose --env-file /absolute/path/to/lemmacomputer.env config --quiet
-```
-
-Compose automatically loads only a root `.env`. Pass `--env-file` for any
-other location.
-
-After updating the checkout, compare the existing environment with the current
-template before starting services:
+The environment contract lives in
+[`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs). Its
+generated `.env.example` lists every operator variable. `npm run worktree:init`
+creates a task worktree's `.env` once. A dedicated disposable evaluation clone
+uses `npm run env:init -- --profile=worktree`. After pulling a change to the
+contract, run:
 
 ```bash
 npm run env:check
-```
-
-Safely merge newly introduced variables without rotating existing values:
-
-```bash
-npm run env:update
+npm run env:update   # only if the check reports missing variables
 npm run env:check
 ```
 
-The updater maps supported renamed or previously implicit variables, generates
-only missing local secrets, and preserves unknown variables in a review section.
-It refuses duplicate variables and incomplete coupled signing or Web Push key
-groups. Review preserved extra variable names manually; the commands never
-print their values.
+`env:update` preserves existing values and reports extra variable names.
+`env:init --force` replaces generated secrets and can invalidate sessions,
+signatures, and encrypted records; it is not an update command. Repository
+commands generate `.runtime-env/<service>.env` for each service. Before a
+direct `docker compose` command, run `npm run env:render` and use
+`docker compose config --quiet` so interpolated secrets are not printed.
 
-`npm run env:render` writes `.runtime-env/<service>.env` with mode `0600`.
-Each service receives only its declared inputs, so do not substitute a global
-`.env` file as a service `env_file`. A non-Compose deployment adapter can
-consume the same projection; it must provide the equivalent internal service
-names or adapt those reference topology values for its platform.
+The public browser origin is `LEMMACOMPUTER_PUBLIC_WEB_URL`. Its exact value
+must match OAuth callbacks. The reference stack binds published ports to
+`127.0.0.1` by default. Provider API keys and personal connector OAuth tokens
+are configured through the product, not `.env`. Real authentication and
+invitation email uses Postmark; the development `capture` transport is local
+only. Keep signing, encryption, Better Auth, LiteLLM, and workspace-ingress
+secrets in the recovery set for as long as their dependent state exists.
 
-The `npm run compose:*` and `npm run image:workspace` commands render those
-files automatically. Before a direct `docker compose` command, run
-`npm run env:render` for the same environment first. The reference Compose
-stack requires Docker Compose v2.30.0 or later so its `env_file` entries can
-use literal `raw` format for secret-manager values.
-
-Qualification stacks use a separate generated
-`.env.qualification.example` reference and create their secrets and ports at
-run time. They are test-only inputs and are intentionally rejected from a
-production deployment environment.
-
-## Environment variable groups
-
-### Public routing
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `LEMMACOMPUTER_HTTP_BIND_ADDRESS` | `127.0.0.1` | Host bind address for all published ports |
-| `LEMMACOMPUTER_WEB_PORT` | `4174` | Product and workspace-ingress port |
-| `LEMMACOMPUTER_PUBLIC_WEB_URL` | `http://localhost:4174` | Canonical product and authentication origin |
-
-Workspace ingress derives the browser-facing connector routes from the one
-canonical origin. It forwards only `GET /oauth/mcp/callback` to private
-LiteLLM and `GET /m365/authorize` to the private Microsoft 365 bridge. LiteLLM
-and the bridge do not publish host ports. Changing
-`LEMMACOMPUTER_PUBLIC_WEB_URL` requires updating configured OAuth application
-redirect URIs.
-
-### Identity and bootstrap
-
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `LEMMACOMPUTER_BETTER_AUTH_SECRET` | Yes | Versioned Better Auth signing and encryption secret; generated locally and stored in a production secret manager |
-| `LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT` | Yes | `capture` for non-production tests or `postmark` for real transactional delivery |
-| `LEMMACOMPUTER_INVITATION_DELIVERY_MODE` | Yes | `email`, or explicit `copy-link` only where the profile permits it |
-| `LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID` and secret | Optional pair | Google customer social login |
-| `LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID` and secret | Optional pair | Microsoft customer social login |
-| `LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS` | Tenant OIDC only | Comma-separated exact HTTPS IdP origins permitted for server-side discovery; never use wildcards |
-| `LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET` | Hosted/worktree platform realm | Versioned signing and encryption secret isolated from customer authentication |
-| `LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_EMAIL` | Hosted | Exact identity of the first platform administrator |
-| `LEMMACOMPUTER_PLATFORM_AUTH_BOOTSTRAP_SECRET` | First platform enrollment only | One-time secret removed from deployment custody after passkey enrollment |
-
-In both profiles, Better Auth proves customer authentication and LemmaComputer
-resolves the active organization membership and permissions. Self-service
-organization creation establishes protected ownership; invitations activate
-only their predetermined organization and role. Social-login and company-SSO
-claims cannot select or elevate a product membership. An organization administrator can later suspend or
-reactivate a membership, revoke its active sessions, change its policy
-assignment, and manage sandbox and egress security-group configuration.
-A returning user does not automatically regain a policy that an administrator
-revoked.
-
-#### Tenant suspension and closure
-
-The platform-operator tenant lifecycle is an access and workspace-runtime
-control for Phase 0.5; it is not a tenant-data erasure workflow.
-
-- **Suspend** revokes active product sessions, fences every affected workspace
-  generation, and queues retryable workspace destruction and gateway
-  revocation. Reactivation is refused until every cleanup job completes, and
-  it never restarts customer compute automatically.
-- **Offboarding** records operator intent but does not itself revoke access or
-  start cleanup. Use **Suspend** when access must stop immediately.
-- **Close** performs the same immediate revocation and fences, then also purges
-  workspace-owned runtime storage. Closing is terminal because that storage
-  purge is destructive; restore from a backup into a new tenant instead of
-  editing lifecycle rows or trying to reactivate the closed tenant.
-
-During suspension or closure, the scheduler does not claim tenant runs and the
-channel broker does not poll tenant connections. A run claimed just before the
-lifecycle transaction cannot enter the running state afterward. Control also
-denies product, connector, tool, and workspace authorization through the same
-tenant lifecycle and workspace-generation checks.
-
-Inspect `GET /v1/platform/tenant-cleanup` until all affected jobs are
-`completed`. `retry` means the dispatcher will resume from its recorded stage;
-`escalated` means automatic attempts were exhausted and service health remains
-degraded until an operator resolves the dependency and deliberately retries
-through supported tooling. Do not delete or rewrite cleanup or audit rows.
-
-Phase 0.5 closure does not claim physical deletion of canonical chats,
-artifacts, audit/history, provider or OAuth records, indexes, or backups. Legal
-hold, configurable retention, tenant export, and verified tenant-wide erasure
-remain separate post-0.5 data-governance work. Operator reasons and diagnostic
-evidence must never contain credentials, tokens, prompts, provider payloads,
-signed URLs, or hidden reasoning.
-
-#### Company SSO lifecycle
-
-Company SSO uses `@better-auth/sso` in the local authentication database for
-both deployment profiles. LemmaComputer remains the only organization,
-membership, and role authority. Provider groups, administrator claims, and
-email domains never create product access.
-
-Before configuring OIDC, add every exact HTTPS origin used by its discovery,
-authorization, token, user-info, and JWKS endpoints to
-`LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS`, then restart Control. Do not
-use wildcards. SAML configuration does not require this discovery allowlist.
-
-1. The protected organization owner opens **Settings → People and access →
-   Company SSO**, adds OIDC client credentials or a SAML sign-in URL and
-   signing certificate, and records the generated callback URL.
-2. Add the displayed DNS TXT proof and use **Verify DNS**. An invitation for
-   the verified email domain may then use the pending provider, but ordinary
-   domain sign-in remains disabled.
-3. Invite a standards-provider account as Administrator. The invitee chooses
-   **Continue with company SSO**, completes any Better Auth email-verification
-   step, accepts the predetermined membership, and uses **Test provider**.
-4. The owner proves a non-SSO recovery method with recent MFA, chooses
-   **Confirm recovery**, then **Enforce SSO**. Only now may public company login
-   route the verified domain. Existing memberships still decide access.
-
-Credential rotation and metadata refresh fence routing first: the connection
-becomes `pending`, its configuration version increments, and prior test,
-recovery, and enforcement timestamps are cleared before Better Auth is
-changed. OIDC refresh re-fetches discovery; SAML refresh requires bounded IdP
-metadata XML. Retest, reconfirm owner recovery, and enforce again. If refresh
-or rotation fails, leave the connection pending and use another sign-in method
-while correcting it; never force the old route active.
-
-**Suspend** immediately disables company routing without deleting provider
-configuration. **Roll back** returns a suspended connection to active but does
-not enforce it. **Disconnect** first removes product routing and then deletes
-the Better Auth provider. Disconnect before transferring organization
-ownership so Better Auth provider administration cannot remain bound to the
-former owner.
-
-Release evidence must include Microsoft Entra and one non-Microsoft SAML/OIDC
-provider. For each, capture setup, DNS verification, invitation admission,
-successful provider test, enforcement, failed unknown/uninvited admission,
-metadata refresh or credential rotation, suspension/recovery, rollback, and
-disconnect without recording credentials, codes, assertions, or tokens.
-
-### Microsoft 365
-
-`LEMMACOMPUTER_MS365_TENANT_ID`, `LEMMACOMPUTER_MS365_CLIENT_ID`, and
-`LEMMACOMPUTER_MS365_CLIENT_SECRET` are optional as a group. When used, all
-three are required and belong to a dedicated connector application so Graph
-scopes and credential rotation stay isolated from customer authentication.
-
-The connector requests only the fixed scope list in `compose.yaml`. Tenant
-administrators should review those scopes against the enabled tool allowlist.
-See [Configure Microsoft 365](local-deployment.md#configure-a-dedicated-microsoft-365-connector-app)
-for the exact local redirect URIs and delegated permission list.
-
-### Hosted MCP connectors
-
-The unified **Connections** screen includes a built-in catalog of official,
-provider-hosted remote MCP servers. Listing a card without an existing
-connection marker only seeds non-secret metadata; it does not register the
-server with LiteLLM, refresh a workspace grant, or expose its tools to an
-agent. On a later Connections entry, Control can revalidate only that person's
-explicit markers and reconciles the workspace grant only when a marker's
-resolved state changes or remains expired. Selecting **Connect** registers and
-checks only that selected connector, then starts its per-user OAuth flow.
-
-Notion, Linear, Atlassian, monday.com, Calendly, ClickUp, Canva, Fireflies,
-Alpha Vantage, Massive, and Intrinio use their official hosted MCP endpoints
-and dynamic OAuth client registration. Google Workspace's Gmail, Drive, and
-Calendar servers require a dedicated Google OAuth application: configure
-`LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID` and
-`LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET`, and register the LiteLLM
-callback `${LEMMACOMPUTER_PUBLIC_WEB_URL}/oauth/mcp/callback`. Keep that client
-separate from the optional Google customer sign-in client so its scopes,
-consent, callback, and rotation are independently reviewable. GitHub likewise
-requires an OAuth app; configure `LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID` and
-`LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET` with the same callback. Other
-providers can impose their own OAuth-app approval or allow-list requirements;
-an unsuccessful registration or authorization leaves the catalog card
-disconnected and contributes no tools.
-
-After a person successfully connects a service, Control discovers that
-person's available tools and projects only those explicitly connected tools
-into that person's workspace grant. Cards that are visible but disconnected,
-disabled, or unavailable are never injected into the agent tool set.
-
-Administrators can add another OAuth-capable remote connector from
-**Connections → Add connector** without changing application code:
-
-1. Enter the public HTTPS MCP endpoint, catalog copy, provider scopes, and any
-   provider app client ID/secret.
-2. **Check server** creates a short-lived LiteLLM discovery session and verifies
-   that the endpoint exposes a compatible OAuth authorization flow.
-3. **Add connector** consumes that one-time check and creates the persistent
-   LiteLLM MCP server. Only non-secret catalog metadata is persisted in
-   `connector_registry`; client settings and per-user OAuth credentials stay in
-   LiteLLM.
-4. When a person connects the service, Control discovers that user's exact
-   server tools and refreshes every workspace grant they own. The aggregate
-   workspace MCP bridge then advertises the newly granted tools to all assigned
-   workspace agents without rebuilding the workspace.
-
-Custom endpoints are admitted only after public-HTTPS parsing and resolution
-of every A and AAAA answer. IP literals, private/link-local/ULA answers,
-mixed public-and-private DNS answers, credentials, and fragments are rejected.
-That admission check is defense in depth: LiteLLM has no direct internet route.
-Model requests use the static-provider `gateway-egress-proxy`; public MCP and
-OAuth requests use the separate `remote-mcp-egress-proxy`. The strict MCP
-client cannot inherit `NO_PROXY`, and the remote proxy resolves and validates
-every connection again, pins the approved IP, checks TLS SNI, and independently
-authorizes redirected destinations. See [MCP networking, egress, and OAuth
-callbacks](../architecture/mcp-networking.md) for the complete path.
-
-For a hosted deployment, the platform/network owner must put every exact HTTPS
-origin used by the MCP and OAuth flow—endpoint, protected-resource and
-authorization-server metadata, authorization, token, and dynamic-client-
-registration origins—in
-`LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` before a tenant administrator can add
-the connector. This is deliberately deployment-owned rather than tenant-local:
-a shared LiteLLM gateway must not let one tenant create a new gateway-wide
-egress destination. Customer-managed installations can use their own
-connector-registry approval path. The check result shows the discovered
-authorization origin; adding the connector is the administrator's explicit
-confirmation of that origin.
-
-Disconnecting a service invalidates its connection projection and refreshes the
-same grants. If a grant cannot be refreshed, Control revokes it so an agent
-cannot keep stale connector access. Grant renewal also recomputes the projection
-periodically. Identically named tools from different connectors are exposed
-with connector-qualified names and routed back to their original server.
-
-#### OAuth credential renewal and recovery
-
-Connection-status checks do not invoke a connector tool or perform a provider
-business action. When LiteLLM reports a person's OAuth connection as expired,
-Control can make one serialized, scoped **safe discovery** request: it asks
-LiteLLM only for that person's enabled tool list for that connector. LiteLLM
-may use its stored refresh credential and rotate it during this discovery;
-Control then reads the connection status again. OAuth access and refresh tokens
-are never returned to Control, included in the tool projection, or suitable for
-operator log inspection.
-
-The pinned qualification fixture returns a renewed token lasting 65 seconds:
-LiteLLM treats tokens within its 60-second expiry skew as stale, and a shorter
-fixture lifetime can cause its compatibility and v2 resolver paths to refresh
-the same connection twice. The release qualifier therefore asserts exactly one
-successful refresh request and one Control safe discovery. A denied renewal may
-be retried by LiteLLM's resolver, but it must never reach a connector tool.
-
-If the second status is connected, the connector's explicitly allowed tools
-remain eligible for workspace grants. If renewal fails or the status remains
-expired, Control fails closed: it drops the cached connector projection and
-recomputes affected workspace grants without that connector. Agents therefore
-cannot receive stale tools while the Web UI directs the person to reconnect.
-
-To recover, the affected person should reconnect the service from
-**Connections** and complete the provider's browser OAuth flow again. Do not
-export, copy, paste, or manually replace tokens in LiteLLM or application
-configuration. After reconnecting, confirm the connection is shown as connected
-and that only its policy-approved tools reappear in a newly refreshed workspace
-grant. If it does not, an administrator should verify that the connector is
-enabled and its configured scopes and provider client settings still match the
-provider registration.
-
-For a suspected renewal regression, first disable the affected connector or
-its access policy to keep it out of new workspace grants. Roll back application
-and gateway images only to the preceding verified immutable release, following
-[the demo release rollback procedure](demo-release.md#rollback). Do not edit
-LiteLLM OAuth records, reverse migrations, or try to restore individual
-credentials; after a compatible rollback, invalidate/recompute connector grants
-and have affected people reconnect.
-
-Run `npm run qualify:oauth` before accepting a LiteLLM version or OAuth gateway
-configuration change. It starts an isolated pinned LiteLLM, PostgreSQL, and
-fixture stack to qualify renewal, restart persistence, identity isolation, and
-fail-closed recovery without printing token material. `npm run verify:release`
-includes this qualification as a required release gate.
-
-Each connector also has an organization-owned access policy. Administrators can
-disable the connector for everyone or prevent members from changing their
-personal connection. Tool decisions remain `allow`, `approval_required`, or
-`deny`; denied tools are removed from workspace grants. These checks are
-enforced by Control and the runtime grant projection, not only by the Web UI.
-
-Remote tool reviews are tied to the provider's current descriptor, not just its
-name. An added tool or a same-name definition change is `deny` until an
-administrator reviews it. The review screen reports added, changed, and removed
-tools, and saving is conditional on the displayed tool-set digest; a provider
-change during review is rejected and must be reviewed again. Control repeats
-the descriptor check while authorizing a call and while refreshing the short
-projection cache, so a previously issued grant cannot retain a silently changed
-tool.
-
-Custom connector deletion removes the LiteLLM server and its catalog metadata.
-Built-in connectors cannot be deleted through the administration API.
-
-### Managed model providers
-
-For the boundary between Control's provider lifecycle, LiteLLM's encrypted
-credential and dynamic route records, workspace virtual keys, governed Auto,
-and MCP grants, see [LiteLLM gateway
-architecture](../architecture/litellm-gateway.md).
-
-OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock are configured by an organization administrator in
-**AI control plane → Models & providers**, not in `.env`. Control passes the
-submitted write-only key directly to LiteLLM's private credential API. LiteLLM
-encrypts the credential in its own database; LemmaComputer stores only
-tenant-scoped route IDs, selected model IDs, lifecycle state, timestamps, and a
-safe HMAC fingerprint.
-
-OpenAI, Anthropic, and Z.ai allow the administrator to choose one or more models
-from a reviewed product inventory. Bedrock uses a reviewed region and inference
-profile pair. Each inventory item declares vision, tool, and streaming support;
-the Model routes editor inherits those provider-sourced flags and combines them
-with reviewed route context/output limits and residency metadata instead of
-guessing capabilities from display names.
-
-The dynamic routes retain compatibility aliases required by signed policy and
-managed clients, while governed service-class workspaces receive only the
-synthetic `lemmacomputer-auto` transport alias. Every concrete model deployment
-is bound to a tenant-specific LiteLLM access group, so a virtual workspace key
-cannot select another organization's deployment. The current reviewed model
-and alias inventory in
-`packages/litellm-adapter/src/provider-settings.ts` is the source of truth; do
-not duplicate it in operator configuration.
-
-Provider health is necessary but not sufficient for governed routing. Pricing,
-an immutable Lite/Balanced/Pro mapping, a Team policy, and a rollout mode are
-separate Control records managed in the adjacent AI control-plane tabs.
-
-The static OpenAI, Anthropic, and GLM YAML routes and provider environment variables are
-retired. During the cutover, keep the LiteLLM salt and credential secret stable,
-back up both databases, deploy the new configuration, then sign in as an
-administrator to configure and test each provider. A stale static route makes
-Control fail closed with `PROVIDER_STATIC_CUTOVER_REQUIRED`; remove it and
-restart LiteLLM rather than attempting to mix static and managed routes.
-
-A candidate key is tested through temporary LiteLLM credentials and routes
-before the stable route changes. Rotation validates the current tenant route
-before replacing the encrypted credential. Disabling or deleting a provider
-removes its routes, revokes affected workspace grants, and requires affected
-workspaces to restart.
-
-For rollback, restore the Control database, LiteLLM database, and the matching
-LiteLLM encryption secrets as one set. Rolling back only an image can leave
-dynamic model records or encrypted credentials incompatible with the old static
-configuration.
-
-### Hosted LiteLLM administration transport
-
-The production-profile capability matrix and matching customer-managed
-preflight are documented in [Deployment profiles](deployment-profiles.md). The
-matrix is configuration policy, not user authorization; hosted routes and
-workers still require organization-scoped RBAC.
-
-Hosted deployments must use the dedicated mutual-TLS administration listener,
-not the gateway's workspace-facing endpoint:
+## Health and diagnostics
 
 ```bash
-npm run env:check -- --profile=hosted
-npm run env:render -- --profile=hosted
-docker compose config --quiet
-docker compose up -d --wait
+docker compose ps
+docker compose logs --since=10m db-migrate auth-db-migrate platform-auth-db-migrate
+docker compose logs --since=10m control-api workspace-controller litellm
 ```
 
-Set `LEMMACOMPUTER_INSTALLATION_KIND=hosted` and
-`LEMMACOMPUTER_LITELLM_ADMIN_URL=https://litellm-admin-listener:8443` in the
-deployment environment. `compose.hosted.yaml` remains a compatibility marker
-only; it deliberately does not select a profile or override a security value.
-The listener is bound only to the
-internal `litellm-admin-private` network alias, and its proxy can reach the
-LiteLLM upstream without exposing the listener to workspace traffic. It accepts
-only a client certificate issued to the `lemmacomputer-control` workload identity.
+Check the browser entry at
+`${LEMMACOMPUTER_PUBLIC_WEB_URL}/__lemmacomputer/healthz`. A healthy stack
+only proves service readiness. Sign-in, a provider request, Microsoft consent,
+and workspace creation need separate checks when those flows change.
 
-Inject the following as base64-encoded PEM from the deployment secret manager:
+| Symptom | First check |
+| --- | --- |
+| Control unhealthy | Migration jobs, schema check, and Control logs. |
+| LiteLLM unhealthy | Gateway database and LiteLLM logs; keep its encryption secrets stable. |
+| Workspace image missing | Run `npm run image:workspace` in development; verify the exact digest on a production node. |
+| Workspace starts but browser returns 502 | Workspace ingress, its desktop relay, and node connectivity. |
+| Microsoft callback fails | Exact public origin and registered callback; see the [Microsoft runbook](local-deployment.md). |
 
-- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CA_B64`
-- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_CERT_B64` and
-  `LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_KEY_B64`
-- `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_CERT_B64` and
-  `LEMMACOMPUTER_LITELLM_ADMIN_TLS_CLIENT_KEY_B64`
+Do not enable verbose request/response logging to diagnose real employee or
+OAuth traffic. Use safe error codes and operation IDs.
 
-The server certificate must verify for
-`LEMMACOMPUTER_LITELLM_ADMIN_TLS_SERVER_NAME` (normally
-`litellm-admin-listener`), and the client certificate subject CN must match
-`LEMMACOMPUTER_LITELLM_ADMIN_CLIENT_COMMON_NAME` (normally
-`lemmacomputer-control`). Hosted startup refuses HTTP, missing or malformed mTLS
-material, and any reuse of `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET` as a
-customer-authentication, platform-authentication, or workspace-ingress secret. The proxy rejects missing client certificates at
-the TLS handshake and rejects a certificate for a different workload identity.
+## Persistence
 
-For an upgrade from an older installation, run `npm run env:update`, put three
-independent values in `LEMMACOMPUTER_LITELLM_CREDENTIAL_SECRET`,
-`LEMMACOMPUTER_BETTER_AUTH_SECRET`, `LEMMACOMPUTER_PLATFORM_BETTER_AUTH_SECRET`,
-and `LEMMACOMPUTER_WORKSPACE_INGRESS_SECRET`, then run the hosted profile preflight.
-
-### Stable cryptographic material
-
-These values must remain stable while their dependent state exists:
-
-- policy signing private key and verification-key set;
-- OpenVTC executor seed;
-- session and workspace-ingress secrets;
-- LiteLLM salt and credential-derivation secret;
-- channel credential encryption secret;
-- schedule-prompt encryption secret;
-- egress grant and agent-chat derivation secrets;
-- Web Push subscription encryption secret.
-
-Loss or blind replacement can invalidate signed bundles, enrolled approvers,
-sessions, OAuth custody, stored channel credentials, or running workspaces.
-Back these values up through an approved secret manager.
-
-### Workspace node runtime
-
-`LEMMACOMPUTER_WORKSPACE_RUNTIME=docker-kasmvnc` uses the workspace node's
-Docker Engine in both placements. Build the workspace image first:
+The reference Compose stack has two PostgreSQL engines but **four logical
+databases**: `lemmacomputer` for product state, `lemmacomputer_auth` for
+customer identity, `lemmacomputer_platform_auth` for platform identity, and
+`litellm` for gateway state. The platform database is initialized even when a
+customer-managed profile does not expose the platform operator realm. Workspace
+homes are separately managed Docker volumes; the local artifact store has its
+own volume. Normal `compose:down` preserves them all.
 
 ```bash
-npm run image:workspace
+docker volume ls --filter label=com.lemmacomputer.runtime=workspace-home
 ```
 
-Worktree development uses isolated local tags for
-`LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE`, `LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE`,
-`LEMMACOMPUTER_MS365_MCP_IMAGE`, and `LEMMACOMPUTER_WORKSPACE_IMAGE`.
-Customer-managed evaluation may also use local tags while
-`LEMMACOMPUTER_RUNTIME_ENVIRONMENT=development`. Hosted and customer-managed
-production runtime rejects tags for these first-party images. Set each value
-to the promoted `repository@sha256:<digest>` reference; do not reuse one digest
-across independently built images.
+Purge a workspace through the product/API so its database, grants, container,
+and persistent home remain consistent.
 
-Chrome, Visual Studio Code, and Obsidian require Chromium's unprivileged user-
-namespace process sandbox. On each AppArmor-enforcing workspace node, validate
-and install LemmaComputer's fixed, root-owned profile before enabling those
-applications:
+## Backup and restore
+
+A recoverable set contains **all four logical databases**, workspace homes,
+Control artifacts (local volume or hosted S3 bucket), matching secret versions,
+and exact first-party image digests. For a local Compose stack, these examples
+create logical database dumps in the current directory:
+
+```bash
+docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer -Fc > lemmacomputer-control.dump
+docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_auth -Fc > lemmacomputer-auth.dump
+docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_platform_auth -Fc > lemmacomputer-platform-auth.dump
+docker compose exec -T litellm-postgres pg_dump -U litellm -d litellm -Fc > lemmacomputer-gateway.dump
+```
+
+These commands do **not** back up Docker workspace/artifact volumes or secrets.
+Protect the dumps as credentials. Restore and test the *whole* set in an
+isolated environment before relying on it; restoring product rows without
+matching authentication and gateway state can break access. Hosted RDS and S3
+need their own coordinated backup and restore procedure before go-live.
+
+## Workspace node runtime
+
+The workspace controller owns the node-local Docker socket. Control does not.
+Build the desktop image locally with `npm run image:workspace`; production
+nodes use promoted `repository@sha256:<digest>` images. For Chrome, Visual
+Studio Code, or Obsidian on an AppArmor-enforcing Linux node, check and install
+the fixed Electron profile before enabling those applications:
 
 ```bash
 npm run apparmor:electron:check
 sudo "$(command -v node)" scripts/install-electron-apparmor.mjs install
 ```
 
-Then set:
+Then set `LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED=true`. The profile
+allows Chromium's user namespace inside the selected workspace container; it
+does not make the container unconfined. Claude Cowork additionally needs usable
+`/dev/kvm` and `/dev/vhost-vsock` on the workspace node. Hosted workspaces and
+these devices belong on private remote nodes, never on the Control host. The
+[workspace-node contract](../architecture/workspace-node.md) defines mTLS,
+networking, storage, and purge; the
+[local remote-node qualifier](development-workflow.md#remote-workspace-node-and-cowork-qualification)
+tests the application boundary.
 
-```text
-LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED=true
-```
+## Changing organization workspace guardrails
 
-The adapter applies `lemmacomputer-workspace-electron` only when the workspace
-policy selects Chrome, Visual Studio Code, or Obsidian. Firefox-only
-workspaces retain Docker's default AppArmor profile. The custom profile is the
-Docker default policy shape with one explicit addition: permission to create a
-user namespace. It is not `unconfined`; `no-new-privileges`, capability drops,
-PID/memory limits, internal workspace networks, and governed egress remain
-active. The associated seccomp profile retains the pinned Moby default and
-adds only argument-filtered `clone` and `unshare` rules whose flags contain
-`CLONE_NEWUSER`, plus the exact PID-namespace-only `clone` transition Chromium
-performs after entering that user namespace. Other namespace combinations
-remain denied. Cowork's `AF_VSOCK`
-exception is included only when Cowork is selected too. The image verifies
-both the enforced AppArmor label and actual user-namespace creation as
-`kasm-user` before reporting ready.
-
-AppArmor confinement attaches to the container, so the `userns` permission is
-available to every process in a workspace that selects one of these apps, not
-only to the Electron executable. True per-process delegation would require a
-separate launcher or application container with a different confinement
-boundary. Hosted deployments therefore allow this profile only on a remote-
-isolated workspace node; a colocated hosted node fails closed with
-`ELECTRON_HOST_ISOLATION_REQUIRED`. If the host profile is absent, disabled, or
-cannot create user namespaces, workspace startup fails closed. Changing the
-setting or selected applications recreates the workspace container while
-preserving its volume.
-
-Claude Cowork local execution requires hardware virtualization. On every eligible
-customer-managed Docker host, verify that `/dev/kvm` and `/dev/vhost-vsock` are character
-devices and that the host has at least 8 GB of RAM and approximately 25 GB of
-free disk space. The local driver gives Cowork workspaces an 8 GiB memory limit;
-allow additional host memory for Docker and the LemmaComputer services. Opt in
-with:
-
-```text
-LEMMACOMPUTER_KASM_LOCAL_KVM_ENABLED=true
-```
-
-The driver accepts this setting for customer-managed installations, isolated
-development worktrees, and hosted installations whose workspace-node topology
-is `remote`. A hosted installation that tries to expose KVM from a colocated
-application/control host fails closed with `COWORK_HOST_ISOLATION_REQUIRED`.
-The adapter maps only `/dev/kvm` and `/dev/vhost-vsock` into workspaces that
-include Claude Desktop; it does not make the container privileged or restore
-dropped capabilities. Cowork containers use the pinned Moby `seccomp/v0.2.1` default
-allowlist with one additional rule permitting only `socket(AF_VSOCK)`, which
-Claude's local execution VM requires. The base profile SHA-256 is
-`536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`.
-AF_ALG and the other address families excluded by Moby remain blocked;
-AppArmor, `no-new-privileges`, capability drops, scoped device access, PID
-limits, and memory limits also remain active. At startup, the image adds
-`kasm-user` to the numeric groups that own the mapped devices and verifies
-AF_VSOCK socket creation before launching the desktop, so host and image group
-IDs do not need to match. Changing this setting recreates the workspace
-container on its next launch while preserving its workspace volume.
-
-Hosted Cowork nodes enable KVM only inside the remote workspace compute
-boundary. Place the controller, Docker socket, `/dev/kvm`, and
-`/dev/vhost-vsock` together there and configure the mTLS node API, private
-desktop host, restricted application network, and private HTTPS gateway/Control
-endpoints. Control never receives the socket or either device. Non-Cowork nodes
-may keep KVM disabled.
-Follow the [remote workspace-node and Cowork workflow](development-workflow.md#remote-workspace-node-and-cowork-qualification) for the topology,
-mTLS identities, and repeatable evaluation workflow, and
-[Workspace node deployment](../architecture/workspace-node.md) for the normative network,
-storage, purge, and removal contract.
-
-`LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS` controls how long the local adapter waits for
-the managed runtime readiness marker. The default is 60 seconds and the
-accepted range is 5–300 seconds. Increase it only when measured image/host
-startup needs more time; do not use it to hide an entrypoint, resource, policy,
-or device preflight failure. Release verification performs a real Hermes
-workspace create/readiness/destroy smoke against the built image.
-
-### Changing organization workspace guardrails
-
-Publishing organization guardrails forcibly moves every existing tenant
-workspace to a safe boundary before the new immutable version becomes current.
-Treat this as a disruptive security operation, even when the proposed change
-looks additive: running, provisioning, restarting, and failed workspaces are
-stopped and their current access is revoked. Previously active compatible
-workspaces are then recreated automatically under the new version. Existing
-sessions still end and users must reopen the workspace UI.
-
-Before saving:
-
-1. Review the **Affected workspaces** inventory and resolve any workspace already
-   marked **Needs attention**.
-2. Tell active users that their desktop session will end. Use a maintenance
-   window when several workspaces are running or long tasks may be interrupted,
-   and coordinate so users do not start or restart workspaces during
-   publication.
-3. Confirm the proposed agent and application allowlists retain at least one
-   complete choice for the intended workspace configurations.
-4. Enter a change summary that explains the security or operational reason for
-   the immutable version.
-
-When an affected workspace is not already stopped, the UI presents **Apply and
-restart compatible workspaces**. Cancelling that dialog makes no change. On
-confirmation, Control revokes access and destroys the affected runtimes before
-creating the version, then recreates eligible workspaces. A successful response
-reports six counts:
-
-- `stopped`: runtimes stopped during this publication;
-- `alreadyStopped`: workspaces that required revocation but no provider
-  destruction;
-- `reconciled`: saved configurations reduced safely to the newly allowed
-  choices; and
-- `actionRequired`: configurations that need an explicit replacement choice.
-- `restarted`: previously active compatible workspaces recreated under the new
-  version; and
-- `restartFailed`: compatible workspaces whose replacement provider failed to
-  become ready.
-
-After publication, verify the administration inventory rather than relying on
-the success toast alone:
-
-- previously stopped workspaces should show **applies on next start**;
-- previously active compatible workspaces should return to **Ready** with the
-  new policy version and digest;
-- an incompatible selection should show **Needs attention** and remain visible;
-- **Review configuration** should lead to a complete allowed selection; and
-- a restarted workspace should receive the new policy version and digest.
-
-If Control returns `WORKSPACE_POLICY_TRANSITION_FAILED`, no new version was
-created. Some workspaces may already have been stopped because provider cleanup
-cannot be one transaction across nodes. Do not restore access manually or
-reuse an old launch URL. Inspect the workspace/controller failure, wait for any
-`stopping` operation to settle, verify provider destruction and gateway health,
-then retry the same proposed version. Already-stopped workspaces follow the
-idempotent revocation path on retry. Workspaces safely stopped by the failed
-attempt are not automatically resumed because no new policy version became
-current.
-
-Scheduled runs that collide with the short transition are deferred for 30
-seconds and retried once. If recovery still has not completed, the run is
-recorded as failed with `WORKSPACE_POLICY_TRANSITION_TIMEOUT`; investigate the
-workspace failure rather than manually replaying an unknown partial execution.
-
-If a workspace reports `WORKSPACE_POLICY_SELECTION_REQUIRED`, choose at least
-one allowed application and agent plus an allowed workspace type and service
-level, save the workspace configuration, and start it again. Do not edit the
-database to preserve an option removed by organization policy.
-
-The normative sequence, fail-closed guarantee, distributed-operation limit,
-and compatibility states are defined in
+Publishing a guardrail version stops affected running workspaces, revokes their
+current access, then restarts compatible ones under the new version. Warn users
+and use a maintenance window for active work. Review **Affected workspaces**
+before saving; afterward check **Ready**, **Needs attention**, and any restart
+failures in the administration inventory. A failed transition can leave some
+workspaces stopped without publishing the new version. Resolve the node or
+controller failure and retry through the product; do not edit policy rows or
+reuse an old launch URL. The exact reconciliation rules are in
 [Workspace guardrail reconciliation](../architecture/workspace-guardrail-reconciliation.md).
 
-## Start and stop
+## Hosted LiteLLM administration transport
 
-Validate interpolation and schema before any mutation:
-
-```bash
-npm run env:check
-npm run compose:config
-```
-
-Start and wait for health:
-
-```bash
-npm run compose:up
-```
-
-Compose runs the one-shot `db-migrate` job after PostgreSQL becomes healthy and
-starts `control-api` only after the job succeeds. Control performs a read-only
-schema compatibility check and never migrates during application startup.
-
-The workspace build is intentionally not part of normal `up`; it is a build
-profile and not a service. Rebuild it explicitly after changing its Dockerfile
-or assets.
-
-Stop every active workspace through LemmaComputer before stopping the control
-stack. Then stop Compose containers while retaining state:
-
-```bash
-npm run compose:down
-```
-
-The npm command checks for sandbox, relay, and egress runtime containers and
-refuses shutdown if any remain. This prevents Compose from disappearing while a
-workspace still depends on the control network and ensures workspace state and
-runtime grants are updated through the product lifecycle.
-
-Pull pinned upstream images and rebuild owned images:
-
-```bash
-docker compose pull --ignore-buildable
-docker compose build --pull
-docker compose up -d --wait --wait-timeout 300
-```
-
-Review upstream version and digest changes before updating pins.
-
-## Health and diagnostics
-
-```bash
-docker compose ps
-docker compose logs --since=10m db-migrate
-docker compose logs --since=10m control-api
-docker compose logs --since=10m workspace-controller
-docker compose logs --since=10m litellm
-```
-
-Expected health endpoints:
-
-| Service | Endpoint |
-| --- | --- |
-| workspace ingress | `${LEMMACOMPUTER_PUBLIC_WEB_URL}/__lemmacomputer/healthz` |
-| Web, private | `http://web:4173/healthz` |
-| Control, private | `http://control-api:4100/healthz` |
-| controller, private | listener on `workspace-controller:4101` (HTTP when colocated; mTLS HTTPS when remote) |
-| channel broker, private | `http://channel-broker:4102/healthz` |
-| scheduler worker, private | `http://scheduler-worker:4103/healthz` |
-| OpenVTC, private | `http://openvtc-consent:8788/healthz` |
-| LiteLLM, private | `http://litellm:4000/health/liveliness` |
-
-Health confirms process readiness, not a successful provider request,
-Microsoft consent, active policy assignment, or a built workspace image.
-The controller container probe checks TCP listener liveness because a hosted
-node must not receive Control's client certificate merely to call `/healthz`.
-Use `npm run qualify:internal-mtls` to verify the authenticated HTTPS boundary.
-
-Common failures:
-
-- **Control stays unhealthy:** inspect required environment validation,
-  database schema compatibility or migration-job failure, policy key parsing, and OpenVTC profile connection.
-- **Workspace startup times out:** inspect the sandbox container and its
-  readiness marker, image architecture, host capacity, signed policy, selected
-  agent initialization, and any Cowork device/seccomp preflight before changing
-  `LEMMACOMPUTER_KASM_LOCAL_STARTUP_TIMEOUT_MS`.
-- **LiteLLM stays unhealthy:** inspect its database, master/salt keys, mounted
-  YAML, and custom callback import.
-- **Workspace creation fails with image not found:** run
-  `npm run image:workspace` and verify `LEMMACOMPUTER_WORKSPACE_IMAGE`.
-- **Workspace opens but ingress returns 502:** inspect the dynamic relay,
-  `lemmacomputer-control` membership, and the ingress logs.
-- **MCP calls return policy unavailable:** verify Control health and the shared
-  controller/policy callback token.
-- **Microsoft connection callback fails:** verify the canonical public origin,
-  exact `/oauth/mcp/callback` Entra redirect URI, `/m365/authorize` ingress
-  route, Web client type, tenant, and clock. Do not expose LiteLLM or the M365
-  bridge as a workaround.
-
-Do not enable verbose gateway request/response logging to diagnose production
-traffic. Correlate safe error codes and operation IDs instead.
-
-## Persistence
-
-Compose manages:
-
-- `lemmacomputer_control-data` for Control PostgreSQL;
-- `lemmacomputer_gateway-data` for LiteLLM PostgreSQL.
-
-Those are two PostgreSQL engines/containers but three logical databases. The
-control engine contains `lemmacomputer` for product authorization, policy,
-workspace, ledger, and audit state and `lemmacomputer_auth` for Better Auth
-users, sessions, authenticators, and company-SSO configuration. The gateway
-engine contains `litellm` for provider deployments, encrypted provider and MCP
-OAuth custody, virtual keys, and gateway configuration. A recoverable backup
-must include all three databases even though Docker shows only two PostgreSQL
-containers and two Compose volumes.
-
-The local sandbox adapter creates separately labeled volumes named
-`lemmacomputer-sandbox-<workspace UUID>`. Compose does not own or delete them.
-
-List owned workspace volumes:
-
-```bash
-docker volume ls --filter label=com.lemmacomputer.runtime=workspace-home
-```
-
-Normal `npm run compose:down` retains all state.
-`npm run compose:down -- --volumes` deletes both database volumes but still
-leaves workspace home volumes. Both commands require all workspaces to be
-stopped first. Purge a workspace through the product/API so Control and provider
-state remain consistent.
-
-## Backup and restore
-
-Back up these as one recovery set:
-
-1. the `lemmacomputer` product database;
-2. the `lemmacomputer_auth` Better Auth database;
-3. the `litellm` gateway database;
-4. per-workspace persistent volumes;
-5. the exact secret-manager versions active at backup time;
-6. immutable control-runtime, OpenVTC consent, Microsoft 365 MCP, and workspace
-   image digests.
-
-Example logical database backups:
-
-```bash
-docker compose exec -T postgres \
-  pg_dump --username lemmacomputer --dbname lemmacomputer --format=custom \
-  > lemmacomputer-control.dump
-
-docker compose exec -T postgres \
-  pg_dump --username lemmacomputer --dbname lemmacomputer_auth --format=custom \
-  > lemmacomputer-auth.dump
-
-docker compose exec -T litellm-postgres \
-  pg_dump --username litellm --dbname litellm --format=custom \
-  > lemmacomputer-gateway.dump
-```
-
-Protect backups as credentials: they contain identity, governance, operation,
-OAuth, and audit state. Test restore in an isolated environment. Restore all
-three logical databases and matching cryptographic material before starting
-Control or LiteLLM; restoring product state without `lemmacomputer_auth` can
-leave organizations present while their users and sessions are missing.
-
-## Rotation
-
-Rotation is not equivalent to regenerating `.env`.
-
-- Rotate provider keys in LiteLLM and revoke the prior provider credential
-  after route verification.
-- Rotate optional OAuth and connector client secrets with an overlap window.
-- Rotate service tokens by deploying consumers and producers with a
-  dual-acceptance window where supported.
-- Rotate policy signing keys by publishing the new public key alongside the old
-  verification key, switching the active signer, waiting for the maximum bundle
-  TTL, and only then retiring the old key.
-- Rotating the OpenVTC executor seed changes executor identity and requires a
-  trust re-enrollment design.
-- Rotating encryption keys requires decrypt-and-reencrypt migration; replacing
-  them directly makes stored credentials unreadable.
+Hosted configuration requires a private HTTPS LiteLLM admin listener with
+mutual TLS, a Control client identity, and distinct customer, platform,
+gateway, and ingress secrets. The hosted
+[profile preflight](deployment-profiles.md#operator-preflight) validates the
+configuration contract. `npm run qualify:internal-mtls` checks the listener
+boundary locally. Neither command provisions or qualifies an AWS network.
+Inject certificate material through production secret custody, using the exact
+variable names and validation rules in
+[`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs).
 
 ## Production considerations
 
-The reference Compose stack is not a production security perimeter by itself.
-Before network exposure:
+A local Compose health check does not approve internet exposure. A production
+operator must provide the canonical HTTPS origin, restricted private services,
+separate model and MCP egress, workload certificates, managed backups and
+restore tests, logging, capacity, and immutable images. Keep LiteLLM and the
+workspace controller off the public network. Do not change
+`LEMMACOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0` without that reviewed perimeter.
+The [AWS go-live path](aws-go-live.md) lists what remains to be built and
+qualified for that environment.
 
-- terminate TLS at an authenticated reverse proxy;
-- publish only the product origin and intentionally designed OAuth routes;
-- protect or disable the LiteLLM administrator UI;
-- replace loopback callback URLs with reviewed HTTPS origins;
-- use an external secret manager rather than environment files;
-- use managed PostgreSQL with encryption, backup, monitoring, and restricted
-  roles;
-- place the Docker/KasmVNC controller and its socket on a private remote workspace node;
-- configure mTLS between ingress and workspace relays and between node
-  application relays and private Control/LiteLLM endpoints;
-- isolate egress networks with host/cloud firewall policy;
-- give LiteLLM no direct NAT/Internet route; use separate model and remote-MCP
-  proxies, and make the remote-MCP client ignore environment proxy bypasses
-  for discovery, OAuth, tool calls, and redirects;
-- restrict the model proxy to exact model-provider hosts and the remote-MCP
-  proxy to Control-approved public origins; cloud security groups/NACLs and a
-  controlled egress firewall must deny VPC, metadata, loopback, link-local,
-  ULA, and other private destinations even if application code regresses;
-- in hosted mode, populate `LEMMACOMPUTER_HOSTED_MCP_EGRESS_ORIGINS` from an
-  IT-reviewed inventory before rollout, including every existing custom
-  endpoint plus every OAuth/metadata/token/registration origin; do not use a
-  tenant administrator's connector record as a cloud egress allowlist;
-- restrict the proxy-to-Control authorization endpoint to its private network,
-  use its dedicated secret (and workload mTLS/service-mesh identity in cloud),
-  and alert on denied proxy decisions;
-- send safe audit events to an append-protected sink;
-- define log retention, data residency, incident response, and key rotation;
-- validate resource limits for every service and workspace;
-- use immutable images, an SBOM, vulnerability scanning, and signed release
-  artifacts.
+Product-specific operating rules live with their owners:
 
-The published ports default to `127.0.0.1` specifically to prevent accidental
-LAN exposure. Do not change `LEMMACOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0`
-without the controls above.
-
-For a concrete AWS mapping of these requirements, see [AWS deployment
-architecture](deployment/aws-deployment.md).
-
-## Durable chat artifact storage
-
-Control PostgreSQL is canonical for conversations and artifact metadata. The
-reference worktree and customer-managed stack mounts the separate
-`artifact-data` volume at `/var/lib/lemmacomputer/artifacts`; it is not part of
-a workspace home and must be included in backup and restore operations.
-
-Hosted deployments must set `LEMMACOMPUTER_ARTIFACT_STORE_BACKEND=s3` plus the
-bucket and region settings documented in
-[Durable chat and artifacts](../product/durable-chat-and-artifacts.md). Grant
-bucket access only to Control. Control explicitly requests SSE-S3 (`AES256`)
-unless `LEMMACOMPUTER_ARTIFACT_S3_KMS_KEY_ID` selects SSE-KMS. In AWS, prefer
-an EC2 instance role or task role over static credentials. Coordinate PostgreSQL
-and object-store recovery, monitor failed/stale staging uploads, and prove
-restore integrity before release. `npm run qualify:artifact-store` is the local
-adapter check, not hosted cloud qualification.
-
-Control records the intended final object locator before promotion. Its staging
-reconciler marks an expired upload abandoned only after both the staging object
-and any promoted final object have been deleted. Alert on staging rows that
-remain in `finalizing` or `failed`: object-store deletion errors deliberately
-leave those rows retryable rather than hiding leaked bytes.
-
-### Workspace recovery after an unexpected outage
-
-Control records running/stopped intent separately from observed runtime health.
-After Control starts listening, a background scan checks up to 20 workspaces per
-15-second tick across tenants. It resolves each owner's current active principal,
-workspace-use permission, policy and saved selection before recovery. No browser
-session is required. An unreachable node is retried without deleting its runtime;
-a stopped or unhealthy runtime is replaced through the normal start path with
-fresh grants and the same persistent home. Failed replacements wait at least one
-minute before retrying. Interrupted lifecycle operations retain the five-minute
-ownership timeout. Intentionally stopped workspaces, including failed Stop
-operations, are not automatically started.
-
-The additive `workspace_running_intent` migration adds a nullable, checked text
-column without a backfill, validation scan or index build. A lifecycle-claim
-trigger also records Start/Stop from older Control replicas during a rolling
-deployment. The migration takes the normal brief ALTER TABLE lock under the
-migration runner's lock timeout. Legacy active or startup-health
-failure records infer running intent; ambiguous older failures remain manual
-recovery. Apply migrations explicitly before deploying Control. Both hosted and
-customer-managed profiles use this path; split-node or EC2 outage qualification
-still requires the corresponding infrastructure.
+- Customer authentication and company SSO:
+  [authentication architecture](../architecture/authentication.md).
+- Model credentials, connector OAuth custody, and private gateway routes:
+  [LiteLLM gateway architecture](../architecture/litellm-gateway.md) and
+  [MCP networking](../architecture/mcp-networking.md).
+- Control-owned artifacts and staged uploads:
+  [durable chat and artifacts](../product/durable-chat-and-artifacts.md).
+- Workspace placement, recovery, and storage:
+  [workspace-node deployment](../architecture/workspace-node.md).

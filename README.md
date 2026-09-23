@@ -48,8 +48,9 @@ deliberately uses a different port:
 grep LEMMACOMPUTER_PUBLIC_WEB_URL .env
 ```
 
-Create the first account through the sign-in page, then open **AI control plane
-→ Models & providers** to add a model-provider key. Provider credentials are
+Create the first account through the sign-in page. A base desktop workspace
+needs no model-provider setup. To test an AI agent, open **AI control plane →
+Models & providers** to add a model-provider key. Provider credentials are
 entered in the product UI and are deliberately not read from `.env`. Configure
 Pricing, publish a Model routes mapping, and set up a Team rollout before
 governed Auto, Lite, Balanced, or Pro requests will run.
@@ -62,8 +63,7 @@ npm run image:workspace
 ```
 
 The `worktree` profile is for evaluation and development. It binds browser-facing
-ports to loopback and permits unresolved Microsoft Entra placeholders, so no
-Microsoft tenant is required to start. See
+ports to loopback; no Microsoft tenant is required to start. See
 [Deployment profiles](docs/guides/deployment-profiles.md) before running
 `customer-managed` or `hosted`, which validate those values strictly.
 
@@ -324,17 +324,15 @@ Compose v2.30.0 or later, and Node.js 22 or later. It binds browser-facing ports
 to loopback and is intended for development or evaluation, not as a production
 security perimeter.
 
-The `worktree` profile permits unresolved Microsoft Entra placeholders. The
-strict `customer-managed` preflight still requires a Microsoft Entra application
-for the transitional workforce adapter, even when customers primarily use Better
-Auth; that compatibility requirement is not product authorization. Microsoft
-social login, organization-managed company SSO, and Microsoft 365 connector
-consent remain separate configurations and separate grants — when enabling one,
-register only the exact redirect URI shown by its setup flow.
+Microsoft social login, organization-managed company SSO, and Microsoft 365
+connector consent are optional, separate configurations and grants. No Entra
+application is required for a basic customer-managed installation. When
+enabling an integration, register only the exact redirect URI shown by its
+setup flow.
 
-The [local deployment and Microsoft integration runbook](docs/guides/local-deployment.md)
-lists the required environment values, optional provider settings, commands, and
-readiness checks in setup order.
+For Microsoft 365 connector consent and SharePoint site-grant testing, use the
+[local Microsoft 365 runbook](docs/guides/local-deployment.md). For general
+local setup, use the [development workflow](docs/guides/development-workflow.md).
 
 ## Development
 
@@ -390,11 +388,8 @@ The four `playwright.*.config.ts` files each drive a different suite:
 points:
 
 - [Architecture and trust model](docs/architecture/overview.md)
-- [Why LemmaComputer runs as many processes](docs/architecture/service-boundaries.md)
-- [Evaluation, development, and remote workspace workflow](docs/guides/development-workflow.md)
-- [Deployment profiles](docs/guides/deployment-profiles.md)
+- [Guides: choose a task](docs/guides/README.md)
 - [Service reference](docs/reference/services.md)
-- [Configuration and operations](docs/guides/operations.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](docs/SECURITY.md)
 

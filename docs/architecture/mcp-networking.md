@@ -53,7 +53,7 @@ the VPN after visiting the provider.
 | LiteLLM model client | Configured model providers | `gateway-egress-proxy` | Static, deployment-owned provider destinations; no custom-MCP authorization |
 | LiteLLM strict MCP client | Public MCP endpoints and their OAuth origins | `remote-mcp-egress-proxy` | Dynamic connector destinations require public-address validation and Control authorization |
 | Microsoft 365 bridge | Microsoft identity and Graph | `microsoft-egress` boundary | Built-in internal connector with a fixed provider family; it does not traverse the public/custom MCP proxy |
-| Control | Entra discovery and token endpoints | `identity-egress` boundary | Product sign-in is independent of connector and model traffic |
+| Control | Configured social-login and tenant-SSO discovery and token endpoints | `identity-egress` boundary | Product sign-in is independent of connector and model traffic |
 | Channel broker | Telegram and configured push/channel providers | `channel-egress` boundary | Channel export policy and credentials are independent of MCP policy |
 | Workspace egress sidecar | Policy-approved web destinations | Per-workspace egress network | Carries a signed workspace/agent/security-group grant, which gateway service proxies do not accept |
 
@@ -187,5 +187,5 @@ and any rollback window closes.
   sanitize the request target before exporting records to a broader SIEM.
 - `npm run qualify:oauth` passes for the pinned LiteLLM image before release.
 
-See [AWS deployment architecture](../guides/deployment/aws-deployment.md) for one cloud
-mapping of these logical boundaries.
+See the [AWS go-live path](../guides/aws-go-live.md) for the proposed cloud
+deployment work.

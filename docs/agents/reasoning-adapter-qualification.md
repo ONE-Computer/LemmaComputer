@@ -1,132 +1,89 @@
-# Reasoning adapter qualification
+# Qualifying agent reasoning adapters
 
-LemmaComputer exposes one provider-neutral thinking-effort control. An agent runtime becomes eligible only when its exact client pin has a qualified adapter and the selected organization route separately qualifies the same effort level. No runtime requires an Anthropic, OpenAI, or other named provider; it works through the organization's assigned model alias. The implementation lessons and end-to-end extension sequence are recorded in the [Agent model and reasoning adapter playbook](agent-reasoning-adapter-playbook.md).
+**Use this when adding or upgrading an agent runtime.** The code-owned
+registration in `packages/model-router/src/governed.ts` is the current source of
+truth. This page explains what a registration means and the evidence needed
+before promotion. A registered adapter, a qualified provider route, and an
+organization policy must all permit a thinking level before a user can select
+it.
 
-`Auto` in this document means only the thinking-effort default that follows the organization's allowed maximum. Employee Web Chat does not expose an Auto model mode: model selection remains the explicit `Lite`, `Balanced`, or `Pro` tier shipped by #68.
+`Auto` here is a thinking-effort default resolved to the organization's
+maximum. Web Chat's model choice remains the explicit Lite, Balanced, or Pro
+tier.
 
-The adapter does not own provider reasoning policy. Its job is to preserve the conversation selection, carry Control's signed task binding to the loopback gateway on every turn, stream text and tool lifecycle events, and suppress hidden reasoning content. The gateway removes native reasoning fields supplied by any workspace client; the governed route injects the resolved provider value after policy evaluation. Exact provider/model routes join through a separate code-owned registration, without provider branches in Web, Control, or the runtime adapter.
+## Current registrations
 
-## Review states
+These exact versions are marked `qualified` in the checked-in registry:
 
-The code-owned registry distinguishes two states:
+| Runtime | Version | Thinking levels |
+| --- | --- | --- |
+| Claude CLI | `2.1.215` | Low, Medium, High; product Auto |
+| Claude Desktop | `1.22209.3` | Native Low, Medium, High |
+| Hermes CLI | `0.21.3` | Low, Medium, High; product Auto |
+| Hermes Desktop | `0.17.2` | Native Low, Medium, High |
+| Codex CLI | `0.154.0` | Native Low, Medium, High |
 
-- `discovery`: the exact upstream client and LemmaComputer transport have been inspected, but required live evidence is incomplete. The runtime receives no thinking-effort options in Web Chat.
-- `qualified`: the exact runtime pin has a qualification ID and all required evidence. Control intersects its levels with organization policy and route capability; Web Chat needs no runtime-specific conditional.
+Older Hermes `0.19.0`/Desktop `0.17.0` registrations also remain in the
+registry; they do not qualify newer versions. An unlisted version has no
+registration and fails closed. Registration is code state, not proof that a
+specific deployment, provider credential, or human workflow was live-tested.
 
-Changing a record from discovery to qualified is a reviewed product change. Administrator metadata, a provider's similarly named field, or a passing fixture test cannot promote it.
+The route registry separately qualifies direct Anthropic Sonnet 4.6/Opus 4.8
+and managed OpenAI GPT 5.6 routes for Low, Medium, and High. Other routes must
+be reviewed independently. Exact model and runtime IDs can change; verify the
+registry before relying on this table.
 
-## Current adapter matrix
+## Boundary to preserve
 
-| Runtime | Exact pin | Review state | Provider-effort authority | Product behavior |
-| --- | --- | --- | --- | --- |
-| Claude CLI | `2.1.215` | Qualified under `claude-cli-2.1.215-governed-effort-adapter-2026-08-13` | Governed route from signed task binding | Eligible for Auto, Low, Medium, and High when the route and organization policy also allow them |
-| Claude Desktop | `1.22209.3`, embedded engine `2.1.215` | `claude-desktop-1.22209.3-governed-effort-adapter-2026-09-06` | Native `output_config.effort` is intent; Control signs it before route resolution | Native Low, Medium, and High; see [Desktop recovery](claude-desktop-recovery.md) for evidence and limits |
-| Hermes Agent CLI | `0.21.3` | Qualified under `hermes-claw-0.21.3-governed-effort-adapter-2026-09-21` | Governed route from signed task binding | Eligible for Auto, Low, Medium, and High when the route and organization policy also allow them |
-| Hermes Desktop | `0.17.2` | Qualified under `hermes-desktop-0.17.2-governed-effort-adapter-2026-09-21` | Governed route from signed task binding | Native Low, Medium, and High; unsupported native effort values remain hidden on LemmaComputer routes |
-| Codex CLI | `0.154.0` (Python SDK `0.154.0`) | Staged local candidate under `codex-cli-0.154.0-governed-effort-adapter-2026-09-17`; retain only after the live evidence contract passes | Native Responses `reasoning.effort` is bounded intent; Control signs it before route resolution | Native Low, Medium, and High in the qualification build; unreviewed versions fail closed |
-| Any other runtime or version | Any | Unreviewed | None | Fail closed |
+1. Control intersects the exact runtime registration, selected route,
+   organization policy, and maximum effort.
+2. Control stores effort with the conversation and signs it into each task
+   binding. A resumed turn retains the same selection.
+3. The agent adapter carries that binding on the first and resumed turns.
+   Native client settings are untrusted intent. The loopback gateway strips
+   client-supplied provider reasoning fields and the governed route injects
+   only the resolved value.
+4. The callback verifies the exact provider deployment and records requested
+   and resolved effort with usage admission. It must not treat a display model
+   name as proof of execution.
+5. The adapter emits approved text, tool, progress, source, and terminal
+   events. Hidden reasoning never enters transcript, Activity, logs, or
+   artifacts.
 
-Hermes and Codex both expose upstream reasoning controls, but that does not make their labels or behavior equivalent to Claude or to one another. LemmaComputer's Low, Medium, and High values are bounded product intents. The separately qualified provider route decides their concrete wire meaning. Direct Anthropic is the first existing route registration from #69, not a prerequisite for these adapters or for future route registrations.
+## Qualification steps
 
-Hermes CLI `0.19.0` and Desktop `0.17.0` remain historical qualified pins under `hermes-claw-0.19.0-governed-effort-adapter-2026-08-13` and `hermes-desktop-0.17.0-governed-effort-adapter-2026-08-13`. They do not qualify the upgraded pins. The current upgrade evidence and limits are recorded in [Hermes runtime upgrade qualification](hermes-runtime-upgrade-qualification.md).
+Use an [isolated task worktree](../guides/development-workflow.md). Configure
+any provider credential through **AI control plane → Models & routing**, not
+through the agent runtime, `.env`, or an evidence file.
 
-The managed OpenAI models `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` use the qualified `openai-gpt-5.6-responses-effort-route-2026-08-13` route. LiteLLM translates OpenAI Chat Completions requests to the Responses API before the governed callback injects signed effort, because OpenAI rejects function tools plus reasoning effort on the legacy Chat Completions transport. This translation is an upstream LiteLLM capability, not a Hermes-specific provider adapter.
+1. Pin the package, binary, source, and checksums. Inspect model discovery,
+   effort controls, first and resumed turns, streaming, tools, and hidden
+   reasoning events.
+2. Add a discovery registration first. Prove signed-binding propagation,
+   forged-field stripping, over-policy denial, stale-route denial, ordering,
+   terminal states, and no hidden reasoning in fixtures.
+3. For each proposed effort, run a new credentialed conversation that streams
+   and uses a governed tool. Repeat one turn, run concurrent conversations at
+   different efforts, and change or revoke a route to prove stale execution
+   fails closed. Check actual admission and routing records.
+4. Record bounded observations in a JSON evidence file outside the repo and
+   validate against the exact commit:
 
-## Shared transport contract
+   ```bash
+   npm run qualify:reasoning-adapter -- --evidence=/absolute/path/to/reasoning-adapter-evidence.json
+   ```
 
-Every qualifying runtime must prove the same boundary:
+5. Review the observations, then promote only the exact runtime and levels
+   that passed. Run focused gateway, registry, chat, usage, and browser tests,
+   `npm run verify:quick`, plus `npm run verify:db` if persistence changed.
 
-1. Web Chat stores `Auto`, `Low`, `Medium`, or `High` when the conversation is created. Later turns must match that stored value.
-2. Control intersects the agent review, exact route capability, effective organization policy, and maximum effort.
-3. Control signs the requested effort and ceiling into the per-turn AI task binding.
-4. The runtime adapter carries that binding request-locally to the loopback gateway before the first model call and on every resumed turn.
-5. A native client may submit Low, Medium, or High as product intent. Control validates the exact adapter, service class route, and organization ceiling before signing that intent. The gateway then strips `thinking`, `output_config`, `reasoning`, and the client's raw `reasoning_effort`; only the signed task binding crosses into provider routing. The exact non-escalating `reasoning_effort: none` opt-out remains safe for requests that do not enable governed reasoning.
-6. The route authority injects only the resolved qualified value and records requested and resolved effort in usage evidence.
-7. The adapter projects allow-listed text, tool, progress, source, and terminal events. It never emits or persists hidden reasoning text.
+The validator checks structure and commit binding; it cannot independently
+prove that a reported live observation occurred. Evidence records should
+contain IDs, exact versions, requested/resolved effort, terminal tool and turn
+states, provider-confirmed usage availability, and limits. Keep credentials,
+prompts, responses, tool payloads, and signed bindings out of the file.
 
-This is why the Codex discovery branch's native `AsyncThread.turn(..., effort=...)` experiment is not copied into the shared implementation. It would create a second, client-side effort authority even though the gateway must discard that raw provider field. Hermes's native selection is accepted only as a request for Control to validate and sign; the signed binding remains the sole provider-effort authority.
-
-## Promotion gates
-
-Run these gates against the exact runtime version and a separately qualified route that supports the proposed levels. The adapter evidence remains valid for any other route that satisfies the same signed gateway contract; provider semantics are evidenced by that route's own qualification. Use an isolated worktree deployment. Add any chosen provider credential through **AI control plane -> Models & providers**; do not place credentials in `.env`, documentation, test output, or evidence artifacts.
-
-### Isolated worktree handoff
-
-The qualification worktree owns a fresh database, generated trust keys, ports, Compose project, provider records, routing policy, and workspaces. Never copy `.env`, authentication rows, LiteLLM records, encrypted provider settings, volumes, or workspace grants from `main` or another worktree.
-
-Before a human live run:
-
-1. Run `npm run dev:doctor`, confirm `docker compose ps` is healthy, and check the worktree's `LEMMACOMPUTER_WEB_PORT` rather than assuming the main-stack URL.
-2. Configure one supported authentication path for the isolated stack. The default `capture` email adapter is sufficient for automated tests but cannot deliver a human verification link. For manual email/password signup, configure Postmark as documented in the [single workflow guide](../guides/development-workflow.md#human-supplied-values), or configure one complete supported social/enterprise identity path. Do not import an account from another stack.
-3. Create and verify the isolated administrator account and organization.
-4. In **AI control plane -> Models & providers**, configure and test the chosen gateway upstream. The runtime never receives that credential and does not connect directly to a named provider.
-5. Publish the explicit `Lite`, `Balanced`, and `Pro` mapping/policy needed by the run, create an isolated workspace with the candidate agent, and keep the source commit fixed while collecting evidence.
-
-Discovery records remain absent from ordinary product controls. The qualification operator may stage one candidate route/runtime promotion only on this isolated issue branch to exercise the live path. Do not merge that staged promotion unless the complete evidence record passes, is reviewed, and is tied to the exact source commit. Revert a failed candidate to discovery before any integration decision.
-
-### 1. Static and fixture evidence
-
-- Verify the package, binary, source tag, and checksums match the proposed pin.
-- Prove the signed binding reaches the runtime's first and resumed model calls without process-global or cross-session state.
-- Prove forged native reasoning fields are stripped and cannot override the signed request.
-- Prove Low, Medium, High, over-policy, stale-version, unsupported-route, and provider-mismatch behavior.
-- Prove streamed text and MCP/function-tool lifecycle events retain stable ordering and terminal states.
-- Prove raw reasoning/thinking events are absent from transcript, Activity, logs, and artifacts.
-
-### 2. Credentialed live smoke
-
-For each proposed level, start a new conversation and run a prompt that requires both multi-step reasoning and at least one governed MCP/function tool. Record only bounded evidence:
-
-- runtime catalog ID and exact version;
-- route qualification ID, provider, model, and immutable deployment/mapping version;
-- conversation, task, and usage-attempt identifiers;
-- requested and resolved effort;
-- streamed text observed, tool started, tool terminal state, and turn terminal state;
-- provider-confirmed usage units, including reasoning tokens when available;
-- latency and cost, explicitly marked unavailable where the provider does not report them;
-- confirmation that no hidden reasoning content appeared in product surfaces or retained logs.
-
-Repeat one conversation turn to exercise resume behavior. Run concurrent conversations at different permitted levels and confirm their signed bindings and usage records do not cross. Revoke or alter the route after capability projection and confirm stale or mismatched execution fails closed.
-
-Record the bounded observations in a strict JSON evidence file and validate it against the exact checked-out commit:
-
-```bash
-npm run qualify:reasoning-adapter -- --evidence=/absolute/path/to/reasoning-adapter-evidence.json
-```
-
-The validator accepts discovery records for any reviewed runtime and a candidate or separately qualified provider/model route. It does not read a provider credential, prompt, response, tool arguments/results, signed binding, or hidden reasoning. Unknown fields fail closed; likely credentials and signed bindings are rejected before parsing. Passing this command proves that the required evidence record is complete and commit-bound. It does not itself prove that the observations are truthful or promote a runtime.
-
-The evidence file contains only:
-
-- exact source commit, runtime pin/discovery ID, route identity, deployment and mapping IDs;
-- one bounded observation for every proposed provider effort level;
-- Auto-thinking resolution, resume and concurrent-conversation isolation results;
-- fail-closed negative-case results and hidden-reasoning absence across product surfaces;
-- provider-confirmed token availability, bounded latency, and confirmed/estimated/unavailable cost status;
-- explicit evidence limitations.
-
-Native Desktop evidence sets `runtime.surface` to `native-desktop`. When its
-native menu has no Auto choice, record `autoResolution: {"status":"not-exposed"}`
-instead of inventing an Auto conversation. Product Chat evidence still requires
-the original organization-maximum Auto check. All level, tool, resume,
-concurrency, policy, and hidden-reasoning evidence remains required.
-
-Keep the evidence outside the repository until it has been reviewed. Never add screenshots, prompts, responses, tool payloads, access tokens, credentials, or signed bindings to it.
-
-### 3. Cache and comparative evidence
-
-Effort is immutable within a conversation. Compare repeated same-effort turns inside one conversation with separate conversations at other efforts. Record provider-confirmed cache-read/write units when available; do not infer a cache hit from latency alone. Cost or latency samples describe only the qualified route and date, not a universal relationship between product levels.
-
-### 4. Promotion
-
-- Replace the discovery record with a `qualified` registration and a new immutable qualification ID tied to the evidence record.
-- Register only the levels that passed. A runtime may expose a narrower subset than its upstream API advertises.
-- Add the exact runtime/route combinations and evidence limits to the matrix.
-- Run focused registry, gateway, chat adapter, usage, and Playwright tests, then `npm run verify:quick`. Run `npm run verify:db` if persistence or migration behavior changed.
-- A client or provider upgrade requires a new discovery and qualification record; never widen an old exact-version match.
-
-## Implementation evidence and limits
-
-The historical Hermes branch `codex/hermes-reasoning-adapter` at local commit `4741eb934c605eaa030c4d36605613327c166d1a` and Codex branch `codex/codex-reasoning-adapter` at local commit `1d80ca3eef5129c75cdb72f1cae77128e9721e46` were research inputs, not branches to merge wholesale. Hermes was subsequently integrated through the provider-neutral #76 path and live-checked with Balanced, Medium, streaming, and automatic function-tool selection. Its governed usage evidence resolved the concrete route to `openai/gpt-5.6-terra` and recorded a successful routing observation.
-
-The Hermes live run did not establish a comparative cache, latency, reasoning-token, or cost benchmark, and unavailable provider evidence remains unavailable rather than zero. A representative human-verified governed tool execution remains part of release acceptance. See [Codex CLI integration](codex-cli-integration.md) for the newer CLI/SDK transport checks and remaining gates. Codex remains discovery-only and intentionally absent from ordinary product controls until its separate workspace integration and complete live gates pass.
+For a native Desktop with no Auto menu, record Auto as `not-exposed`; do not
+invent a native Auto run. Cache, latency, cost, and reasoning-token observations
+are route- and date-specific. Mark unavailable values unavailable rather than
+zero.

@@ -1,6 +1,6 @@
 # Database migrations
 
-Schema changes are an explicit deployment step, not an application-startup side effect. `control-api` refuses to start when the database is uninitialized, behind, unknown, or has a changed historical checksum. Compose runs the one-shot `db-migrate` service after PostgreSQL is healthy and starts `control-api` only after that job succeeds.
+Schema changes are an explicit deployment step, not an application-startup side effect. `control-api` refuses to start when its database is uninitialized, behind, unknown, or has a changed historical checksum. The local Compose stack runs separate one-shot product, customer-auth, and platform-auth migration jobs after PostgreSQL is healthy; Control starts only after those jobs succeed. Production operators must run and verify equivalent jobs before starting new application containers.
 
 ## Ledger and serialization
 
