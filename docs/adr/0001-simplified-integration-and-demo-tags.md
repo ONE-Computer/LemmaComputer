@@ -1,4 +1,4 @@
-# ADR 0002: Separate integration from immutable demo releases
+# ADR 0001: Separate integration from immutable demo releases
 
 - Status: accepted
 - Date: 2026-07-29

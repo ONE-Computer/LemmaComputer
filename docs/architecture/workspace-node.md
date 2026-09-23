@@ -1,7 +1,7 @@
 # Workspace node deployment
 
 The rationale for sticky placement and the remote mutual-TLS trust boundary is
-recorded in [ADR 0006](../adr/0006-hosted-c-minus-workspace-node-placement-and-trust.md).
+recorded in [ADR 0005](../adr/0005-hosted-c-minus-workspace-node-placement-and-trust.md).
 
 LemmaComputer has one Docker/KasmVNC workspace runtime and two placements. A
 `colocated` node runs beside the reference application stack for
@@ -124,7 +124,7 @@ not imply an AI provider or agent runtime.
 ## Chromium and Electron process sandbox
 
 The application boundary and reasons for catalog gating are recorded in
-[ADR 0005](../adr/0005-catalog-gated-electron-sandbox.md). The profile below is
+[ADR 0004](../adr/0004-catalog-gated-electron-sandbox.md). The profile below is
 not a general-purpose compatibility mode: only release-qualified application
 identifiers can select it, and software installed inside a workspace cannot
 change the enforced container profile.

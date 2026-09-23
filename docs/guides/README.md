@@ -14,6 +14,5 @@ yet have a command that deploys this design to AWS.
 | [Microsoft 365 local test](local-deployment.md) | Register the connector app and test consent or SharePoint site grants. |
 | [Database migrations](database-migrations.md) | Change schema or run explicit migration jobs. |
 
-For AWS subnet, firewall, and service-placement detail, see the
-[AWS architecture reference](../architecture/aws-deployment.md). It is a design
-reference, not another deployment guide.
+The [AWS go-live path](aws-go-live.md) states the current proposal and the
+decisions still needed for production.

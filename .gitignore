@@ -25,3 +25,7 @@ test-results/
 docs/private/
 docs/tmp/
 docs/spikes/
+
+# Local design and QA evidence; keep review output out of published docs.
+design-qa*
+docs/reports/

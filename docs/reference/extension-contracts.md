@@ -80,7 +80,7 @@ For an agent with model or effort controls, follow
 [Reasoning adapter qualification](../agents/reasoning-adapter-qualification.md).
 Native labels are intent until Control signs a task binding and the gateway
 verifies the concrete route. For Chromium/Electron apps, follow
-[ADR 0005's qualification contract](../adr/0005-catalog-gated-electron-sandbox.md#application-qualification-contract).
+[ADR 0004's qualification contract](../adr/0004-catalog-gated-electron-sandbox.md#application-qualification-contract).
 
 ## Workspace adapter or egress rule
 

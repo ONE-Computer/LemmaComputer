@@ -1,6 +1,6 @@
-# ADR 0004: Better Auth adoption and qualification
+# ADR 0003: Better Auth adoption and qualification
 
-- Status: accepted; transitional Microsoft adapter plan superseded by [ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md)
+- Status: accepted; transitional Microsoft adapter plan superseded by [ADR 0006](0006-better-auth-only-customer-and-platform-authentication.md)
 - Date: 2026-08-09
 - Current implementation: [Authentication architecture](../architecture/authentication.md)
 
@@ -101,7 +101,7 @@ Do not add a credential or claim bypass to restore availability.
 ## Completed contraction
 
 Direct customer and platform Microsoft identity adapters were removed under
-[ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md).
+[ADR 0006](0006-better-auth-only-customer-and-platform-authentication.md).
 Microsoft 365 connector consent uses its own application; it is not the
 customer sign-in mechanism.
 

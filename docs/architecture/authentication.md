@@ -2,8 +2,8 @@
 
 **Current design.** Better Auth runs inside Control API for customer sign-in in
 both production profiles. LemmaComputer separately authorizes product access.
-See [ADR 0004](../adr/0004-better-auth-adoption-and-qualification.md) for the
-original choice and [ADR 0007](../adr/0007-better-auth-only-customer-and-platform-authentication.md)
+See [ADR 0003](../adr/0003-better-auth-adoption-and-qualification.md) for the
+original choice and [ADR 0006](../adr/0006-better-auth-only-customer-and-platform-authentication.md)
 for removal of direct Microsoft identity adapters.
 
 > Better Auth proves which account signed in. LemmaComputer decides which

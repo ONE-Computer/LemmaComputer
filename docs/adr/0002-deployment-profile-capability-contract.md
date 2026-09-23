@@ -1,6 +1,6 @@
-# ADR 0003: One product, explicit deployment profiles
+# ADR 0002: One product, explicit deployment profiles
 
-- Status: accepted; original sign-in-provider plan superseded by [ADR 0007](0007-better-auth-only-customer-and-platform-authentication.md)
+- Status: accepted; original sign-in-provider plan superseded by [ADR 0006](0006-better-auth-only-customer-and-platform-authentication.md)
 - Date: 2026-08-05
 
 ## Context

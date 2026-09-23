@@ -180,9 +180,8 @@ separate model and MCP egress, workload certificates, managed backups and
 restore tests, logging, capacity, and immutable images. Keep LiteLLM and the
 workspace controller off the public network. Do not change
 `LEMMACOMPUTER_HTTP_BIND_ADDRESS` to `0.0.0.0` without that reviewed perimeter.
-The [AWS architecture reference](../architecture/aws-deployment.md) maps these
-boundaries to proposed AWS services; the [go-live path](aws-go-live.md) lists
-what remains to be built and qualified.
+The [AWS go-live path](aws-go-live.md) lists what remains to be built and
+qualified for that environment.
 
 Product-specific operating rules live with their owners:
 

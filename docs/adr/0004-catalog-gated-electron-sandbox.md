@@ -1,4 +1,4 @@
-# ADR 0005: Catalog-gated Electron sandbox
+# ADR 0004: Catalog-gated Electron sandbox
 
 - Status: accepted
 - Date: 2026-08-15

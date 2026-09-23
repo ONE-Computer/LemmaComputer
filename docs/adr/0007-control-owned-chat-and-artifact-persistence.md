@@ -1,4 +1,4 @@
-# ADR 0008: Control-owned chat and artifact persistence
+# ADR 0007: Control-owned chat and artifact persistence
 
 - Status: Accepted
 - Date: 2026-08-16

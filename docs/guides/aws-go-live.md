@@ -16,19 +16,17 @@ not define every route, security-group rule, or service permission.*
    (`hosted` or `customer-managed`), the AWS account and VPC boundaries, Region,
    public origin, workspace-node allocation, network inspection, and recovery
    targets. Record unresolved choices in an infrastructure ADR. The
-   [deployment profile guide](deployment-profiles.md) defines product behavior;
-   the [AWS architecture reference](../architecture/aws-deployment.md) details
-   the proposed cloud controls.
+   [deployment profile guide](deployment-profiles.md) defines product behavior.
 2. **Qualify the application boundary.** Use the
    [development workflow](development-workflow.md#remote-workspace-node-and-cowork-qualification)
    to test remote nodes, mTLS, and Cowork locally. Its Compose commands do not
    deploy AWS or qualify production networking.
 3. **Build the AWS environment.** Write and review infrastructure code for
    two-AZ networking, inspected egress, WAF/ALB/DNS/TLS, ECS services, private
-   workspace nodes, RDS, S3, logs, and secrets. Use the
-   [AWS architecture reference](../architecture/aws-deployment.md) to review
-   service placement, routes, and release gates. Test the selected design in
-   the target AWS organization.
+   workspace nodes, RDS, S3, logs, and secrets. Review task roles, private
+   service access, database roles, backup, callback logging, and routes in the
+   actual infrastructure plan. Test the selected design in the target AWS
+   organization.
 4. **Create an immutable release.** Follow the
    [full release procedure](demo-release.md#full-release-path), including
    `npm run verify:release` and `npm run release:tag -- --push` from a clean,
@@ -50,8 +48,8 @@ not define every route, security-group rule, or service permission.*
    the ALB/WAF and register exact OAuth callbacks.
 7. **Qualify the live installation.** On the target infrastructure, test
    sign-in, model/MCP and channel paths, workspace persistence and purge,
-   inspected egress, backup/restore, failure recovery, and rollback. Apply the
-   [release gates](../architecture/aws-deployment.md#deployment-phases-and-release-gates)
+   inspected egress, backup/restore, failure recovery, and rollback. Record
+   the deployed image digests, infrastructure revision, and observed results
    before declaring it ready.
 
 ## Decisions that the diagram does not settle
@@ -70,7 +68,5 @@ not define every route, security-group rule, or service permission.*
   migration or cross-Region recovery. Set task counts, restore procedure, and
   node replacement targets before making an availability claim.
 
-Read the [AWS architecture reference](../architecture/aws-deployment.md) only
-when designing or reviewing infrastructure. Read the
-[development workflow](development-workflow.md) only when setting up local
-evaluation, a task worktree, or remote-node qualification.
+The [development workflow](development-workflow.md) covers local evaluation,
+task worktrees, and remote-node qualification.

@@ -1,4 +1,4 @@
-# ADR 0006: Hosted workspace ownership and trust
+# ADR 0005: Hosted workspace ownership and trust
 
 - Status: Accepted
 - Date: 2026-08-16
@@ -81,5 +81,5 @@ from SSO or cloud tags.
 ## Related documents
 
 - [Workspace node deployment](../architecture/workspace-node.md)
-- [Deployment profile capability contract](0003-deployment-profile-capability-contract.md)
+- [Deployment profile capability contract](0002-deployment-profile-capability-contract.md)
 - [Evaluation, development, and remote workspace workflow](../guides/development-workflow.md)

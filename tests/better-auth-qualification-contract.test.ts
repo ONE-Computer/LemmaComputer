@@ -74,10 +74,10 @@ test("qualification gates cover every issue #51 security and recovery boundary",
   });
 });
 
-test("ADR 0004 retains the Better Auth security boundaries", async () => {
-  const adr = await readFile(new URL("../docs/adr/0004-better-auth-adoption-and-qualification.md", import.meta.url), "utf8");
+test("ADR 0003 retains the Better Auth security boundaries", async () => {
+  const adr = await readFile(new URL("../docs/adr/0003-better-auth-adoption-and-qualification.md", import.meta.url), "utf8");
   for (const required of [
-    "# ADR 0004: Better Auth adoption and qualification",
+    "# ADR 0003: Better Auth adoption and qualification",
     "better-auth` `1.6.26",
     "@better-auth/sso` `1.6.26",
     "## Trust boundaries and data flow",

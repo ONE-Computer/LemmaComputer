@@ -187,5 +187,5 @@ and any rollback window closes.
   sanitize the request target before exporting records to a broader SIEM.
 - `npm run qualify:oauth` passes for the pinned LiteLLM image before release.
 
-See [AWS deployment architecture](aws-deployment.md) for one cloud
-mapping of these logical boundaries.
+See the [AWS go-live path](../guides/aws-go-live.md) for the proposed cloud
+deployment work.

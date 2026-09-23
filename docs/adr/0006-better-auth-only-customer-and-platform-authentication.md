@@ -1,4 +1,4 @@
-# ADR 0007: Better Auth-only customer and platform authentication
+# ADR 0006: Better Auth-only customer and platform authentication
 
 Status: Accepted
 
@@ -61,7 +61,7 @@ has no live customer data requiring identity migration.
 
 ## Supersedes
 
-This ADR completes the adapter contraction described in ADR 0004 and supersedes
-the transitional sign-in-provider portions of ADR 0003 and ADR 0004. Their
+This ADR completes the adapter contraction described in ADR 0003 and supersedes
+the transitional sign-in-provider portions of ADR 0002 and ADR 0003. Their
 provider-neutral authorization and deployment-profile boundaries remain in
 force.
