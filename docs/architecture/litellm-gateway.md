@@ -95,7 +95,7 @@ credentials must never enter a user-controlled sandbox process.
 
 The static LiteLLM configuration intentionally has an empty `model_list`.
 OpenAI, Anthropic, GLM (Z.ai), and Amazon Bedrock deployments are managed at
-runtime from **AI control plane → Models & providers**:
+runtime from **AI control plane → Models & routing**:
 
 1. An administrator submits a write-only provider credential and selects from
    LemmaComputer's reviewed model or Bedrock profile inventory.
@@ -146,6 +146,9 @@ disabled, or disconnected connectors contribute no MCP server or tool
 permissions.
 
 ## Governed model request and Auto switching
+
+`Auto` below is the router's internal dynamic-selection mode. Current member
+controls expose Lite, Balanced, and Pro, not an Auto model mode.
 
 ```mermaid
 sequenceDiagram

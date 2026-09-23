@@ -91,7 +91,7 @@ Read the worktree-specific URL from `.env`; do not assume port 4174. Localhost
 cookies are scoped to the host rather than the port, so use separate browser
 profiles for sensitive parallel worktrees. For a basic desktop test, create a
 workspace without an AI agent or model provider. Configure model keys through
-**AI control plane → Models & providers** only when the chosen test needs AI.
+**AI control plane → Models & routing** only when the chosen test needs AI.
 
 ### Verify a local account without external email delivery
 

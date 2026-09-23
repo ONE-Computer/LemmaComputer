@@ -1,184 +1,74 @@
 # Governed model routing
 
-LemmaComputer exposes stable service classes while keeping provider deployments and prices under administrator control.
+Members choose Lite, Balanced, or Pro as stable service classes. They do not
+choose a provider deployment. Administrators map each class to reviewed
+provider models, prices, and policy. `lemmacomputer-auto` is the gateway's
+internal transport alias, not a member-facing mode. See
+[LiteLLM gateway](../architecture/litellm-gateway.md#governed-model-request-and-auto-switching)
+for the execution boundary.
 
-LiteLLM carries the synthetic transport alias and executes the signed concrete
-route, but it does not own the Auto classifier or service-class policy. See
-[LiteLLM gateway architecture](../architecture/litellm-gateway.md#governed-model-request-and-auto-switching)
-for the gateway hooks and grant boundary around this decision flow.
+## Member selection
 
-## User-facing contract
+A workspace saves a policy-bounded default model mode for new conversations.
+Chat can override it for one conversation; Web remembers the override locally
+by workspace, agent, and conversation. Another browser or cleared site data
+returns to the workspace default. Thinking effort is a separate choice.
 
-Users choose one of three model modes:
+Managed native clients present the same three labels through reviewed
+compatibility aliases. Their loopback broker maps each request to the product
+class and gets a fresh Control-signed task binding. A client-supplied model
+name or reasoning field cannot select a provider directly. Unknown aliases,
+unavailable classes, and unsupported runtime versions fail closed.
 
-- `Lite` favors lower-cost work within its capability contract.
-- `Balanced` is the safe default for ambiguous work.
-- `Pro` is reserved for work that needs its stronger capability contract.
+## Decision and accounting
 
-Lite, Balanced, and Pro are product contracts, not provider model names.
-Administrators can replace the deployment behind a class without changing user
-workflows. `lemmacomputer-auto` remains an internal synthetic gateway transport
-used to resolve those explicit classes; it is not a selectable employee model
-mode.
-Legacy workspace projections that still contain an `auto` default are rendered
-and executed as `Balanced`; new workspace settings cannot save Auto.
+1. LiteLLM accepts the synthetic alias with a scoped workspace key and signed
+   task binding.
+2. Control resolves the active organization, default spending Team, policy,
+   rollout, mapping, eligible deployments, capabilities, residency, health,
+   effective rate card, currency, and budget.
+3. Control records the decision and signs one concrete deployment. LiteLLM
+   verifies the actual selected route and obtains a durable usage admission
+   and budget reservation before provider dispatch.
+4. Completion records normalized usage, cost, outcome, and route observation.
+   An admission without a final event remains visible for reconciliation.
 
-The workspace **Default model mode** is the starting choice for new
-conversations. Chat can override it per conversation without changing the
-workspace configuration. The Web client persists that override in
-browser-local storage keyed by workspace, agent, and conversation, restores it
-when returning to the same conversation, and falls back to the explicit
-workspace default if the saved value is unsupported. Clearing site data or
-using another browser starts with the workspace default again.
+A provider failure can temporarily mark its deployment unavailable. A later
+success clears that signal. The gateway cannot silently fall back outside the
+signed deployment. No eligible, priced, policy-compliant route means no
+dispatch. Unknown price or usage is unavailable, never zero.
 
-The default and override affect `requestedServiceClass`; they never expose or
-select a provider model directly. An explicit Lite, Balanced, or Pro request
-skips Auto classification but remains subject to the full eligibility checks
-below.
+Each deployment uses an immutable effective rate card; service-class names
+have no blended price. A mapping change affects future decisions only.
+Historical decisions keep their mapping and price snapshot. Cost and usage
+observations must match the original tenant, actor, Team, task, class,
+provider, model, and deployment.
 
-Managed native clients use the same contract. Claude Desktop's pinned client
-rejects gateway IDs that are not Anthropic-shaped and exposes its effort menu
-only for model IDs with a built-in capability record. Its managed catalogue
-therefore uses three distinct dated `claude-sonnet-4-6-*` client-adapter IDs
-that the pinned client normalizes to the same effort-capable UI contract, with
-the employee-facing labels Lite, Balanced, and Pro. These compatibility IDs do
-not select the concrete provider model.
-Hermes uses the provider-neutral `lemmacomputer-lite`,
-`lemmacomputer-balanced`, and `lemmacomputer-pro` entries returned by the
-custom loopback provider's `/v1/models` catalogue and stores the selected alias
-in its normal session configuration. Neither client receives a provider
-credential. On every native inference request, the root-owned
-loopback broker translates the exact product alias into an explicit service
-class, obtains a fresh Control-signed task binding, removes client routing
-and native reasoning metadata (including Hermes's `think` flag), and forwards
-only the internal synthetic transport alias. The broker preserves only the
-non-escalating Chat Completions opt-out `reasoning_effort: none`; this prevents
-an unqualified reasoning-model default from conflicting with Hermes function
-tools, while enabled effort still requires a signed qualified binding. Unknown
-`lemmacomputer-*` aliases and unavailable or disallowed service classes fail
-closed.
-
-Web Chat presents the same Lite, Balanced, and Pro labels from Control's live
-service-class options and binds the selection to the conversation. Thinking
-effort is a separate control and does not change the selected model mode.
-
-## Native session and rollout behavior
-
-Claude binds the selected catalogue entry to its native chat request. Start a
-new Claude conversation when changing model mode so the conversation label and
-request history remain unambiguous. Hermes keeps a model-picker or `/model`
-selection within the selected native session; it does not rewrite another
-session's model. The broker holds no mutable model-mode selection: it derives
-the requested class independently from every inference request and obtains a
-new agent-instance-bound task binding. Concurrent users, workspaces, agents,
-and conversations therefore cannot inherit one another's mode through broker
-state. Claude and Hermes native requests that cannot attach the process header
-may use their dedicated broker's active identity only when exactly one
-Control-verified process is running; zero or multiple processes fail closed.
-
-The Claude managed catalogue and Hermes default configuration are generated
-when the workspace container starts. After deploying this change, rebuild the
-workspace image and stop and restart each running workspace that should receive
-the new native controls. The persistent home is retained; Claude's root-owned
-managed settings are replaced, while Hermes's existing employee skill toggles
-are preserved. Web Chat needs only the ordinary Web and Control deployment
-refresh because its service-class options are already fetched live.
-
-## Decision flow
-
-1. LiteLLM accepts only the synthetic `lemmacomputer-auto` transport alias.
-2. The callback validates the signed task binding and trusted workspace identity.
-3. Control resolves the user's default Team and its immutable rollout and policy versions.
-4. The router applies explicit class requests or privacy-safe task signals, then capability, residency, approval, health, rate-card, currency, and budget constraints.
-5. Control records the decision and all eligible and rejected candidates atomically before returning a signed concrete-deployment binding.
-6. LiteLLM verifies that binding immediately before provider execution, admits spend, and appends the final usage observation after completion.
-
-Provider execution outcomes are also health evidence. A concrete provider availability
-failure is marked unavailable for a bounded 60-second window in both the callback's
-immediate routing signal and Control's durable tenant-scoped evidence. A later
-successful execution clears the signal. The router records health-rejected
-candidates and an `availability` escalation, or fails closed when no approved
-deployment remains. LiteLLM never falls back outside the signed concrete
-deployment binding.
-
-Model names are intentionally absent from the user contract. Decision details expose provider, deployment, mapping, rate-card, and candidate evidence only to administrators.
-
-## Cost model
-
-Administrators set the policy billing currency, but do not type a single blended price on a service-class alias. Each concrete deployment references an immutable effective rate card. Expected cost is calculated from the expected usage buckets and that deployment's rates before selection.
-
-Routing calls the ledger's canonical rate-card selector with the exact tenant, provider account, model, deployment, region, and service tier. The configured card must be the currently effective winner under contract-override, pinned-catalogue, and conservative precedence. A stale card, a higher-priority replacement, or any route-dimension mismatch fails closed. Decision insertion repeats this check in PostgreSQL.
-
-Cache reads, cache writes, reasoning tokens, uncached input, output, requests, images, audio, and provider-specific units remain separate when the provider reports them. The usage ledger applies the exact decimal rate for each available bucket. A missing required rate, unknown price, expired card, or currency mismatch makes that deployment budget-ineligible; routing fails closed when no safe candidate remains.
-
-If an administrator swaps the deployment behind Balanced, the new mapping version points to the replacement deployment and its own rate card. Historical decisions remain tied to the old immutable mapping and pricing evidence.
-
-## Safety and privacy
-
-- Task classification is bounded and stores signal codes, never prompt text.
-- Low-confidence or ambiguous Auto classification defaults to Balanced.
-- Team policy can narrow identity policy but cannot widen it.
-- Session affinity pins the exact eligible deployment and records why it moves.
-- Duplicate request IDs replay the durable decision instead of routing or charging twice.
-
-Decision and observation rows are append-only and tenant-scoped in both customer-managed and hosted profiles. Mixed-currency reports deliberately show an unknown aggregate instead of adding incomparable money.
-
-An observation is accepted only when its immutable usage event belongs to the same task, Team, actor, policy, mapping, service class, and executed provider/model/deployment as the routing decision. Its actual cost and currency must exactly equal the usage ledger fact. Both the store transaction and a database trigger enforce this binding.
+The router stores bounded signal codes and decision evidence, not prompt or
+response text. Concurrent and repeated request IDs preserve independent,
+idempotent decisions.
 
 ## Rollout and rollback
 
-New Teams start in fixed mode on `Balanced`. Shadow mode remains non-activating:
-Auto requests execute the fixed deployment while the router records the
-hypothetical class and deployment separately from the deployment that actually
-ran, along with expected cost, candidate evidence, fallback rate, errors,
-regret, and overhead. Explicit Lite, Balanced, and Pro requests are not
-classifier experiments: they execute the eligible deployment mapped to the
-requested class and are excluded from Auto shadow evidence. A denied explicit
-class or one without an eligible deployment fails closed instead of silently
-executing the fixed route.
+New Teams start on a fixed Balanced route. Shadow mode executes the fixed
+route while separately recording the hypothetical dynamic decision. Explicit
+Lite/Balanced/Pro selections still require an eligible route for the selected
+class. A representative review must match the exact policy, mapping, fixed
+route, and shadow window before dynamic routing is enabled. The kill switch
+appends a disabled rollout that returns to the configured fixed route; it does
+not rewrite past decisions.
 
-Shadow mode never blocks the fixed route when the hypothetical policy has no eligible, priced, or budget-feasible candidate; it records an explicit `no_candidate` decision instead. Disabled mode bypasses hypothetical policy, budget, and pricing selection entirely and executes the rollout's validated fixed deployment.
+## Administrator setup
 
-Each review is derived server-side from an immutable set of decisions belonging to one exact shadow rollout, policy, mapping, and fixed route. Production enablement rejects reviews from older shadow windows even when their mapping happens to be unchanged.
+1. Configure and test provider credentials and models in **Models & routing**.
+2. Publish complete rate cards there.
+3. Publish a Lite/Balanced/Pro mapping there.
+4. Assign default Teams and budgets in **Teams & budgets**.
+5. Create Team policies, review shadow evidence, enable, and monitor routing
+   and Data health.
 
-1. Review a representative evidence window in the administrator UI.
-2. Record the reviewer, note, sample size, and pass or fail result.
-3. Enable production routing only after a passing review and typed confirmation.
-4. Monitor observations and use the decision drill-down when results diverge.
-
-The kill switch appends a disabled rollout that returns execution to the configured fixed deployment. It does not mutate or erase the prior rollout, policy, mapping, decision, or observation evidence.
-
-## Operator provisioning and qualification
-
-Use **AI control plane** in this order:
-
-1. In **Models & providers**, configure and test provider credentials and
-   choose approved models. Control uses the provider configuration's reviewed
-   capability inventory when composing routes.
-2. In **Pricing**, create complete immutable rate cards for every deployment
-   expected to carry traffic.
-3. In **Model routes**, publish an immutable mapping that assigns eligible
-   deployments to Lite, Balanced, and Pro.
-4. In **Teams & budgets**, assign default spending Teams and configure budgets.
-5. Return to **Model routes** to create each Team policy and start its rollout
-   in shadow mode.
-
-Before creating a Team policy, the resulting state must include:
-
-- an immutable mapping version;
-- approved, evaluated deployments with capability and residency metadata; and
-- effective tenant rate cards for every deployment expected to carry traffic.
-
-Both deployment profiles use the same callback, Control APIs, schema, and tenant-scoped records. Deployment-specific endpoints and secrets remain configuration.
-
-Saving a provider credential does not automatically publish a mapping, create
-a price, or enable production routing. Those remain separate versioned
-administrator decisions.
-
-Qualify the pinned LiteLLM image and real callback hook with:
-
-`npm run qualify:governed-routing`
-
-Run fresh migrations and Postgres integrity coverage with:
-
-`npm run verify:db`
+Provider setup does not automatically publish a price, mapping, policy, or
+rollout. Both deployment profiles use the same tenant-scoped code and schema.
+Run `npm run qualify:governed-routing` for the pinned callback and
+`npm run verify:db` for persistence changes. Live provider and browser
+behavior require separate target-environment checks.

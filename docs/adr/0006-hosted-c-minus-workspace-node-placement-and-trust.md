@@ -1,4 +1,4 @@
-# ADR 0006: Hosted C-minus workspace-node placement and trust
+# ADR 0006: Hosted workspace ownership and trust
 
 - Status: Accepted
 - Date: 2026-08-16
@@ -23,7 +23,7 @@ later controls must not weaken the initial sticky ownership invariant.
 
 ## Decision
 
-Hosted C-minus uses an operator-managed registry of logical workspace nodes and
+The first hosted topology (previously called "C-minus") uses an operator-managed registry of logical workspace nodes and
 sticky, persisted placement:
 
 - each node has a stable logical ID, private HTTPS endpoint, expected TLS server

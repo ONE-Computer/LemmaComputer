@@ -1,6 +1,6 @@
 # Workspace performance and Office regression evidence
 
-Phase 0.5 keeps one complete Kasm workspace image. Benchmarking must not remove
+The current product uses one complete Kasm workspace image. Benchmarking must not remove
 LibreOffice, Hermes Office runtimes, Claude Cowork, QEMU, OVMF, `virtiofsd`,
 fonts, converters, connectors, policy projection, persistence, or isolation.
 

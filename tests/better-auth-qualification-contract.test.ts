@@ -74,7 +74,7 @@ test("qualification gates cover every issue #51 security and recovery boundary",
   });
 });
 
-test("ADR 0004 records the complete issue #51 threat and operability decision", async () => {
+test("ADR 0004 retains the Better Auth security boundaries", async () => {
   const adr = await readFile(new URL("../docs/adr/0004-better-auth-adoption-and-qualification.md", import.meta.url), "utf8");
   for (const required of [
     "# ADR 0004: Better Auth adoption and qualification",
@@ -92,7 +92,7 @@ test("ADR 0004 records the complete issue #51 threat and operability decision", 
   ]) {
     assert.match(adr, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(adr, /email, domain, provider groups, and provider administrator claims are\s+non-authoritative/i);
+  assert.match(adr, /email,\s+domain, provider groups, and provider administrator claims are\s+non-authoritative/i);
   assert.match(adr, /application startup never migrates/i);
-  assert.match(adr, /customer-managed.*no required LemmaComputer-hosted identity dependency/is);
+  assert.match(adr, /customer-managed.*no required\s+LemmaComputer-hosted identity dependency/is);
 });
