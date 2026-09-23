@@ -24,16 +24,10 @@ const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
 const initialized = initializeEnvironment(template, timeZone);
 const contents = profile === undefined ? initialized : applyInstallationProfile(initialized, profile);
 
-// The worktree profile permits unresolved Entra placeholders so that an
-// evaluation or development stack starts without a Microsoft tenant. Every
-// other profile validates them strictly before Compose renders.
-const entraRequired = (profile ?? installationKind.default) !== "worktree";
-
 await writeFile(destination, contents, { mode: 0o600 });
 process.stdout.write([
   `Created ${destination} with fresh local service, signing, and encryption secrets.`,
-  entraRequired
-    ? "Configure the provider and Microsoft Entra values that remain marked as placeholders before starting the stack."
-    : "Model-provider credentials are configured in the product UI after startup, not in this file.",
+  "Run npm run env:check before starting the stack. Configure optional Microsoft integrations only when needed.",
+  "Model-provider credentials are configured in the product UI after startup, not in this file.",
   "",
 ].join("\n"));
