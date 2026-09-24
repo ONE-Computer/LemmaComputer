@@ -11,6 +11,50 @@ workspace access, connectors, AI providers, usage, and budgets. Members choose
 **Lite**, **Balanced**, or **Pro** model classes; the gateway's
 `lemmacomputer-auto` alias is internal and is not a member-facing choice.
 
+## Run locally
+
+The complete reference stack needs Linux x86_64, Node.js 22 or later, Docker
+Engine, and Docker Compose v2.30.0 or later. In a **dedicated disposable
+clone**:
+
+```bash
+git clone https://github.com/ONE-Computer/LemmaComputer.git lemmacomputer-eval
+cd lemmacomputer-eval
+npm ci
+npm run env:init -- --profile=worktree
+npm run env:check
+npm run compose:up
+```
+
+This uses the root `compose.yaml` and selects the required Dockerfiles for you.
+See the [Docker file map](docker/README.md) for what each image contains.
+
+Open the URL in the generated `.env`:
+
+```bash
+grep '^LEMMACOMPUTER_PUBLIC_WEB_URL=' .env
+```
+
+Choose **Create account**, then **Open local verification email** to verify
+your account in the browser. No existing admin account or email service is
+needed for local evaluation.
+
+To open a desktop, first build its image in the same checkout:
+
+```bash
+npm run image:workspace
+```
+
+Then choose **Workspace → Create workspace**, leave optional applications and
+AI agents unselected, wait for it to become ready, and open the desktop.
+The [first-run guide](docs/guides/development-workflow.md#evaluate-a-single-checkout)
+explains prerequisites, these steps, and how to stop and resume without losing data.
+
+To use AI, configure a provider and its prices and class mappings through
+**AI control plane → Models & routing**, then set the appropriate Team budget
+and routing policy. Follow the [model-routing contract](docs/product/model-routing.md)
+for the exact readiness and rollout steps.
+
 ## Start with your task
 
 | Goal | Read |
@@ -26,43 +70,6 @@ The [development workflow](docs/guides/development-workflow.md) is the setup
 authority. Use a disposable evaluation clone to explore the product and an
 isolated task worktree to change it. The primary `main` checkout is for
 integration.
-
-## Local evaluation
-
-The complete reference stack needs Linux x86_64, Node.js 22 or later, Docker
-Engine, and Docker Compose v2.30.0 or later. In a **dedicated disposable
-clone**:
-
-```bash
-git clone https://github.com/ONE-Computer/LemmaComputer.git lemmacomputer-eval
-cd lemmacomputer-eval
-npm ci
-npm run env:init -- --profile=worktree
-npm run compose:up
-```
-
-This uses the root `compose.yaml` and selects the required Dockerfiles for you.
-See the [Docker file map](docker/README.md) for what each image contains.
-
-Open the URL in the generated `.env`:
-
-```bash
-grep '^LEMMACOMPUTER_PUBLIC_WEB_URL=' .env
-```
-
-Create an account through the sign-in page. The local development profile
-captures verification email for the browser flow; production requires a real
-delivery service. A basic desktop workspace does not need a model provider.
-Build the separate workspace image only when you want to launch one:
-
-```bash
-npm run image:workspace
-```
-
-To use AI, configure a provider and its prices and class mappings through
-**AI control plane → Models & routing**, then set the appropriate Team budget
-and routing policy. Follow the [model-routing contract](docs/product/model-routing.md)
-for the exact readiness and rollout steps.
 
 ## How it is organized
 

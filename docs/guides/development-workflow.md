@@ -1,51 +1,128 @@
 # Evaluation, development, and remote workspace workflow
 
-**Use this page to choose and run a local setup.** It is the setup authority
-for disposable evaluation, isolated code changes, and local remote-node/Cowork
-tests. It is not an AWS deployment runbook; see [AWS go-live](aws-go-live.md).
+**First time here? Follow “Evaluate a single checkout” below.** It takes you
+from a clone to sign-in and a working desktop on your own machine. You need
+no AWS account, model-provider key, Microsoft app registration, or existing
+admin account for this first run.
 
-## Choose the workflow first
+If you intend to edit code, use [the task worktree setup](#develop-in-an-isolated-task-worktree)
+instead. This page owns local setup; [AWS go-live](aws-go-live.md) covers the
+separate production deployment work.
 
-| Goal | Setup |
+## Host requirements
+
+Use Linux x86_64 (or a Linux x86_64 VM), Git, Node.js 22+, Docker Engine,
+and Docker Compose v2.30.0+. Verify that your current user can reach Docker:
+
+```bash
+node --version
+npm --version
+docker version
+docker compose version
+```
+
+Image builds need internet access, disk space, and available Docker network
+address space. The desktop image downloads the bundled applications, so its
+first build can take substantially longer than starting the web interface.
+Node.js tests can run on macOS; the full desktop workflow below requires Linux.
+
+## Evaluate a single checkout
+
+### 1. Clone and start the application
+
+Use a dedicated evaluation clone. Keep it for this evaluation; use a separate
+task worktree if you later want to change code. Run only one evaluation clone
+per Docker host because this setup uses the default names and ports.
+
+```bash
+git clone https://github.com/ONE-Computer/LemmaComputer.git lemmacomputer-eval
+cd lemmacomputer-eval
+npm ci
+npm run env:init -- --profile=worktree
+npm run env:check
+npm run compose:up
+```
+
+`env:init` generates `.env` with fresh local secrets; run it **once**.
+`worktree` here names the development configuration, even though this is a
+standalone evaluation clone. Do not copy or fill out `.env.example` manually.
+
+`compose:up` selects the root `compose.yaml`, builds the application services,
+runs database migrations, and waits for service health. You do not select a
+Dockerfile or a second Compose file. See [Docker files](../../docker/README.md)
+only if you want to understand the images.
+
+### 2. Open the product and create your account
+
+Find this installation's browser URL:
+
+```bash
+grep '^LEMMACOMPUTER_PUBLIC_WEB_URL=' .env
+```
+
+Open the printed URL, choose **Create account**, and enter your name, email,
+and password. Choose **Open local verification email** to complete verification
+through the browser. The development configuration captures email locally;
+you do not need an email delivery service. Sign in if prompted.
+
+At this point the web application is running. A desktop still needs the
+separate image built in the next step. AI features need provider configuration
+and may correctly show as unavailable.
+
+### 3. Build and open your first desktop
+
+In the same checkout:
+
+```bash
+npm run image:workspace
+```
+
+When the build succeeds, go to **Workspace → Create workspace** in the product.
+Leave optional applications and AI agents unselected for the first run, keep
+the default permitted workspace access, and create it. Wait for it to become
+ready, then open the desktop. This checks the base workspace without provider
+keys or extra host configuration.
+
+For AI later, configure a provider, pricing, and class mappings under
+**AI control plane → Models & routing**, then the applicable Team budget and
+routing policy. See [model routing](../product/model-routing.md). Chrome,
+Visual Studio Code, and Obsidian need the [Electron AppArmor setup](operations.md#workspace-node-runtime)
+on an enforcing host. Cowork needs the [remote-node procedure](#remote-workspace-node-and-cowork-qualification)
+and usable `/dev/kvm` and `/dev/vhost-vsock`.
+
+### 4. Stop and resume this evaluation
+
+Stop active workspaces through the product, then stop the application:
+
+```bash
+npm run compose:down
+```
+
+To resume later, return to this **same clone** and run:
+
+```bash
+npm run env:check
+npm run compose:up
+```
+
+Keep `.env` and the Docker volumes: they hold the secrets and data needed to
+resume. Do not rerun `env:init`, add `-- --volumes`, or create a new clone to
+resume an existing installation. If startup fails, use
+[health and diagnostics](operations.md#health-and-diagnostics).
+
+## Other workflows
+
+| Goal | Next step |
 | --- | --- |
-| Read, review, or run unit tests | Any checkout; no stack unless the test needs one. |
-| Explore without changing code | Dedicated disposable clone, `worktree` development profile. |
-| Change code or documentation | One branch in one worktree under the primary checkout's `.worktrees/`. |
-| Test remote-node routing or Cowork | Initialized task worktree, then the remote qualifier below. |
-| Test customer-managed Microsoft integration | Task worktree for code changes; a separate disposable `customer-managed` operator evaluation may follow the [Microsoft runbook](local-deployment.md). |
-| Qualify hosted production | Representative hosted infrastructure; local Compose is insufficient. |
+| Read code or run unit tests | No stack needed; see [Contributing](../../CONTRIBUTING.md). |
+| Change code or documentation | Use the task worktree procedure below. |
+| Test remote-node routing or Cowork | Initialize a task worktree, then use the remote qualifier below. |
+| Test Microsoft integration | Follow the [Microsoft runbook](local-deployment.md). |
+| Deploy hosted production | Follow [AWS go-live](aws-go-live.md); local Compose is insufficient. |
 
 The primary `main` checkout is for integration; it does not own a local
 stack. Never copy an `.env`, database, generated PKI, or workspace home from
 another checkout to get started.
-
-## Host requirements
-
-Node.js tests can run on macOS. The complete reference stack and managed
-desktop require Linux x86_64, Node.js 22+, Docker Engine, Docker Compose
-v2.30.0+, and available Docker address space. Chrome, Visual Studio Code, and
-Obsidian require the [Electron AppArmor procedure](operations.md#workspace-node-runtime).
-Claude Cowork additionally needs working `/dev/kvm` and `/dev/vhost-vsock` on
-the workspace node. A Linux x86_64 host or VM is required for full workspace
-runtime checks.
-
-## Evaluate a single checkout
-
-Use a dedicated disposable clone that will not be used for code changes:
-
-```bash
-git clone <repository-url> lemmacomputer-eval
-cd lemmacomputer-eval
-npm ci
-npm run env:init -- --profile=worktree
-npm run compose:up
-```
-
-Open the URL reported by `grep '^LEMMACOMPUTER_PUBLIC_WEB_URL=' .env`.
-Build a desktop image with `npm run image:workspace` only when evaluating a
-managed workspace. `env:init` creates fresh secrets and refuses to overwrite
-an existing `.env`. This clone does not allocate names and ports for parallel
-stacks; run only one such evaluation on a Docker host.
 
 ## Develop in an isolated task worktree
 
@@ -87,19 +164,12 @@ migrations. Stop active workspaces in the product before
 `npm run compose:down`; the command preserves volumes. Do not add
 `-- --volumes` to resume or clean up a data-bearing stack.
 
+Then follow steps 2–3 above to sign in and build/open a desktop.
 Read the worktree-specific URL from `.env`; do not assume port 4174. Localhost
 cookies are scoped to the host rather than the port, so use separate browser
 profiles for sensitive parallel worktrees. For a basic desktop test, create a
 workspace without an AI agent or model provider. Configure model keys through
 **AI control plane → Models & routing** only when the chosen test needs AI.
-
-### Verify a local account without external email delivery
-
-An initialized worktree uses the `capture` email transport. Sign up in the
-browser, choose **Open local verification email**, and complete the real
-same-origin verification link. Password recovery uses the same capture flow.
-The link is limited to that worktree's development profile and captured
-messages; production requires real transactional email.
 
 ## Configuration and commands
 

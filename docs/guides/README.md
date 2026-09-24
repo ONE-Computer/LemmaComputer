@@ -1,8 +1,12 @@
 # Guides: read only the one for your task
 
-**AWS go-live?** Start with the short [AWS deployment path](aws-go-live.md). It
-shows the diagram, work order, and remaining decisions. The repository does not
-yet have a command that deploys this design to AWS.
+**First time running the repo?** Follow the numbered
+[first-run steps](development-workflow.md#evaluate-a-single-checkout): clone,
+start the application, verify your account, and open a desktop. That is the
+only guide you need for a basic local evaluation.
+
+If you are changing code, use the [task worktree setup](development-workflow.md#develop-in-an-isolated-task-worktree).
+Read the other guides only when you reach the corresponding task:
 
 | File | Read it when you need to… |
 | --- | --- |
