@@ -16,3 +16,12 @@ dist
 
 docs
 tests
+
+# Checkout-owned state and generated evidence must never enter build contexts.
+.worktrees
+.runtime-env
+.runtime-remote-workspace-node
+.claude
+playwright-report
+test-results
+design-qa*

@@ -225,8 +225,8 @@ test("every production Compose operator reference and worktree override is regis
 
 test("qualification inputs are registered separately from deployment inputs", async () => {
   const [oauthCompose, providerCompose, remoteQualifier, qualificationExample] = await Promise.all([
-    readFile(new URL("../compose.oauth-qualification.yaml", import.meta.url), "utf8"),
-    readFile(new URL("../compose.provider-qualification.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../docker/qualification/compose.oauth.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../docker/qualification/compose.providers.yaml", import.meta.url), "utf8"),
     readFile(new URL("../scripts/qualify-remote-workspace-node.mjs", import.meta.url), "utf8"),
     readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
@@ -621,12 +621,6 @@ test("worktree platform authentication uses isolated credentials projected only 
     }, { profile: "worktree", strict: true }),
     /authentication secrets.*distinct/i,
   );
-});
-
-test("the hosted Compose overlay does not select a deployment policy", async () => {
-  const hostedOverlay = await readFile(new URL("../compose.hosted.yaml", import.meta.url), "utf8");
-  assert.doesNotMatch(hostedOverlay, /^\s+LEMMACOMPUTER_INSTALLATION_KIND:\s*hosted\s*$/m);
-  assert.doesNotMatch(hostedOverlay, /^\s+LITELLM_ADMIN_URL:\s*https:\/\//m);
 });
 
 test("reference service env files use raw Compose parsing and renderer repairs restrictive permissions", async () => {

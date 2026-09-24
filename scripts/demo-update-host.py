@@ -242,7 +242,7 @@ def update(root, bundle, apply=False):
             # No server secrets enter the build context: build the pristine archived tree in /tmp.
             tag = f"lemmacomputer/demo-control:{meta['sha']}"
             print("Building the shared application image; existing demo remains running.", file=sys.stderr, flush=True)
-            command(["docker", "build", "-f", "docker/Dockerfile.node", "-t", tag, "."], cwd=temp / "candidate")
+            command(["docker", "build", "-f", "docker/Dockerfile.services", "-t", tag, "."], cwd=temp / "candidate")
             image = command(["docker", "image", "inspect", tag, "--format", "{{.Id}}"])
             require(re.fullmatch(r"sha256:[a-f0-9]{64}", image) is not None, "Build did not produce an immutable image ID")
         else:

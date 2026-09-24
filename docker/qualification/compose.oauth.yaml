@@ -1,3 +1,4 @@
+# Test-only stack; run through npm run qualify:oauth.
 name: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_PROJECT:?set an isolated qualification project name}
 
 services:
@@ -22,8 +23,8 @@ services:
 
   gateway-fixture:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.node
+      context: ../..
+      dockerfile: docker/Dockerfile.services
     command: ["npm", "run", "start", "--workspace", "@lemmacomputer/gateway-fixture"]
     environment:
       FIXTURE_HOST: 0.0.0.0
@@ -64,7 +65,7 @@ services:
     ports:
       - "127.0.0.1:${LEMMACOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT:?set an isolated qualification LiteLLM port}:4000"
     volumes:
-      - ./config/litellm/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
+      - ../../config/litellm/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
     depends_on:
       litellm-postgres:
         condition: service_healthy

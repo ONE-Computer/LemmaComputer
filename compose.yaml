@@ -1,10 +1,12 @@
+# Local application stack. After setup, run npm run compose:up from the repository root.
+# Image recipes and test-only stacks: docker/README.md.
 name: ${LEMMACOMPUTER_COMPOSE_PROJECT_NAME:?set LEMMACOMPUTER_COMPOSE_PROJECT_NAME in .env}
 
 x-control-runtime: &control-runtime
   image: ${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?set LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE in .env}
   build:
     context: .
-    dockerfile: docker/Dockerfile.node
+    dockerfile: docker/Dockerfile.services
   init: true
 
 x-hardened: &hardened

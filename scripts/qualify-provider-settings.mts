@@ -118,7 +118,7 @@ const main = async () => {
     const result = spawnSync("docker", [
       "compose",
       "--project-name", project,
-      "--file", "compose.provider-qualification.yaml",
+      "--file", "docker/qualification/compose.providers.yaml",
       ...args,
     ], { cwd: process.cwd(), encoding: "utf8", env: environment });
     if (result.status !== 0) throw new Error(`Provider Settings qualification Docker command failed: ${args[0] ?? "compose"}`);

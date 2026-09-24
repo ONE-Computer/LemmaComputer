@@ -114,8 +114,8 @@ real sign-in, persistence, workspaces, and external integrations.
 | `npm run benchmark:kasm-browser` | Collect Kasm browser runtime measurements |
 
 The complete product uses repository-managed `npm run compose:*` commands.
-Do not choose Compose files manually for ordinary work and do not use
-`compose.hosted.yaml` to select a deployment profile.
+These use the root `compose.yaml`; no overlay selection is needed. The
+[Docker file map](docker/README.md) explains the image recipes and test stacks.
 
 ## Database and generated-contract tools
 

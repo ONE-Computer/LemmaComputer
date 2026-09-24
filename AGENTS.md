@@ -34,7 +34,7 @@ deployment. Do not ask when the request already determines the setup.
 
 Do not invent a hybrid setup. In particular, do not develop from the evaluation
 clone, run a local stack from the primary `main` checkout, copy another
-checkout's `.env`, or use `compose.hosted.yaml` to approximate hosted.
+checkout's `.env`, or use local Compose to approximate hosted infrastructure.
 
 ## Before changing code
 

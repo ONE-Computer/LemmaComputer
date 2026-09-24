@@ -58,7 +58,7 @@ test("the archived office-worker baseline remains verifiable for historical audi
 });
 
 test("the Control runtime image does not package the retired product policy ceiling", async () => {
-  const dockerfile = await readFile(new URL("docker/Dockerfile.node", root), "utf8");
+  const dockerfile = await readFile(new URL("docker/Dockerfile.services", root), "utf8");
   assert.doesNotMatch(dockerfile, /COPY config\/product-policy/);
 });
 

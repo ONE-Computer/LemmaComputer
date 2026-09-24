@@ -81,10 +81,7 @@ test("environment initialization and upgrades never derive session or ingress se
 });
 
 test("the shared projection routes LiteLLM administration through the dedicated mutual-TLS listener", async () => {
-  const [compose, hostedCompose] = await Promise.all([
-    readFile(new URL("../compose.yaml", import.meta.url), "utf8"),
-    readFile(new URL("../compose.hosted.yaml", import.meta.url), "utf8"),
-  ]);
+  const compose = await readFile(new URL("../compose.yaml", import.meta.url), "utf8");
   const control = compose.split("  control-api:")[1]?.split("\n  channel-broker:")[0] ?? "";
   const proxy = compose.split("  litellm-admin-proxy:")[1]?.split("\n  openvtc-consent:")[0] ?? "";
   const projected = projectServiceEnvironment();
@@ -100,7 +97,6 @@ test("the shared projection routes LiteLLM administration through the dedicated 
   assert.ok("LITELLM_ADMIN_PROXY_TLS_CA_B64" in proxyEnvironment);
   assert.equal(proxyEnvironment.LITELLM_ADMIN_PROXY_HOST, "litellm-admin-listener");
   assert.ok(!("LITELLM_ADMIN_PROXY_TLS_SERVER_KEY_B64" in controlEnvironment));
-  assert.doesNotMatch(hostedCompose, /^\s+environment:/m);
 });
 
 test("Compose separates model egress from strict remote-MCP egress", async () => {

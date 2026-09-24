@@ -41,6 +41,9 @@ npm run env:init -- --profile=worktree
 npm run compose:up
 ```
 
+This uses the root `compose.yaml` and selects the required Dockerfiles for you.
+See the [Docker file map](docker/README.md) for what each image contains.
+
 Open the URL in the generated `.env`:
 
 ```bash
