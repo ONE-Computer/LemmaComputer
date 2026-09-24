@@ -135,16 +135,16 @@ explicit migration jobs own schema changes. Applied migrations are immutable,
 forward-only, checksummed, dependency ordered, transactional, and advisory-lock
 serialized.
 
-Generated deployment references are checked with:
+Check the generated deployment reference with:
 
 ```bash
 npm run env:example
-npm run env:qualification:example
 ```
 
-Edit `scripts/setup/deployment-config.mjs`, not `.env.example` or
-`.env.qualification.example`, then use the script's explicit `--write` mode
-when the generated files intentionally change.
+Edit `scripts/setup/deployment-config.mjs`, then run
+`npm run env:example -- --write` to regenerate `.env.example`.
+Integration runners generate their own test environments; no separate example
+file needs to be filled out.
 
 ## Test design and security boundaries
 

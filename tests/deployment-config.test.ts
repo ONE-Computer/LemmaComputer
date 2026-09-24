@@ -11,7 +11,7 @@ import {
   allEnvironmentVariableNameSet,
   projectServiceEnvironment,
   renderEnvironmentTemplate,
-  renderQualificationEnvironmentTemplate,
+  qualificationEnvironmentContract,
   serializeEnvironment,
   validateDeploymentEnvironment,
   worktreeEnvironmentOverrides,
@@ -177,7 +177,6 @@ test("the checked-in environment example is rendered from the canonical deployme
   assert.deepEqual(assignmentKeys(rendered), keys, "the template must list every registered operator variable once");
   assert.match(rendered, /Scope: every operator-owned input accepted in a deployment \.env is listed/);
   assert.match(rendered, /Service-local and per-workspace variables are derived/);
-  assert.match(rendered, /Qualification-only inputs are documented in \.env\.qualification\.example/);
   assert.match(rendered, /Accepted values: customer-managed, hosted, worktree\./);
   assert.match(rendered, /Sensitive: keep this value out of source control and logs/);
   assert.match(rendered, /Required when: The hosted profile is selected\./);
@@ -224,11 +223,10 @@ test("every production Compose operator reference and worktree override is regis
 });
 
 test("qualification inputs are registered separately from deployment inputs", async () => {
-  const [oauthCompose, providerCompose, remoteQualifier, qualificationExample] = await Promise.all([
+  const [oauthCompose, providerCompose, remoteQualifier] = await Promise.all([
     readFile(new URL("../docker/qualification/compose.oauth.yaml", import.meta.url), "utf8"),
     readFile(new URL("../docker/qualification/compose.providers.yaml", import.meta.url), "utf8"),
     readFile(new URL("../scripts/development/remote-workspace-node.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
   const references = [
     ...environmentReferences(oauthCompose),
@@ -236,8 +234,8 @@ test("qualification inputs are registered separately from deployment inputs", as
     ...environmentReferences(remoteQualifier),
   ];
   assert.deepEqual(references.filter((key) => !allEnvironmentVariableNameSet.has(key)), []);
-  assert.equal(qualificationExample, renderQualificationEnvironmentTemplate());
-  assert.match(qualificationExample, /reference inventory, not a file that operators must populate/);
+  const deploymentKeys = new Set(environmentContract.map(({ key }) => key));
+  assert.deepEqual(qualificationEnvironmentContract.filter(({ key }) => deploymentKeys.has(key)), []);
 });
 
 test("a complete hosted configuration passes the shared profile validation", () => {

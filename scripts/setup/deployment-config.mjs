@@ -303,16 +303,14 @@ export const coupledEnvironmentGroups = Object.freeze([
 
 const comments = (text) => text.split("\n").flatMap((line) => `# ${line}`);
 
-const variableGuidance = (item, { qualification = false } = {}) => {
+const variableGuidance = (item) => {
   const guidance = [];
   if (item.requiredWhen) guidance.push(`Required when: ${item.requiredWhen}`);
   if (item.kind === "enum") guidance.push(`Accepted values: ${item.values.map((value) => value || "(empty)").join(", ")}.`);
   if (item.kind === "boolean") guidance.push("Accepted values: true or false.");
   if (item.kind === "integer") guidance.push("Accepted value: a non-negative integer.");
   if (item.kind === "url") guidance.push("Accepted value: an absolute URL.");
-  if (item.secret) guidance.push(qualification
-    ? "Sensitive: generated for an isolated qualification run; do not persist or log it."
-    : "Sensitive: keep this value out of source control and logs; use a secret manager in production.");
+  if (item.secret) guidance.push("Sensitive: keep this value out of source control and logs; use a secret manager in production.");
   if (item.generated) guidance.push("Local initialization: npm run env:init replaces this placeholder and keeps the generated value stable in .env.");
   return guidance.flatMap(comments);
 };
@@ -328,7 +326,6 @@ export function renderEnvironmentTemplate() {
     "# Scope: every operator-owned input accepted in a deployment .env is listed",
     "# exactly once below. Service-local and per-workspace variables are derived",
     "# into .runtime-env/ files or runtime container specifications.",
-    "# Qualification-only inputs are documented in .env.qualification.example.",
     "# Model-provider API keys and tenant MCP OAuth tokens are configured in the",
     "# product UI and encrypted stores; they are intentionally not deployment env vars.",
     "# Run `npm run env:check` to validate the selected profile and conditional fields.",
@@ -336,21 +333,6 @@ export function renderEnvironmentTemplate() {
   for (const { name, description, variables } of environmentSections) {
     lines.push("", `# ${name}`, ...comments(description));
     for (const item of variables) lines.push(...comments(item.description), ...variableGuidance(item), `${item.key}=${item.default}`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-export function renderQualificationEnvironmentTemplate() {
-  const lines = [
-    "# LemmaComputer qualification-only environment reference",
-    "#",
-    "# Generated from scripts/setup/deployment-config.mjs. The qualification commands",
-    "# generate these values at run time; do not copy them into a deployment .env.",
-    "# This file is a reference inventory, not a file that operators must populate.",
-  ];
-  for (const { name, description, variables } of qualificationSections) {
-    lines.push("", `# ${name}`, ...comments(description));
-    for (const item of variables) lines.push(...comments(item.description), ...variableGuidance(item, { qualification: true }), `${item.key}=${item.default}`);
   }
   return `${lines.join("\n")}\n`;
 }

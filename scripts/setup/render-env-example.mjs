@@ -1,12 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
-import {
-  renderEnvironmentTemplate,
-  renderQualificationEnvironmentTemplate,
-} from "./deployment-config.mjs";
+import { renderEnvironmentTemplate } from "./deployment-config.mjs";
 
-const qualification = process.argv.includes("--qualification");
 const destination = process.argv.find((argument) => argument.startsWith("--file="))?.slice("--file=".length)
-  ?? (qualification ? ".env.qualification.example" : ".env.example");
+  ?? ".env.example";
 const write = process.argv.includes("--write");
 // The npm scripts intentionally default to --check. A caller may append
 // `-- --write` to opt into regeneration without bypassing the repository
@@ -14,7 +10,7 @@ const write = process.argv.includes("--write");
 const check = process.argv.includes("--check") && !write;
 if (check === write) throw new Error("Choose exactly one of --check or --write");
 
-const rendered = qualification ? renderQualificationEnvironmentTemplate() : renderEnvironmentTemplate();
+const rendered = renderEnvironmentTemplate();
 if (check) {
   const current = await readFile(destination, "utf8");
   if (current !== rendered) {

@@ -39,7 +39,6 @@
     "benchmark:tool-audit": "node tests/performance/tool-audit-volume.mjs",
     "env:init": "node scripts/setup/initialize-env.mjs",
     "env:example": "node scripts/setup/render-env-example.mjs --check",
-    "env:qualification:example": "node scripts/setup/render-env-example.mjs --qualification --check",
     "env:check": "node scripts/setup/update-env.mjs --check",
     "env:update": "node scripts/setup/update-env.mjs --write",
     "env:render": "node scripts/setup/render-service-env.mjs",
