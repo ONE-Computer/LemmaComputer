@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { generateSigningIdentity, signTrustTask } from "@openvtc/pnm-core";
-import { validateRequest } from "../apps/web/src/openvtc-browser-agent.js";
+import { validateRequest } from "../../apps/web/src/openvtc-browser-agent.js";
 
 const baseUrl = (process.env.OPENVTC_CONSENT_URL ?? "http://127.0.0.1:18788").replace(/\/+$/, "");
 const token = process.env.OPENVTC_CONSENT_TOKEN;

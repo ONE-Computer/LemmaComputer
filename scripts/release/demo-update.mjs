@@ -27,7 +27,7 @@ const run = (command, argv, settings = {}) => {
   if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? result.error?.code}). ${result.stderr ?? ""}`);
   return result.stdout?.trim();
 };
-const target = JSON.parse(readFileSync(fileURLToPath(new URL("../config/demo-target.json", import.meta.url)), "utf8"));
+const target = JSON.parse(readFileSync(fileURLToPath(new URL("../../config/demo-target.json", import.meta.url)), "utf8"));
 const script = readFileSync(fileURLToPath(new URL("./demo-update-host.py", import.meta.url)));
 const remote = (operation, extra = []) => run("ssh", [...ssh, host,
   ["sudo", "-n", "python3", "-", operation, "--target-json", JSON.stringify(target), ...extra].map(quote).join(" "),

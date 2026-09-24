@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 for (const [command, args] of [
-  [process.execPath, ["scripts/dev-doctor.mjs"]],
+  [process.execPath, ["scripts/development/dev-doctor.mjs"]],
   ["npm", ["run", "env:check"]],
   ["npm", ["run", "compose:config"]],
   ["npm", ["run", "build"]],

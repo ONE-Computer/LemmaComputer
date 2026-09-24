@@ -20,7 +20,7 @@ if (check === write) throw new Error("Choose exactly one of --check or --write")
 const template = renderEnvironmentTemplate();
 const checkedInTemplate = await readFile(".env.example", "utf8");
 if (checkedInTemplate !== template) {
-  throw new Error(".env.example is not generated from scripts/deployment-config.mjs; run npm run env:example -- --write");
+  throw new Error(".env.example is not generated from scripts/setup/deployment-config.mjs; run npm run env:example -- --write");
 }
 const current = await readFile(destination, "utf8");
 const parity = environmentParity(template, current);

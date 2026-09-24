@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { worktreeEnvironmentOverrides } from "../scripts/deployment-config.mjs";
+import { worktreeEnvironmentOverrides } from "../scripts/setup/deployment-config.mjs";
 import {
   applyWorktreeEnvironmentOverrides,
   isWorktreeResourceName,
   legacyWorktreeSlug,
   worktreeId,
   worktreeSlug,
-} from "../scripts/worktree-names.mjs";
+} from "../scripts/development/worktree-names.mjs";
 
 test("worktree Docker resources use the LemmaComputer namespace", () => {
   const id = worktreeId({ root: "/workspace/task", branch: "123-example" });

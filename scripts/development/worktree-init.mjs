@@ -1,7 +1,7 @@
 import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { worktreeEnvironmentOverrides } from "./deployment-config.mjs";
+import { worktreeEnvironmentOverrides } from "../setup/deployment-config.mjs";
 import { runtimeContainerFilters } from "./compose-down.mjs";
 import { containerMountedFilePaths } from "./dev-doctor-lib.mjs";
 import {
@@ -33,7 +33,7 @@ if (!await exists(localModules)) {
 }
 
 const existingEnvironment = await exists(".env");
-if (!existingEnvironment) run(process.execPath, ["scripts/initialize-env.mjs"]);
+if (!existingEnvironment) run(process.execPath, ["scripts/setup/initialize-env.mjs"]);
 const envPath = resolve(root, ".env");
 const current = await readFile(envPath, "utf8");
 const currentProject = current.match(/^LEMMACOMPUTER_COMPOSE_PROJECT_NAME=(.+)$/m)?.[1]?.trim();

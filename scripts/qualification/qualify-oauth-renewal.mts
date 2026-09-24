@@ -6,7 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { IdentityContext, RuntimePolicy } from "@lemmacomputer/contracts";
 import { LiteLLMGatewayAdapter, type OAuthConnectionGateway } from "@lemmacomputer/litellm-adapter";
 import { MemoryConnectorRegistryStore, type SaveConnectorRegistryRecord } from "@lemmacomputer/workspace-store";
-import { McpConnectionService } from "../apps/control-api/src/connections.js";
+import { McpConnectionService } from "../../apps/control-api/src/connections.js";
 
 type FixtureCounters = {
   oauthToolsList: number;

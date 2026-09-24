@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location("demo_update", Path(__file__).parents[1] / "scripts/demo-update-host.py")
+spec = importlib.util.spec_from_file_location("demo_update", Path(__file__).parents[1] / "scripts/release/demo-update-host.py")
 demo = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(demo)
 BASE, NEXT = "a" * 40, "b" * 40
@@ -108,7 +108,7 @@ class DemoUpdates(unittest.TestCase):
 
     def test_sensitive_changes_refused_before_staging(self):
         for path in ["packages/workspace-store/migrations/new.sql", "package-lock.json", "docker/Dockerfile.workspace",
-                     "scripts/deployment-config.mjs", "apps/control-api/src/migrate.ts", "apps/control-api/src/auth.ts",
+                     "scripts/setup/deployment-config.mjs", "apps/control-api/src/migrate.ts", "apps/control-api/src/auth.ts",
                      "packages/auth-store/src/index.ts", "compose.yaml"]:
             with self.subTest(path=path):
                 bundle = self.bundle({path: "changed"})

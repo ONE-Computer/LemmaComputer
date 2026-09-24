@@ -1,6 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { worktreeIsolationEnvironmentVariableNames } from "./deployment-config.mjs";
+import { worktreeIsolationEnvironmentVariableNames } from "../setup/deployment-config.mjs";
 import { containerMountedFilePaths, inspectReadablePaths } from "./dev-doctor-lib.mjs";
 import { isWorktreeResourceName, worktreeResourcePrefix } from "./worktree-names.mjs";
 

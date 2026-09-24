@@ -54,7 +54,7 @@ release directory. It does not undo database writes, restore old secrets, or
 replace volumes. It refuses an unexpected environment or source change. If a
 cutover is interrupted, `status` reports its pending journal; inspect it and
 use the rollback command before another update. The host-side tool can also
-run `sudo python3 /opt/onecomputer/current/scripts/demo-update-host.py status`
+run `sudo python3 /opt/onecomputer/current/scripts/release/demo-update-host.py status`
 or `rollback`. Retain the prior image; global Docker pruning can remove the
 rollback path.
 

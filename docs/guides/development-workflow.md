@@ -185,7 +185,7 @@ workspace without an AI agent or model provider. Configure model keys through
 | `npm run compose:down` | Stops the local stack and preserves volumes by default. |
 
 The generated `.env.example` is the operator-variable catalog from
-[`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs). Do not
+[`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Do not
 edit it by hand. `.env` is the ignored, checkout-owned deployment input;
 `.runtime-env/<service>.env` is generated for each service. Provider keys and
 per-user connector OAuth tokens are entered through the product, not `.env`.

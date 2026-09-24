@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseEnvironment } from "./environment-template.mjs";
+import { parseEnvironment } from "../setup/environment-template.mjs";
 
 const stateDirectoryName = ".runtime-remote-workspace-node";
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
@@ -115,7 +115,7 @@ export const renderControlOverride = () => `services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
     volumes:
-      - ./scripts/remote-workspace-node-tls-forwarder.mjs:/qualification/remote-workspace-node-tls-forwarder.mjs:ro
+      - ./scripts/qualification/remote-workspace-node-tls-forwarder.mjs:/qualification/remote-workspace-node-tls-forwarder.mjs:ro
       - \${QUALIFICATION_ROOT:?set qualification root}/pki:/qualification-pki:ro
     networks:
       control-private: {}
@@ -242,7 +242,7 @@ const readLocalEnvironment = () => {
 
 const prepareState = ({ cowork }) => {
   const environment = readLocalEnvironment();
-  run(process.execPath, ["scripts/render-service-env.mjs"]);
+  run(process.execPath, ["scripts/setup/render-service-env.mjs"]);
   const root = resolve(stateDirectoryName);
   const pki = resolve(root, "pki");
   rmSync(root, { recursive: true, force: true });
@@ -402,7 +402,7 @@ const tearDownRemoteState = (state) => {
 };
 
 const restoreColocated = (projectName) => {
-  run(process.execPath, ["scripts/render-service-env.mjs"]);
+  run(process.execPath, ["scripts/setup/render-service-env.mjs"]);
   const args = ["compose", "--env-file", ".env", "-f", "compose.yaml"];
   try {
     run("docker", [...args, "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);

@@ -8,12 +8,12 @@ import {
   initializeEnvironment,
   mergeEnvironment,
   parseEnvironment,
-} from "../scripts/environment-template.mjs";
+} from "../scripts/setup/environment-template.mjs";
 import {
   runComposeDown,
   runtimeContainerFilters,
-} from "../scripts/compose-down.mjs";
-import { validateDeploymentEnvironment } from "../scripts/deployment-config.mjs";
+} from "../scripts/development/compose-down.mjs";
+import { validateDeploymentEnvironment } from "../scripts/setup/deployment-config.mjs";
 
 test("environment updates preserve values, map renamed keys, initialize missing keys, and retain extras", () => {
   const template = [

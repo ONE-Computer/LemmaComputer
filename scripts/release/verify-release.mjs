@@ -43,13 +43,13 @@ if (
 }
 // compose.yaml consumes ignored per-service files. Render and validate them
 // immediately before any release command can invoke Docker Compose.
-run(process.execPath, ["scripts/render-service-env.mjs"]);
+run(process.execPath, ["scripts/setup/render-service-env.mjs"]);
 run("npm", ["run", "qualify:providers"]);
 run("npm", ["run", "qualify:mcp-egress"]);
 run("npm", ["run", "qualify:oauth"]);
 run("npm", ["run", "qualify:microsoft365-contracts"]);
-run(process.execPath, ["scripts/verify-quick.mjs"]);
-run(process.execPath, ["scripts/verify-db.mjs"]);
+run(process.execPath, ["scripts/development/verify-quick.mjs"]);
+run(process.execPath, ["scripts/database/verify-db.mjs"]);
 let composeAttempted = false;
 let firstPartyImages;
 try {
@@ -60,7 +60,7 @@ try {
   const webUrl = env.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
   if (!webUrl) throw new Error("LEMMACOMPUTER_PUBLIC_WEB_URL is missing");
   run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__lemmacomputer/healthz`]);
-  const qualifier = `${process.cwd()}/scripts/qualify-workspace-startup.mts`;
+  const qualifier = `${process.cwd()}/scripts/qualification/qualify-workspace-startup.mts`;
   // Run from the persistent Control container. The Kasm adapter attaches this
   // exact container to each workspace network, so the qualifier can challenge
   // the private chat endpoint instead of merely trusting public state. Stream
@@ -85,7 +85,7 @@ try {
     };
   });
 } finally {
-  if (composeAttempted) run(process.execPath, ["scripts/compose-down.mjs", "--volumes"]);
+  if (composeAttempted) run(process.execPath, ["scripts/development/compose-down.mjs", "--volumes"]);
 }
 if (capture("git", ["rev-parse", "HEAD"]) !== sha || capture("git", ["status", "--porcelain"])) {
   throw new Error("Worktree changed during release verification");

@@ -8,7 +8,7 @@ import {
   inspectReadablePaths,
   litellmMountedFilePaths,
   postgresMountedFilePaths,
-} from "../scripts/dev-doctor-lib.mjs";
+} from "../scripts/development/dev-doctor-lib.mjs";
 
 test("dev doctor covers every repository file mounted into LiteLLM", () => {
   assert.deepEqual(litellmMountedFilePaths, [

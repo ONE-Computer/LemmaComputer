@@ -11,7 +11,8 @@ choose and initialize the correct environment using
 | --- | --- |
 | Evaluation, worktree development, remote-node/Cowork setup, and command meanings | `docs/guides/development-workflow.md` |
 | Runnable repository commands | `package.json` scripts |
-| Deployment variables and per-service projections | `scripts/deployment-config.mjs` |
+| Script implementation folders | [Script layout](scripts/README.md) |
+| Deployment variables and per-service projections | `scripts/setup/deployment-config.mjs` |
 | Canonical local topology | `compose.yaml` |
 | Unit and contract tests | `tests/**/*.test.ts` |
 | Browser suites | `tests/ui/` (tests, fixtures, configs, and reviewed snapshots) |
@@ -137,7 +138,7 @@ npm run env:example
 npm run env:qualification:example
 ```
 
-Edit `scripts/deployment-config.mjs`, not `.env.example` or
+Edit `scripts/setup/deployment-config.mjs`, not `.env.example` or
 `.env.qualification.example`, then use the script's explicit `--write` mode
 when the generated files intentionally change.
 

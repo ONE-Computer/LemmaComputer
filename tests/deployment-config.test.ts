@@ -15,12 +15,12 @@ import {
   serializeEnvironment,
   validateDeploymentEnvironment,
   worktreeEnvironmentOverrides,
-} from "../scripts/deployment-config.mjs";
+} from "../scripts/setup/deployment-config.mjs";
 import {
   initializeEnvironment,
   mergeEnvironment,
   parseEnvironment,
-} from "../scripts/environment-template.mjs";
+} from "../scripts/setup/environment-template.mjs";
 
 const environmentReferences = (contents: string) => new Set(
   [...contents.matchAll(/\$\{((?:LEMMACOMPUTER|QUALIFICATION)_[A-Z0-9_]+)/g)].map(([, key]) => key),
@@ -227,7 +227,7 @@ test("qualification inputs are registered separately from deployment inputs", as
   const [oauthCompose, providerCompose, remoteQualifier, qualificationExample] = await Promise.all([
     readFile(new URL("../docker/qualification/compose.oauth.yaml", import.meta.url), "utf8"),
     readFile(new URL("../docker/qualification/compose.providers.yaml", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/qualify-remote-workspace-node.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/qualification/qualify-remote-workspace-node.mjs", import.meta.url), "utf8"),
     readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
   const references = [
@@ -437,7 +437,7 @@ test("environment migration preserves retired variables without projecting them 
   try {
     await writeFile(source, `${initializedCustomerManagedEnvironment()}LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}\n`, { mode: 0o600 });
     const update = spawnSync(process.execPath, [
-      new URL("../scripts/update-env.mjs", import.meta.url).pathname,
+      new URL("../scripts/setup/update-env.mjs", import.meta.url).pathname,
       `--file=${source}`,
       "--write",
     ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
@@ -445,7 +445,7 @@ test("environment migration preserves retired variables without projecting them 
     assert.match(await readFile(source, "utf8"), new RegExp(`LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}`));
 
     const render = spawnSync(process.execPath, [
-      new URL("../scripts/render-service-env.mjs", import.meta.url).pathname,
+      new URL("../scripts/setup/render-service-env.mjs", import.meta.url).pathname,
       `--file=${source}`,
       `--directory=${destination}`,
     ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
@@ -638,7 +638,7 @@ test("reference service env files use raw Compose parsing and renderer repairs r
     const existing = join(destination, "control-api.env");
     await writeFile(existing, "stale=true\n", { mode: 0o644 });
     const rendered = spawnSync(process.execPath, [
-      new URL("../scripts/render-service-env.mjs", import.meta.url).pathname,
+      new URL("../scripts/setup/render-service-env.mjs", import.meta.url).pathname,
       `--file=${source}`,
       `--directory=${destination}`,
     ], { encoding: "utf8" });

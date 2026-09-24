@@ -8,13 +8,13 @@ import {
   metricDefinitions,
   summarizeWorkspaceMeasurements,
   validateWorkspaceBenchmarkEvent,
-} from "../scripts/workspace-benchmark-lib.mjs";
+} from "../scripts/benchmark/workspace-benchmark-lib.mjs";
 import {
   parseDockerStats,
   parseKasmCollectorArguments,
   webSocketPayloadBytes,
   workspaceBenchmarkEvent,
-} from "../scripts/collect-kasm-browser-runtime.mjs";
+} from "../scripts/benchmark/collect-kasm-browser-runtime.mjs";
 
 const execute = promisify(execFile);
 
@@ -143,7 +143,7 @@ test("workspace benchmark snapshots retain route, allocation, image and host evi
 
 test("benchmark CLI can emit a deterministic metadata-only baseline without touching Docker", async () => {
   const { stdout } = await execute("node", [
-    "scripts/benchmark-workspace.mjs",
+    "scripts/benchmark/benchmark-workspace.mjs",
     "--benchmark-id", "metadata-only",
     "--recorded-at", "2026-08-12T05:00:00.000Z",
     "--route-id", "local-host",
@@ -167,7 +167,7 @@ test("benchmark CLI can emit a deterministic metadata-only baseline without touc
   assert.equal(snapshot.measurements.image_content_bytes.status, "unavailable");
   assert.equal(snapshot.measurements.input_to_paint_ms.status, "unavailable");
 
-  const cli = await readFile("scripts/benchmark-workspace.mjs", "utf8");
+  const cli = await readFile("scripts/benchmark/benchmark-workspace.mjs", "utf8");
   assert.doesNotMatch(cli, /docker\s+(?:run|create|start|stop|restart|rm|rmi|pull)|compose\s+(?:up|down|build)/);
 });
 

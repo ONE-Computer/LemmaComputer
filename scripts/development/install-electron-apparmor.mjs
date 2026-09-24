@@ -22,7 +22,7 @@ if (process.argv[2] === "check") {
 }
 
 if (process.argv[2] !== "install") {
-  throw new Error("usage: node scripts/install-electron-apparmor.mjs <check|install>");
+  throw new Error("usage: node scripts/development/install-electron-apparmor.mjs <check|install>");
 }
 if (process.getuid?.() !== 0) {
   throw new Error("installation requires root; rerun this command with sudo");

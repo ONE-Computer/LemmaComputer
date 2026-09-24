@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { mvpPolicyDocument, upgradeHistoricMvpPolicyDocument } from "@lemmacomputer/workspace-store";
-import { projectServiceEnvironment } from "../scripts/deployment-config.mjs";
+import { projectServiceEnvironment } from "../scripts/setup/deployment-config.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const source = (relativePath: string) => readFile(path.join(root, relativePath), "utf8");
@@ -110,7 +110,7 @@ test("the local workspace receives an explicit host-seeded IANA timezone", async
   const [compose, example, initializer, entrypoint] = await Promise.all([
     source("compose.yaml"),
     source(".env.example"),
-    source("scripts/initialize-env.mjs"),
+    source("scripts/setup/initialize-env.mjs"),
     source("docker/workspace/lemmacomputer-workspace-entrypoint.sh"),
   ]);
   const controllerEnvironment = projectServiceEnvironment()["workspace-controller"];

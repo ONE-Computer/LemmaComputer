@@ -52,7 +52,7 @@ npm run env:check -- --profile=hosted
 `npm run env:render -- --profile=<chosen-profile>` then generates the
 per-service environment projections. It does not provision databases, ECS,
 workspace nodes, or secrets. The full catalog of required values is generated
-from [`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs) into
+from [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs) into
 `.env.example`; production values belong in deployment secret custody.
 
 For a code-level check of both profiles, run

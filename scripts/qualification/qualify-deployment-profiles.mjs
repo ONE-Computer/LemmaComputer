@@ -3,11 +3,11 @@ import {
   projectServiceEnvironment,
   renderEnvironmentTemplate,
   validateDeploymentEnvironment,
-} from "./deployment-config.mjs";
+} from "../setup/deployment-config.mjs";
 import {
   initializeEnvironment,
   parseEnvironment,
-} from "./environment-template.mjs";
+} from "../setup/environment-template.mjs";
 
 const requested = process.argv.find((argument) => argument.startsWith("--profile="))?.slice("--profile=".length);
 const profiles = requested ? [requested] : ["customer-managed", "hosted"];

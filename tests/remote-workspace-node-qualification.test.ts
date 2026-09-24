@@ -5,7 +5,7 @@ import {
   renderControlOverride,
   renderNodeCompose,
   replaceEnvironment,
-} from "../scripts/qualify-remote-workspace-node.mjs";
+} from "../scripts/qualification/qualify-remote-workspace-node.mjs";
 
 test("remote workspace-node qualification names remain scoped to the worktree project", () => {
   assert.deepEqual(qualificationNames("LemmaComputer-Issue_74"), {
@@ -52,7 +52,7 @@ test("qualification Compose separates Docker authority and uses variable-backed 
 
 test("qualification application forwarders authenticate node-local relays", async () => {
   const forwarder = await import("node:fs/promises").then(({ readFile }) => readFile(
-    new URL("../scripts/remote-workspace-node-tls-forwarder.mjs", import.meta.url),
+    new URL("../scripts/qualification/remote-workspace-node-tls-forwarder.mjs", import.meta.url),
     "utf8",
   ));
   assert.match(forwarder, /requestCert:\s*true/);
@@ -63,7 +63,7 @@ test("qualification application forwarders authenticate node-local relays", asyn
 
 test("qualification recovery scopes orphan-network cleanup to its Compose project", async () => {
   const source = await import("node:fs/promises").then(({ readFile }) => readFile(
-    new URL("../scripts/qualify-remote-workspace-node.mjs", import.meta.url),
+    new URL("../scripts/qualification/qualify-remote-workspace-node.mjs", import.meta.url),
     "utf8",
   ));
   assert.match(source, /label=com\.docker\.compose\.project=\$\{projectName\}/);

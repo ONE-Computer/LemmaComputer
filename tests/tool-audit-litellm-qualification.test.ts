@@ -7,7 +7,7 @@ test("the MCP audit qualification is pinned and measures exceptional post-hook g
   const root = path.resolve(import.meta.dirname, "..");
   const [packageJson, qualifier] = await Promise.all([
     readFile(path.join(root, "package.json"), "utf8"),
-    readFile(path.join(root, "scripts/qualify-litellm-mcp-audit-hooks.py"), "utf8"),
+    readFile(path.join(root, "scripts/qualification/qualify-litellm-mcp-audit-hooks.py"), "utf8"),
   ]);
   assert.match(packageJson, /"qualify:mcp-audit-hooks"/);
   assert.match(packageJson, /ghcr\.io\/berriai\/litellm:v1\.93\.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e/);

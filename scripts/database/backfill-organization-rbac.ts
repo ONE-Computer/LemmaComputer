@@ -1,5 +1,5 @@
 import pg from "pg";
-import { backfillOrganizationRbac } from "../packages/workspace-store/src/organization-rbac-backfill.js";
+import { backfillOrganizationRbac } from "../../packages/workspace-store/src/organization-rbac-backfill.js";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");

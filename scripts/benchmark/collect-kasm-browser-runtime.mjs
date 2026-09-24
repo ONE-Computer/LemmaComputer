@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 
-const usage = `usage: node scripts/collect-kasm-browser-runtime.mjs [options]
+const usage = `usage: node scripts/benchmark/collect-kasm-browser-runtime.mjs [options]
 
 Collects browser-side Kasm measurements from an already-ready workspace. It
 does not create, stop, restart, resize, or remove a workspace.

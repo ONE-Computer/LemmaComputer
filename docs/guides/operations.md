@@ -37,7 +37,7 @@ with data. Never copy another checkout's `.env` or attach its writable volumes.
 ## Configuration lifecycle
 
 The environment contract lives in
-[`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs). Its
+[`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Its
 generated `.env.example` lists every operator variable. `npm run worktree:init`
 creates a task worktree's `.env` once. A dedicated disposable evaluation clone
 uses `npm run env:init -- --profile=worktree`. After pulling a change to the
@@ -135,7 +135,7 @@ the fixed Electron profile before enabling those applications:
 
 ```bash
 npm run apparmor:electron:check
-sudo "$(command -v node)" scripts/install-electron-apparmor.mjs install
+sudo "$(command -v node)" scripts/development/install-electron-apparmor.mjs install
 ```
 
 Then set `LEMMACOMPUTER_KASM_LOCAL_ELECTRON_SANDBOX_ENABLED=true`. The profile
@@ -170,7 +170,7 @@ configuration contract. `npm run qualify:internal-mtls` checks the listener
 boundary locally. Neither command provisions or qualifies an AWS network.
 Inject certificate material through production secret custody, using the exact
 variable names and validation rules in
-[`scripts/deployment-config.mjs`](../../scripts/deployment-config.mjs).
+[`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs).
 
 ## Production considerations
 

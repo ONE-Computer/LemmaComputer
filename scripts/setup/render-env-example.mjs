@@ -18,7 +18,7 @@ const rendered = qualification ? renderQualificationEnvironmentTemplate() : rend
 if (check) {
   const current = await readFile(destination, "utf8");
   if (current !== rendered) {
-    throw new Error(`${destination} is not generated from scripts/deployment-config.mjs; run npm run env:example -- --write`);
+    throw new Error(`${destination} is not generated from scripts/setup/deployment-config.mjs; run npm run env:example -- --write`);
   }
   process.stdout.write(`${destination} matches the deployment environment contract.\n`);
 } else {

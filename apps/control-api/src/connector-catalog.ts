@@ -90,7 +90,7 @@ const googleWorkspaceSetup = (service: string, scopes: string[]): ConnectorCrede
 
 // Credential groups a deployment can configure. Each one is a provider OAuth
 // application the operator registers, matching a coupled environment pair in
-// scripts/deployment-config.mjs and a `client_id` in config/litellm/config.yaml.
+// scripts/setup/deployment-config.mjs and a `client_id` in config/litellm/config.yaml.
 export type StaticCredentialGroup = "google-workspace" | "github";
 export const staticCredentialGroups: readonly StaticCredentialGroup[] = ["google-workspace", "github"];
 export const isStaticCredentialGroup = (value: string): value is StaticCredentialGroup =>
@@ -131,7 +131,7 @@ const REGISTRATION_ALLOWLISTED =
 // row or environment pair yet, so no deployment can configure them. Restoring
 // one means adding its `mcp_servers` entry to config/litellm/config.yaml, its
 // coupled environment pair and credential group to
-// scripts/deployment-config.mjs, then replacing this line with
+// scripts/setup/deployment-config.mjs, then replacing this line with
 // `requiresCredentials`.
 const STATIC_CREDENTIALS_UNWIRED =
   "The provider publishes no registration endpoint and has no deployment credential group yet";

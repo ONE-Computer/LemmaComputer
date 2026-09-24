@@ -16,12 +16,12 @@ import {
 import {
   projectServiceEnvironment,
   validateDeploymentEnvironment,
-} from "../scripts/deployment-config.mjs";
+} from "../scripts/setup/deployment-config.mjs";
 import {
   initializeEnvironment,
   parseEnvironment,
-} from "../scripts/environment-template.mjs";
-import { renderEnvironmentTemplate } from "../scripts/deployment-config.mjs";
+} from "../scripts/setup/environment-template.mjs";
+import { renderEnvironmentTemplate } from "../scripts/setup/deployment-config.mjs";
 
 const initializedEnvironment = () => Object.fromEntries(parseEnvironment(
   initializeEnvironment(renderEnvironmentTemplate(), "Etc/UTC"),
@@ -223,7 +223,7 @@ test("customer-managed preflight passes with Node network access denied", () => 
   const smoke = spawnSync(process.execPath, [
     "--import",
     new URL("fixtures/deny-node-network.mjs", import.meta.url).pathname,
-    new URL("../scripts/qualify-deployment-profiles.mjs", import.meta.url).pathname,
+    new URL("../scripts/qualification/qualify-deployment-profiles.mjs", import.meta.url).pathname,
     "--profile=customer-managed",
   ], { encoding: "utf8" });
   assert.equal(smoke.status, 0, smoke.stderr);

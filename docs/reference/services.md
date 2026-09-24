@@ -2,7 +2,7 @@
 
 **Use this to find the process that owns a behavior.** The current service
 list, network attachments, health checks, and environment projection are in
-`compose.yaml` and `scripts/deployment-config.mjs`; those files are the
+`compose.yaml` and `scripts/setup/deployment-config.mjs`; those files are the
 runtime authority. Ports below are container ports, not public endpoints.
 The [architecture overview](../architecture/overview.md) explains the trust
 boundaries, and [operations](../guides/operations.md) has local commands.

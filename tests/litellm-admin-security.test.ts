@@ -8,8 +8,8 @@ import {
   initializeEnvironment,
   mergeEnvironment,
   parseEnvironment,
-} from "../scripts/environment-template.mjs";
-import { projectServiceEnvironment } from "../scripts/deployment-config.mjs";
+} from "../scripts/setup/environment-template.mjs";
+import { projectServiceEnvironment } from "../scripts/setup/deployment-config.mjs";
 
 const credentialSecret = "credential-secret-that-is-long-enough-0000001";
 const sessionSecret = "session-secret-that-is-long-enough-0000000001";

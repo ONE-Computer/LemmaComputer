@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateReasoningAdapterEvidence } from "../scripts/qualify-reasoning-adapter.mts";
+import { validateReasoningAdapterEvidence } from "../scripts/qualification/qualify-reasoning-adapter.mts";
 
 const sourceCommit = "1".repeat(40);
 const observation = (effort: "low" | "medium" | "high", suffix: string) => ({
