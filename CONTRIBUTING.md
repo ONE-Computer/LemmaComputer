@@ -14,7 +14,7 @@ choose and initialize the correct environment using
 | Deployment variables and per-service projections | `scripts/deployment-config.mjs` |
 | Canonical local topology | `compose.yaml` |
 | Unit and contract tests | `tests/**/*.test.ts` |
-| Browser suites | `tests/e2e/` and `playwright.*.config.ts` |
+| Browser suites | `tests/ui/` (tests, fixtures, configs, and reviewed snapshots) |
 | Database change rules | `packages/workspace-store/AGENTS.md` and `docs/guides/database-migrations.md` |
 | Component-specific implementation checklists | `docs/reference/extension-contracts.md` |
 | Repository-wide agent safety contract | `AGENTS.md` plus any more-specific `AGENTS.md` |
@@ -55,11 +55,12 @@ applicable suites below:
 | --- | --- |
 | Persistence, migrations, startup ordering, backup compatibility, or tenant scoping | `npm run verify:db` |
 | Any user-visible Web behavior | Smallest relevant Playwright spec plus `verify:quick` |
-| Flow spanning multiple browser surfaces | `npm run test:e2e` |
-| Activity panel | `npm run test:activity:e2e` |
-| Customer authentication | `npm run test:customer-auth:e2e` |
-| Platform-operator isolation | `npm run test:platform-operator:e2e` |
-| Responsive layout | `npm run test:responsive:e2e` |
+| Flow spanning multiple browser surfaces | `npm run test:ui` |
+| Activity panel | `npm run test:ui:activity` |
+| Customer sign-in and invitations | `npm run test:ui -- customer-authentication.spec.ts customer-invitation.spec.ts` |
+| Customer passkey registration and sign-in | `npm run test:ui:auth` |
+| Platform operator UI | `npm run test:ui:operator` |
+| Responsive layout | `npm run test:ui:responsive` |
 | Internal service mTLS | `npm run qualify:internal-mtls` |
 | Customer-managed or hosted configuration contract | `npm run qualify:deployment-profiles` |
 | Remote workspace node or Claude Cowork | `npm run qualify:remote-workspace-node -- config [--cowork]`, then the manual split-node flow when required |
@@ -80,6 +81,25 @@ explicit credentials. Default unit tests must not require real provider keys.
 Never treat a sandbox denial of Docker, Chromium, IPC, or local binding as a
 product failure until the same command has been run with the required scoped
 host capability.
+
+## UI browser tests
+
+`tests/ui/` contains Playwright tests, configs, fixture servers, and reviewed
+screenshot baselines. No running Docker stack or account is needed: the main
+suite starts the real Web frontend and a backend with example data. The passkey
+suite starts its own authentication fixture; the operator suite renders HTML
+directly. These checks cover browser behavior, not deployed infrastructure.
+
+Run `npm run test:ui` for the main suite and `npm run test:ui:auth` for passkeys.
+The Activity, responsive, and operator commands select tests already covered by
+the main suite; they are shortcuts, not additional coverage. For one file, use
+`npm run test:ui -- model-routing.spec.ts`.
+
+Generated HTML reports live in `tests/ui/reports/<suite>/`; traces and screenshots
+live in `tests/ui/results/<suite>/`. Both are ignored by Git. Open the main report
+with `npx playwright show-report tests/ui/reports/web`. Keep reviewed `*-snapshots/`
+baselines tracked. Use a separate walkthrough of a running stack to validate
+real sign-in, persistence, workspaces, and external integrations.
 
 ## Local processes and runtime tools
 

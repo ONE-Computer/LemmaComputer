@@ -13,7 +13,7 @@ for (const arg of args) {
   (options[match[1]] ??= []).push(match[2]);
 }
 if (!["status", "plan", "apply", "rollback"].includes(action)) {
-  throw new Error("Usage: npm run demo:update -- status|plan|apply|rollback --host=user@host [--identity=path] [--ref=commit] [--browser-test=tests/e2e/example.spec.ts]");
+  throw new Error("Usage: npm run demo:update -- status|plan|apply|rollback --host=user@host [--identity=path] [--ref=commit] [--browser-test=tests/ui/example.spec.ts]");
 }
 const host = options.host?.[0];
 if (!host || !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*@[a-zA-Z0-9][a-zA-Z0-9.-]*$/.test(host)) {
@@ -70,10 +70,10 @@ if (["status", "rollback"].includes(action)) {
       run("npm", ["run", "verify:quick"], { stdio: "inherit" });
       if (plan.changed.some((file) => file.startsWith("apps/web/"))) {
         const specs = options["browser-test"] ?? [];
-        if (specs.some((spec) => !/^tests\/e2e\/[a-zA-Z0-9_./-]+\.spec\.ts$/.test(spec) || spec.includes(".."))) {
-          throw new Error("Browser tests must name repository tests/e2e/*.spec.ts files");
+        if (specs.some((spec) => !/^tests\/ui\/[a-zA-Z0-9_./-]+\.spec\.ts$/.test(spec) || spec.includes(".."))) {
+          throw new Error("Browser tests must name repository tests/ui/*.spec.ts files");
         }
-        run("npm", ["run", "test:e2e", "--", ...specs], { stdio: "inherit" });
+        run("npm", ["run", "test:ui", "--", ...specs], { stdio: "inherit" });
       }
       if (sha !== run("git", ["rev-parse", "HEAD"]) || run("git", ["status", "--porcelain"])) {
         throw new Error("Candidate changed during verification");

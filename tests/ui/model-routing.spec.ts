@@ -19,7 +19,7 @@ test("model limits validate, save without a key, and persist after reload", asyn
   await dialog.getByLabel("Context window (tokens)").fill("2000");
   await expect(dialog.getByRole("button", { name: "Save model limits" })).toBeDisabled();
   await dialog.getByLabel("Context window (tokens)").fill("1000000");
-  await page.screenshot({ path: "test-results/model-limits-editor.png" });
+  await page.screenshot({ path: test.info().outputPath("model-limits-editor.png") });
   await dialog.getByRole("button", { name: "Save model limits" }).click();
   await expect(dialog).toBeHidden();
   expect(received).toEqual({ deploymentId: "test-model", limits: { contextTokens: 1000000, outputTokens: 32768 } });
@@ -48,7 +48,7 @@ test("models, pricing, and organization routes form one continuous maintenance s
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Pricing");
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Organization route");
   await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
-  await page.screenshot({ path: "test-results/models-routing-unified.png" });
+  await page.screenshot({ path: test.info().outputPath("models-routing-unified.png") });
   expect(consoleErrors).toEqual([]);
 });
 

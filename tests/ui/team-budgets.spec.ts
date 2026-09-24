@@ -28,7 +28,7 @@ test("administrator creates, monitors, reconciles, and temporarily overrides a T
   await expect(current).toContainText("USD 250");
   await expect(current).toContainText("hard enforcement");
   await expect(dialog.getByRole("status")).toContainText("50% threshold reached");
-  await page.screenshot({path:"test-results/team-budget-admin-reviewed.png",fullPage:true});
+  await page.screenshot({path: test.info().outputPath("team-budget-admin-reviewed.png"),fullPage:true});
 
   const reconciled=page.waitForResponse((response)=>response.url().includes("/budget/reconcile")&&response.status()===200);
   await dialog.getByRole("button",{name:"Reconcile gateway"}).click();

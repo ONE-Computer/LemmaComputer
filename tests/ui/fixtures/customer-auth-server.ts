@@ -4,14 +4,14 @@ import {
   createCustomerAuthentication,
   createInMemoryCustomerAuthenticationDatabase,
   customerAuthenticationBasePath,
-} from "../../apps/control-api/src/customer-authentication.js";
+} from "../../../apps/control-api/src/customer-authentication.js";
 import {
   createBetterAuthSessionReader,
   CustomerProductAuthenticationService,
-} from "../../apps/control-api/src/customer-product-authentication.js";
-import { createControlServer } from "../../apps/control-api/src/server.js";
-import type { ControllerClient } from "../../apps/control-api/src/service.js";
-import { CaptureTransactionalEmailAdapter } from "../../apps/control-api/src/transactional-email.js";
+} from "../../../apps/control-api/src/customer-product-authentication.js";
+import { createControlServer } from "../../../apps/control-api/src/server.js";
+import type { ControllerClient } from "../../../apps/control-api/src/service.js";
+import { CaptureTransactionalEmailAdapter } from "../../../apps/control-api/src/transactional-email.js";
 
 const host = "127.0.0.1";
 const port = Number(process.env.CUSTOMER_AUTH_FIXTURE_PORT ?? 4_409);

@@ -29,3 +29,7 @@ docs/spikes/
 # Local design and QA evidence; keep review output out of published docs.
 design-qa*
 docs/reports/
+
+# Generated UI test reports and failure artifacts.
+/tests/ui/reports/
+/tests/ui/results/

@@ -36,7 +36,7 @@ Treat grant-bearing asset URLs as sensitive in reverse-proxy/access logs.
 Control redacts the grant segment in its request serializer. Never copy an asset
 URL into chat, email, a public link, or diagnostic output.
 
-Verification: `tests/e2e/site-assets.spec.ts` exercises the real Control handler
+Verification: `tests/ui/site-assets.spec.ts` exercises the real Control handler
 with a cookie-authenticated parent and cookie-less sandboxed module imports,
 CSS and JSON. It checks isolation, live session revocation, foreign-tenant denial,
 explicit cross-organization sharing/revocation and deletion. The database gate

@@ -22,7 +22,7 @@ Replace the example SSH target with the actual user and host. `plan` compares
 the exact committed candidate with the deployed baseline without changing the
 server. `apply` requires that candidate checked out cleanly. It runs
 `verify:quick` and, for Web changes, relevant Playwright tests. Use repeated
-`--browser-test=tests/e2e/<relevant>.spec.ts` options to select meaningful
+`--browser-test=tests/ui/<relevant>.spec.ts` options to select meaningful
 coverage; without them, a Web change runs all browser tests.
 
 The planner **refuses** schema, dependency, Compose, environment-contract,

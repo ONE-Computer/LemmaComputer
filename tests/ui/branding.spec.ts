@@ -9,7 +9,7 @@ test("LemmaComputer branding is visible in the desktop, mobile, and companion sh
   await expect(desktopBrand).toHaveText("LemmaComputer");
   await expect(page.locator(".workspace-assignment-grid").first()).toContainText("GLM");
   await expect(page.getByText("lemmacomputer-glm", { exact: true })).toHaveCount(0);
-  await page.screenshot({ path: "test-results/lemma-branding-desktop-reviewed.png" });
+  await page.screenshot({ path: test.info().outputPath("lemma-branding-desktop-reviewed.png") });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".mobile-brand")).toHaveText("LemmaComputer");

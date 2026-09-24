@@ -137,7 +137,7 @@ Required commands:
 
 - `npm run verify:quick`
 - `npm run verify:db`
-- `npm run test:e2e -- tests/e2e/model-routing.spec.ts`
+- `npm run test:ui -- tests/ui/model-routing.spec.ts`
 - `npm run qualify:providers`
 
 Provider qualification uses the pinned LiteLLM 1.93.0 image, disposable databases,

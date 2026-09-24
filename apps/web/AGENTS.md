@@ -14,7 +14,7 @@ When implementing from a selected generated mock, treat that image as the source
 
 - Use the repository's Playwright Test dependency and its managed Chromium for repeatable browser checks. Playwright does not require a browser MCP server or desktop browser plugin.
 - On a Linux development environment where the managed browser is not installed yet, run `npx playwright install chromium`. Do not use `--with-deps` unless system package installation is explicitly required and approved.
-- Run `npm run test:activity:e2e` for Activity panel changes. Run `npm run test:e2e` when a change affects multiple covered web flows, shared navigation, or common browser behavior.
+- Run `npm run test:ui:activity` for Activity panel changes. Run `npm run test:ui` when a change affects multiple covered web flows, shared navigation, or common browser behavior.
 - Add or extend the smallest Playwright scenario that proves new user-visible behavior, accessibility behavior, security boundary, or reconnect behavior. Select the suite from `CONTRIBUTING.md`; its config owns the fixture and ports when needed. Never point browser tests at the demo deployment or its data.
 - Update visual snapshots only for intentional, reviewed visual changes. Inspect the rendered result before accepting a new baseline, and report the exact Playwright command and outcome at handoff.
 
