@@ -13,6 +13,3 @@ yet have a command that deploys this design to AWS.
 | [Local operations](operations.md) | Start, stop, diagnose, and back up a local Compose stack. |
 | [Microsoft 365 local test](local-deployment.md) | Register the connector app and test consent or SharePoint site grants. |
 | [Database migrations](database-migrations.md) | Change schema or run explicit migration jobs. |
-
-The [AWS go-live path](aws-go-live.md) states the current proposal and the
-decisions still needed for production.

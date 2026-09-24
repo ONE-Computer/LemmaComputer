@@ -1,9 +1,13 @@
-# Legacy product policy artifacts
+# Product policy artifacts
 
-The files in this directory are retained only to verify and interpret policy
-history written by the retired protected-baseline implementation. They are not
-loaded during Control startup and do not restrict a new or existing
-organization.
+`product-release-trust.json` and the signed `protected-baselines/` envelope
+remain to verify and interpret records written by the retired
+protected-baseline implementation. Control does not load them at startup, and
+they do not restrict a new or existing organization.
+
+`microsoft365-tool-contract-evidence.v1.json` has a different purpose: it is
+an active input to `npm run qualify:microsoft365-contracts`. The qualifier
+compares the pinned connector's tool definitions with the product contract.
 
 A new organization has no organization workspace policy. All product-supported
 workspace profiles, agents, applications, and service levels are available by
