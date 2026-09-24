@@ -119,8 +119,10 @@ The generated `.env.example` is the operator-variable catalog from
 edit it by hand. `.env` is the ignored, checkout-owned deployment input;
 `.runtime-env/<service>.env` is generated for each service. Provider keys and
 per-user connector OAuth tokens are entered through the product, not `.env`.
-`compose.hosted.yaml` is an empty compatibility marker; it does not turn local
-Compose into hosted infrastructure.
+The root `compose.yaml` is the only local application stack. The commands above
+select it automatically; you do not choose a Dockerfile or overlay. See the
+[Docker file map](../../docker/README.md) for build recipes and test-only stacks.
+Hosted production follows the [AWS go-live path](aws-go-live.md).
 
 A normal worktree needs no external credentials for unit tests, stack health,
 or a base workspace. Real Postmark delivery, Microsoft 365, or a social-login
