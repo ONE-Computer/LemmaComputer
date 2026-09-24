@@ -19,7 +19,6 @@ test("model limits validate, save without a key, and persist after reload", asyn
   await dialog.getByLabel("Context window (tokens)").fill("2000");
   await expect(dialog.getByRole("button", { name: "Save model limits" })).toBeDisabled();
   await dialog.getByLabel("Context window (tokens)").fill("1000000");
-  await page.screenshot({ path: test.info().outputPath("model-limits-editor.png") });
   await dialog.getByRole("button", { name: "Save model limits" }).click();
   await expect(dialog).toBeHidden();
   expect(received).toEqual({ deploymentId: "test-model", limits: { contextTokens: 1000000, outputTokens: 32768 } });
@@ -48,7 +47,6 @@ test("models, pricing, and organization routes form one continuous maintenance s
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Pricing");
   await expect(page.getByRole("complementary", { name: "Model details" })).toContainText("Organization route");
   await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
-  await page.screenshot({ path: test.info().outputPath("models-routing-unified.png") });
   expect(consoleErrors).toEqual([]);
 });
 
@@ -297,7 +295,6 @@ for (const providerName of ["foundry", "vertex"] as const) {
       await expect(dialog).toContainText("Global does not pin inference to one region");
     }
     await expect(dialog.locator('input[type="password"]')).toHaveValue(secret);
-    await page.screenshot({ path: `/tmp/${providerName}-provider-editor.png`, fullPage: true });
     await dialog.getByRole("button", { name: "Connect account" }).click();
     await expect(dialog).not.toBeVisible();
     await expect.poll(() => submitted?.modelIds).toEqual([modelId]);
@@ -346,13 +343,11 @@ test("dynamic catalog searches new models, preserves selections on refresh failu
   await expect(dialog.getByRole("checkbox", { name: /Existing Gemini/ })).toHaveCount(0);
   await dialog.getByRole("combobox", { name: "Filter models by capability" }).click();
   await page.getByRole("option", { name: "All models", exact: true }).click();
-  await page.screenshot({ path: "/tmp/model-catalog-toolbar-desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileDialog = await dialog.boundingBox();
   const mobileRefresh = await refresh.boundingBox();
   expect(mobileRefresh!.height).toBe(44);
   expect(mobileRefresh!.x + mobileRefresh!.width).toBeLessThanOrEqual(mobileDialog!.x + mobileDialog!.width);
-  await page.screenshot({ path: "/tmp/model-catalog-toolbar-mobile.png", fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
   await dialog.getByLabel("Search models").fill("Anthropic");
   await dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ }).check();
@@ -363,7 +358,6 @@ test("dynamic catalog searches new models, preserves selections on refresh failu
   await dialog.getByRole("button", { name: "Refresh models" }).click();
   await expect(dialog.getByRole("status")).toContainText("Your selection is preserved");
   await expect(dialog.getByRole("checkbox", { name: /Claude Sonnet 5/ })).toBeChecked();
-  await page.screenshot({ path: "/tmp/dynamic-model-catalog-editor.png", fullPage: true });
   await dialog.getByRole("button", { name: "Apply changes" }).click();
   await expect.poll(() => submitted?.modelIds).toEqual(["gemini-future", "claude-sonnet-5", "deepseek-ai/deepseek-future-maas"]);
   expect(submitted.apiKey).toBeUndefined();
@@ -402,7 +396,6 @@ test("Google API-key setup filters partner models, clears credentials on method 
   await dialog.getByRole("checkbox", { name: /Gemini Future/ }).check();
   await dialog.getByRole("button", { name: "Refresh models" }).click();
   await expect.poll(() => discovery).toEqual({ refresh: true, apiKey: "fixture-google-key", vertex: { authMethod: "api-key", location: "global" } });
-  await page.screenshot({ path: "/tmp/google-api-key-editor.png", fullPage: true });
   await dialog.getByRole("button", { name: "Connect account" }).click();
   await expect(dialog).toBeHidden();
   expect(submitted).toEqual({ apiKey: "fixture-google-key", modelIds: ["gemini-future"], emissionsRegion: "sg", vertex: { authMethod: "api-key", location: "global" } });

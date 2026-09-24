@@ -117,8 +117,6 @@ test.describe("streaming Activity panel", () => {
 
   for (const viewport of [
     { name: "wide", width: 1440, height: 1000 },
-    { name: "narrow", width: 1100, height: 800 },
-    { name: "tablet", width: 834, height: 1112 },
     { name: "mobile", width: 390, height: 844 },
   ]) {
     test(`matches the ${viewport.name} Activity layout`, async ({ page }) => {
@@ -136,6 +134,7 @@ test.describe("streaming Activity panel", () => {
     for (const viewport of [
       { width: 1920, height: 1080 },
       { width: 1440, height: 900 },
+      { width: 1100, height: 800 },
       { width: 834, height: 1112 },
       { width: 390, height: 844 },
     ]) {

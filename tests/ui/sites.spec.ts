@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("builds from the reviewed chat skill and manages the published site", async ({ page }, testInfo) => {
+test("builds from the reviewed chat skill and manages the published site", async ({ page }) => {
   await page.goto("/?view=chat&chat=fixture-session-1");
 
   await expect(page.getByLabel("Available skills")).toHaveCount(0);
@@ -26,7 +26,6 @@ test("builds from the reviewed chat skill and manages the published site", async
   await expect(sitePage.locator("iframe")).toBeVisible();
   await expect(sitePage.locator("iframe").contentFrame().getByText("Hello world", { exact: true })).toBeVisible();
   expect(await sitePage.evaluate(() => window.opener)).toBeNull();
-  await testInfo.attach("site-viewer", { body: await sitePage.screenshot(), contentType: "image/png" });
   await sitePage.close();
 
   const [titleSitePage] = await Promise.all([
@@ -61,7 +60,7 @@ test("builds from the reviewed chat skill and manages the published site", async
   await expect(page.getByRole("heading", { name: "No sites yet" })).toBeVisible();
 });
 
-test("Sites shares view-only access with owner controls and one scroll container", async ({ page }, testInfo) => {
+test("Sites shares view-only access with owner controls and one scroll container", async ({ page }) => {
   const timestamp = "2026-09-05T00:00:00.000Z";
   const sites = ["owner", "viewer"].map((role, index) => ({
     id: `11111111-1111-4111-8111-11111111111${index}`, handle: role.padEnd(24, "x"),
@@ -126,7 +125,6 @@ test("Sites shares view-only access with owner controls and one scroll container
     }).length)).toBe(1);
     expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await testInfo.attach(`site-sharing-${viewport.width}`, { body: await page.screenshot({ path: testInfo.outputPath(`site-sharing-${viewport.width}.png`) }), contentType: "image/png" });
     await dialog.getByRole("button", { name: "Done", exact: true }).click();
     await expect(dialog).toHaveCount(0);
   }

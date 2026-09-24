@@ -124,7 +124,6 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByText("Organization connector ceiling", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Desired · Product defaults", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Affected workspaces" })).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath("workspace-policy-unrestricted-default.png"), fullPage: true });
 
   await page.getByRole("button", { name: "Set guardrails" }).click();
   const policyDialog = page.getByRole("dialog", { name: "Set workspace guardrails" });
@@ -161,7 +160,6 @@ test("organization administrator invites a person and manages member access", as
   await expect(page.getByText("Desired · v1", { exact: true })).toBeVisible();
   await expect(page.getByText(/previously active workspaces were restarted under the new policy/)).toBeVisible();
   await expect(page.locator(".workspace-policy-context").getByText("Use Claude CLI for organization workspaces", { exact: true })).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath("workspace-guardrails-v1.png") });
   await page.locator(".workspace-policy-history summary").click();
   await expect(page.locator(".workspace-policy-history-list")).toContainText("v1 · Current");
   await expect(page.locator(".workspace-policy-history-list")).toContainText("Use Claude CLI for organization workspaces");
@@ -183,7 +181,6 @@ test("organization administrator invites a person and manages member access", as
   networkDialog = page.getByRole("dialog", { name: "Network access for Personal workspace" });
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
   await page.getByRole("option", { name: "Use Restricted workspace default" }).click();
-  await page.screenshot({ path: test.info().outputPath("workspace-network-access-reset.png"), fullPage: true });
   await networkDialog.getByRole("button", { name: "Save network access" }).click();
 
   await page.locator("aside").getByRole("button", { name: "Network access", exact: true }).click();
@@ -204,12 +201,9 @@ test("organization administrator invites a person and manages member access", as
   await securityGroupDialog.getByText("Advanced traffic settings", { exact: true }).click();
   await expect(securityGroupDialog.getByRole("combobox", { name: "Traffic covered by this destination rule" })).toContainText("Standard web traffic (HTTP 80 and HTTPS 443)");
   await expect(securityGroupDialog.getByText("Standard web traffic creates both an HTTP port 80 rule and an HTTPS port 443 rule.", { exact: true })).toBeVisible();
-  await securityGroupDialog.screenshot({ path: test.info().outputPath("firewall-traffic-scope-reviewed.png") });
   await securityGroupDialog.getByRole("button", { name: "Block destination" }).click();
   await expect(securityGroupDialog.getByText("Web traffic · HTTP and HTTPS", { exact: false })).toBeVisible();
   await securityGroupDialog.evaluate((dialog) => dialog.scrollTo({ top: 0 }));
-  await page.screenshot({ path: test.info().outputPath("firewall-security-group-editor-reviewed.png") });
-  await securityGroupDialog.locator(".firewall-editor-rule-list").screenshot({ path: test.info().outputPath("firewall-security-group-rule-reviewed.png") });
   await securityGroupDialog.getByRole("button", { name: "Create security group" }).click();
   const microsoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
   await expect(microsoftGroup).toContainText("Public web with blocked destinations");
@@ -231,7 +225,6 @@ test("organization administrator invites a person and manages member access", as
   const summaryBox = await networkDialog.locator(".workspace-network-access-summary").boundingBox();
   const createLinkBox = await createSecurityGroupLink.boundingBox();
   expect(createLinkBox?.x).toBeCloseTo(summaryBox?.x ?? 0, 0);
-  await networkDialog.screenshot({ path: test.info().outputPath("workspace-internet-network-access-reviewed.png") });
   await networkDialog.getByRole("combobox", { name: "Workspace network security group" }).click();
   await page.getByRole("option", { name: /Ban Microsoft/ }).click();
   await networkDialog.getByRole("button", { name: "Save network access" }).click();
@@ -240,7 +233,6 @@ test("organization administrator invites a person and manages member access", as
   await page.locator("aside").getByRole("button", { name: "Network access", exact: true }).click();
   const attachedMicrosoftGroup = page.locator(".firewall-security-group-list article").filter({ hasText: "Ban Microsoft" });
   await expect(attachedMicrosoftGroup).toContainText("1 workspace attached");
-  await page.screenshot({ path: test.info().outputPath("network-access-reviewed.png"), fullPage: true });
   await attachedMicrosoftGroup.getByRole("button", { name: "Manage group" }).click();
   let managedGroupDialog = page.getByRole("dialog", { name: "Manage Ban Microsoft" });
   await expect(managedGroupDialog.getByRole("button", { name: "Delete group" })).toBeDisabled();
@@ -319,7 +311,6 @@ test("organization administrator invites a person and manages member access", as
   await member.getByRole("button", { name: "Reactivate" }).click();
   await page.getByRole("dialog", { name: "Reactivate Example Admin?" }).getByRole("button", { name: "Reactivate" }).click();
   await expect(member.getByText("suspended", { exact: true })).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("people-access-reviewed.png"), fullPage: true });
 });
 
 test("workspace guardrails remain usable on a narrow screen", async ({ page }) => {
@@ -343,7 +334,6 @@ test("workspace guardrails remain usable on a narrow screen", async ({ page }) =
   const dialogBox = await policyDialog.boundingBox();
   expect(dialogBox?.width ?? 0).toBeLessThanOrEqual(390);
   await policyDialog.getByRole("button", { name: "Close dialog" }).click();
-  await page.screenshot({ path: test.info().outputPath("workspace-policy-mobile-reviewed.png"), fullPage: true });
 });
 
 test("workspace guardrails warn before replacing an affected runtime and give the destructive action comfortable spacing", async ({ page }) => {
@@ -381,7 +371,6 @@ test("workspace guardrails warn before replacing an affected runtime and give th
   expect((confirmBox?.x ?? 0) - ((cancelBox?.x ?? 0) + (cancelBox?.width ?? 0))).toBeGreaterThanOrEqual(16);
   expect(confirmSpacing.paddingLeft).toBeGreaterThanOrEqual(24);
   expect(confirmSpacing.paddingRight).toBeGreaterThanOrEqual(24);
-  await page.screenshot({ path: test.info().outputPath("workspace-guardrail-impact-warning.png"), fullPage: true });
   await cancel.click();
   await expect(warning).toHaveCount(0);
 });
@@ -527,7 +516,6 @@ test("organization owner registers company SSO without exposing its client secre
   const firstActionBox = await connectionRow.getByRole("button", { name: "Show DNS proof" }).boundingBox();
   expect((connectionBox?.y ?? 0) - ((configurationBox?.y ?? 0) + (configurationBox?.height ?? 0))).toBeGreaterThanOrEqual(20);
   expect((firstActionBox?.y ?? 0) - (connectionBox?.y ?? 0)).toBeGreaterThanOrEqual(16);
-  await page.screenshot({ path: test.info().outputPath("company-sso-polish-reviewed.png"), fullPage: true });
   await page.getByRole("button", { name: "Show DNS proof" }).click();
   await expect(page.getByLabel("DNS TXT value", { exact: true })).toHaveValue("refreshed-better-auth-domain-proof");
   expect(registration).toEqual({

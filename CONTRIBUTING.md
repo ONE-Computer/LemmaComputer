@@ -161,8 +161,12 @@ the concrete subsystem checklist in
 which catalogs, policy contracts, transports, and negative tests must move
 together; it is not a second repository setup guide.
 
-Treat visual baselines as reviewed product artifacts. Update Playwright
-snapshots only after inspecting and accepting the intended visual change.
+Prefer tests of observable behavior over assertions about source text, exact
+CSS declarations, or retired labels. Use failure screenshots and traces
+automatically captured by Playwright; avoid screenshots on successful runs
+unless they are compared with a reviewed baseline. Keep representative desktop/mobile visual
+baselines and test responsive behavior at intermediate widths. Update snapshots
+only after inspecting and accepting the intended visual change.
 
 ## Handoff and pull-request evidence
 

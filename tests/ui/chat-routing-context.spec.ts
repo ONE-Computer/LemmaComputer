@@ -68,7 +68,6 @@ test("routes the next turn through the selected workspace, agent, and stable mod
   await expect(page.getByRole("option", { name: /Auto/ })).toHaveCount(0);
   await page.getByRole("option", { name: "Pro · highest capability" }).click();
   await page.getByRole("button", { name: /Hermes Agent CLI · Product · Pro/ }).click();
-  await page.screenshot({ path: test.info().outputPath("chat-explicit-model-tiers.png"), fullPage: true });
 
   const composer = page.getByPlaceholder("Message Hermes Agent CLI");
   await composer.fill("Line one\nLine two\nLine three\nLine four");

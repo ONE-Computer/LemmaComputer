@@ -18,7 +18,7 @@ const session = {
   roles: ["platform-administrator" as const],
 };
 
-test("platform operator workbench is a separate passkey surface with operational and elevation controls", async ({ page }, testInfo) => {
+test("platform operator workbench is a separate passkey surface with operational and elevation controls", async ({ page }) => {
   let requestedElevation: Record<string, unknown> | undefined;
   let registeredNode: Record<string, unknown> | undefined;
   let placementRequest: Record<string, unknown> | undefined;
@@ -91,7 +91,6 @@ test("platform operator workbench is a separate passkey surface with operational
   await expect(ownElevation.getByRole("button", { name: "Approve" })).toHaveCount(0);
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(approvableElevation.getByText("active", { exact: true })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("platform-operator-workbench.png"), fullPage: true });
 
   await page.getByLabel("Target organization").selectOption("55555555-5555-4555-8555-555555555555");
   await page.getByLabel("Reason", { exact: true }).fill("Investigate customer-requested authentication incident");

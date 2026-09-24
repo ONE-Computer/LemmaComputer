@@ -7,7 +7,7 @@ import { createControlServer } from "../../apps/control-api/src/server.js";
 import { SitesService } from "../../apps/control-api/src/sites.js";
 import { createDeterministicSiteZip, validateSiteBundle } from "../../apps/control-api/src/site-bundle.js";
 
-test("real Sites gateway serves opaque-sandbox modules, CSS and JSON and revokes access", async ({ page }, testInfo) => {
+test("real Sites gateway serves opaque-sandbox modules, CSS and JSON and revokes access", async ({ page }) => {
   const proxyToken = "site-browser-fixture-proxy-secret-at-least-32-characters";
   const owner = { tenantId: "acme", subjectId: "alex", audience: "lemmacomputer-control" };
   const accountUserId = randomUUID(), authenticationSessionId = randomUUID();
@@ -97,7 +97,6 @@ test("real Sites gateway serves opaque-sandbox modules, CSS and JSON and revokes
     expect((await page.request.get(`${origin}${sharedResource}`)).status()).toBe(404);
     await service.delete({ ...owner, accountUserId }, published.id);
     expect((await page.request.get(`${origin}${resource}`)).status()).toBe(404);
-    await testInfo.attach("authenticated-multifile-site", { body: await page.screenshot(), contentType: "image/png" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await control.close();

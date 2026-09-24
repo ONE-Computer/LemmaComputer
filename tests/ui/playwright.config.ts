@@ -35,7 +35,6 @@ export default defineConfig({
     timezoneId: "Asia/Singapore",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
   },
   webServer: [
     {

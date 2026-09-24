@@ -39,3 +39,14 @@ test("service startup only checks schema and Compose owns the migration job", as
   assert.match(compose, /db-migrate:[\s\S]+command: \["npm", "run", "db:migrate"\]/);
   assert.match(compose, /control-api:[\s\S]+db-migrate:\s+condition: service_completed_successfully/);
 });
+
+test("the consent-task schema is repaired additively for existing installations", async () => {
+  const [migration, migrations] = await Promise.all([
+    source("packages/workspace-store/migrations/017_openvtc_request_proof_hash.sql"),
+    discoverWorkspaceMigrations(),
+  ]);
+  assert.ok(migrations.some((item) => item.fileName === "017_openvtc_request_proof_hash.sql"));
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS request_proof_hash/);
+  assert.match(migration, /request_proof_hash IS NULL OR length\(request_proof_hash\) = 64/);
+  assert.doesNotMatch(migration, /UPDATE[\s\S]+request_proof_hash/i);
+});
