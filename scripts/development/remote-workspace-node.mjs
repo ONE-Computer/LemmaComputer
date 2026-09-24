@@ -115,7 +115,7 @@ export const renderControlOverride = () => `services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
     volumes:
-      - ./scripts/qualification/remote-workspace-node-tls-forwarder.mjs:/qualification/remote-workspace-node-tls-forwarder.mjs:ro
+      - ./scripts/development/remote-workspace-node-tls-forwarder.mjs:/qualification/remote-workspace-node-tls-forwarder.mjs:ro
       - \${QUALIFICATION_ROOT:?set qualification root}/pki:/qualification-pki:ro
     networks:
       control-private: {}
@@ -491,7 +491,7 @@ const down = () => {
 export function runRemoteWorkspaceNodeQualification(args = process.argv.slice(2)) {
   const command = args.find((argument) => !argument.startsWith("--")) ?? "up";
   const cowork = args.includes("--cowork");
-  if (!new Set(["config", "up", "status", "down"]).has(command)) throw new Error("Usage: npm run qualify:remote-workspace-node -- [config|up|status|down] [--cowork]");
+  if (!new Set(["config", "up", "status", "down"]).has(command)) throw new Error("Usage: npm run dev:remote-workspace -- [config|up|status|down] [--cowork]");
   if (command === "config") return config({ cowork });
   if (command === "up") return up({ cowork });
   if (command === "status") return status();

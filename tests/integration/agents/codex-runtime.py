@@ -23,7 +23,7 @@ from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
 sys.dont_write_bytecode = True
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 requests = []
 
 

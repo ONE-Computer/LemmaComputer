@@ -150,7 +150,7 @@ def write_corpus(output: Path) -> None:
         })
     manifest = {
         "schemaVersion": 1,
-        "generator": "scripts/qualification/generate-office-regression-corpus.py",
+        "generator": "tests/fixtures/office-regression/generate.py",
         "files": files,
     }
     (output / "manifest.json").write_text(

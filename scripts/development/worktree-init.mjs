@@ -51,7 +51,7 @@ if (migrateLegacyNamespace) {
     throw new Error(`--migrate-legacy-namespace requires LEMMACOMPUTER_COMPOSE_PROJECT_NAME=${legacySlug}; found ${currentProject || "no project name"}`);
   }
   if (await exists(".runtime-remote-workspace-node")) {
-    throw new Error("Remote workspace-node qualification is active; stop every workspace and run npm run qualify:remote-workspace-node -- down first");
+    throw new Error("Remote workspace-node qualification is active; stop every workspace and run npm run dev:remote-workspace -- down first");
   }
   const composeContainers = [legacySlug, `${legacySlug}-remote-node`].flatMap((project) => run("docker", [
     "ps", "-a", "--filter", `label=com.docker.compose.project=${project}`, "--format", "{{.Names}}",

@@ -70,7 +70,7 @@ through the agent runtime, `.env`, or an evidence file.
    validate against the exact commit:
 
    ```bash
-   npm run qualify:reasoning-adapter -- --evidence=/absolute/path/to/reasoning-adapter-evidence.json
+   npm run release:check-reasoning -- --evidence=/absolute/path/to/reasoning-adapter-evidence.json
    ```
 
 5. Review the observations, then promote only the exact runtime and levels

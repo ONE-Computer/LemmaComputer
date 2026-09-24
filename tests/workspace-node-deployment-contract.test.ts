@@ -22,7 +22,7 @@ test("the local mTLS qualification has a stable one-shot command", async () => {
   };
 
   assert.equal(
-    packageDocument.scripts["qualify:internal-mtls"],
+    packageDocument.scripts["test:mtls"],
     "tsx --test tests/internal-mtls-boundaries.test.ts tests/litellm-admin-proxy.test.ts",
   );
 });

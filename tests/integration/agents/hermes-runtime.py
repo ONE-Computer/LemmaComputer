@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.dont_write_bytecode = True
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def qualify_history(previous_source, previous_python):

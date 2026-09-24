@@ -28,7 +28,7 @@ test("Better Auth core and plugins are exact, matching production pins", async (
     "@better-auth/passkey": "1.6.26",
     "@better-auth/sso": "1.6.26",
   });
-  assert.equal(rootPackage.scripts["qualify:better-auth"], "npm run qualify:better-auth -w @lemmacomputer/control-api");
+  assert.equal(rootPackage.scripts["test:integration:auth"], "npm run qualify:better-auth -w @lemmacomputer/control-api");
   assert.equal(controlPackage.scripts["qualify:better-auth"], "node scripts/qualify-better-auth.mjs");
 });
 

@@ -7,7 +7,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   const [verifyRelease, releaseTag, qualifier, workspaceDockerfile] = await Promise.all([
     readFile("scripts/release/verify-release.mjs", "utf8"),
     readFile("scripts/release/release-tag.mjs", "utf8"),
-    readFile("scripts/qualification/qualify-workspace-startup.mts", "utf8"),
+    readFile("tests/integration/workspace/startup.mts", "utf8"),
     readFile("docker/Dockerfile.workspace", "utf8"),
   ]);
 
@@ -66,7 +66,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
 });
 
 test("OAuth release qualification explicitly reviews discovered connector tools", async () => {
-  const qualifier = await readFile("scripts/qualification/qualify-oauth-renewal.mts", "utf8");
+  const qualifier = await readFile("tests/integration/gateway/oauth-renewal.mts", "utf8");
   assert.match(qualifier, /connectorToolPolicy\(alpha, "oauth-qualification"\)/);
   assert.match(qualifier, /saveConnectorToolPolicy\([\s\S]+fixtureReview\.documentHash/);
   assert.match(qualifier, /executeGovernedTool\(\{[\s\S]+accessGeneration: 1,/);
@@ -76,23 +76,23 @@ test("release verification executes the pinned remote MCP egress qualification",
   const [verifyRelease, packageDocument, qualifier] = await Promise.all([
     readFile("scripts/release/verify-release.mjs", "utf8"),
     readFile("package.json", "utf8"),
-    readFile("scripts/qualification/qualify-mcp-egress.mjs", "utf8"),
+    readFile("tests/integration/gateway/mcp-egress.mjs", "utf8"),
   ]);
   assert.ok(requiredReleaseGates.includes("pinned-litellm-remote-mcp-egress-qualification"));
-  assert.match(verifyRelease, /run\("npm", \["run", "qualify:mcp-egress"\]\)/);
-  assert.match(packageDocument, /"qualify:mcp-egress": "node scripts\/qualification\/qualify-mcp-egress\.mjs"/);
+  assert.match(verifyRelease, /run\("npm", \["run", "test:integration:mcp-egress"\]\)/);
+  assert.match(packageDocument, /"test:integration:mcp-egress": "node tests\/integration\/gateway\/mcp-egress\.mjs"/);
   assert.match(qualifier, /"--network", "none"/);
-  assert.match(qualifier, /tests\/litellm-remote-mcp-egress\.py/);
+  assert.match(qualifier, /tests\/integration\/gateway\/remote-mcp-egress\.py/);
 });
 
 test("release verification executes the Microsoft 365 tool-contract drift qualification", async () => {
   const [verifyRelease, packageDocument, qualifier] = await Promise.all([
     readFile("scripts/release/verify-release.mjs", "utf8"),
     readFile("package.json", "utf8"),
-    readFile("scripts/qualification/qualify-microsoft365-contracts.mts", "utf8"),
+    readFile("tests/integration/microsoft365/contracts.mts", "utf8"),
   ]);
   assert.ok(requiredReleaseGates.includes("microsoft365-tool-contract-drift-qualification-v1"));
-  assert.match(verifyRelease, /run\("npm", \["run", "qualify:microsoft365-contracts"\]\)/);
-  assert.match(packageDocument, /"qualify:microsoft365-contracts": "tsx scripts\/qualification\/qualify-microsoft365-contracts\.mts"/);
+  assert.match(verifyRelease, /run\("npm", \["run", "test:integration:microsoft365-contracts"\]\)/);
+  assert.match(packageDocument, /"test:integration:microsoft365-contracts": "tsx tests\/integration\/microsoft365\/contracts\.mts"/);
   assert.match(qualifier, /Qualified \$\{names\.length\} Microsoft 365 tool contracts/);
 });

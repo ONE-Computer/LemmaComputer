@@ -6,7 +6,7 @@ protected-baseline implementation. Control does not load them at startup, and
 they do not restrict a new or existing organization.
 
 `microsoft365-tool-contract-evidence.v1.json` has a different purpose: it is
-an active input to `npm run qualify:microsoft365-contracts`. The qualifier
+an active input to `npm run test:integration:microsoft365-contracts`. The qualifier
 compares the pinned connector's tool definitions with the product contract.
 
 A new organization has no organization workspace policy. All product-supported

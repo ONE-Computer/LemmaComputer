@@ -4,11 +4,11 @@ import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { canonicalJson, m365ToolCatalog } from "@lemmacomputer/contracts";
-import { m365CapabilityDefinitions, m365ControlInputSchemas } from "../../apps/control-api/src/mcp-policy.js";
+import { m365CapabilityDefinitions, m365ControlInputSchemas } from "../../../apps/control-api/src/mcp-policy.js";
 
 const execFileAsync = promisify(execFile);
-const evidencePath = new URL("../../config/product-policy/microsoft365-tool-contract-evidence.v1.json", import.meta.url);
-const upstreamRoot = new URL("../../integrations/ms365-mcp/", import.meta.url);
+const evidencePath = new URL("../../../config/product-policy/microsoft365-tool-contract-evidence.v1.json", import.meta.url);
+const upstreamRoot = new URL("../../../integrations/ms365-mcp/", import.meta.url);
 
 const sha256 = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
 
@@ -39,7 +39,7 @@ const names = Object.keys(m365ToolCatalog).sort();
 const localTools = new Set(["list-approved-sharepoint-sites"]);
 const upstreamUtilityTools = new Set(["download-bytes"]);
 const evaluationFixture = JSON.parse(await readFile(new URL(
-  "../../tests/fixtures/microsoft365-tool-contract-evaluations.v1.json",
+  "../../fixtures/microsoft365-tool-contract-evaluations.v1.json",
   import.meta.url,
 ), "utf8"));
 assert.deepEqual(evaluationFixture.agents, ["claude", "codex", "hermes"]);
@@ -66,7 +66,7 @@ const upstreamDefinitions = Object.fromEntries(names.map((name) => {
 }));
 
 const { stdout } = await execFileAsync("python3", ["docker/workspace/lemmacomputer-connectors-stdio.py"], {
-  cwd: new URL("../..", import.meta.url),
+  cwd: new URL("../../..", import.meta.url),
   env: { ...process.env, LEMMACOMPUTER_PRINT_MS365_CONTRACTS: "1" },
   maxBuffer: 16 * 1024 * 1024,
 });

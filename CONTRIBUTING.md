@@ -62,22 +62,26 @@ applicable suites below:
 | Customer passkey registration and sign-in | `npm run test:ui:auth` |
 | Platform operator UI | `npm run test:ui:operator` |
 | Responsive layout | `npm run test:ui:responsive` |
-| Internal service mTLS | `npm run qualify:internal-mtls` |
-| Customer-managed or hosted configuration contract | `npm run qualify:deployment-profiles` |
-| Remote workspace node or Claude Cowork | `npm run qualify:remote-workspace-node -- config [--cowork]`, then the manual split-node flow when required |
-| Provider settings and credential custody | `npm run qualify:providers` (includes pinned Azure/Vertex wire-format checks with mocked HTTP and cloud credential encryption checks) |
-| OAuth renewal and callback behavior | `npm run qualify:oauth` |
-| Microsoft 365 owned tool contracts | `npm run qualify:microsoft365-contracts` |
-| MCP destination isolation | `npm run qualify:mcp-egress` |
-| Codex CLI/SDK transport compatibility (activate the pinned agent-chat Python environment; pass `-- --binary /path/to/codex`) | `npm run qualify:codex-runtime` |
-| Installed Hermes gateway and MCP 2 transport (activate the candidate Hermes Python environment) | `npm run qualify:hermes-runtime` |
-| Reasoning/model adapter behavior | `npm run qualify:reasoning-adapter` |
-| Workspace startup/readiness | `npm run qualify:workspace-startup` |
-| Better Auth compatibility | `npm run qualify:better-auth` |
-| Governed routing integrations | `npm run qualify:auto-routing` and/or `npm run qualify:governed-routing` |
-| Office document regressions | `npm run fixtures:office-regression` and `npm run qualify:office-roundtrip` |
+| Internal service mTLS | `npm run test:mtls` |
+| Customer-managed or hosted configuration contract | `npm run test:profiles` |
+| Remote workspace node or Claude Cowork | `npm run dev:remote-workspace -- config [--cowork]`, then the manual split-node flow when required |
+| Provider settings and credential custody | `npm run test:integration:providers` (includes pinned Azure/Vertex wire-format checks with mocked HTTP and cloud credential encryption checks) |
+| OAuth renewal and callback behavior | `npm run test:integration:oauth` |
+| Microsoft 365 owned tool contracts | `npm run test:integration:microsoft365-contracts` |
+| MCP destination isolation | `npm run test:integration:mcp-egress` |
+| Codex CLI/SDK transport compatibility (activate the pinned agent-chat Python environment; pass `-- --binary /path/to/codex`) | `npm run test:integration:codex-runtime` |
+| Installed Hermes gateway and MCP 2 transport (activate the candidate Hermes Python environment) | `npm run test:integration:hermes-runtime` |
+| Validate supplied reasoning/model promotion evidence | `npm run release:check-reasoning` |
+| Workspace startup/readiness | `npm run test:integration:workspace-startup` |
+| Better Auth compatibility | `npm run test:integration:auth` |
+| Artifact filesystem/S3 lifecycle | `npm run test:integration:artifact-store` |
+| JavaScript-to-Rust consent interoperability | `npm run test:integration:consent` |
+| MCP audit hook compatibility | `npm run test:integration:mcp-audit-hooks` |
+| Audit query performance on a disposable database | `npm run benchmark:tool-audit` |
+| Governed routing integrations | `npm run test:integration:governed-routing` |
+| Office document regressions | `npm run fixtures:office-regression` and `npm run test:integration:office` |
 
-Qualification commands may require Docker, local sockets, external services, or
+Integration commands may require Docker, local sockets, external services, or
 explicit credentials. Default unit tests must not require real provider keys.
 Never treat a sandbox denial of Docker, Chromium, IPC, or local binding as a
 product failure until the same command has been run with the required scoped

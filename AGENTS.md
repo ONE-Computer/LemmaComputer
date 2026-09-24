@@ -22,7 +22,7 @@ environment:
 | Read, explain, diagnose, or review | No stack unless evidence requires one; do not create a branch for read-only work. |
 | Explore the product without changing code | Dedicated disposable evaluation clone using `npm run env:init -- --profile=worktree`; never the primary integration checkout. |
 | Change code or documentation | One task branch in one Git worktree; run `npm run worktree:init` once and `npm run dev:doctor` each session. |
-| Test the remote workspace boundary or Claude Cowork | An initialized task worktree, then `npm run qualify:remote-workspace-node -- up [--cowork]`; never `main` or a manually selected hosted profile. |
+| Test the remote workspace boundary or Claude Cowork | An initialized task worktree, then `npm run dev:remote-workspace -- up [--cowork]`; never `main` or a manually selected hosted profile. |
 | Exercise customer-managed Microsoft integration | Follow `docs/guides/local-deployment.md`; code changes remain in the worktree profile, while a dedicated operator evaluation may use `customer-managed`. |
 | Qualify hosted production | Use representative hosted infrastructure; local split-node Compose is not production qualification. |
 
@@ -73,7 +73,7 @@ npm run compose:up
 `dev:doctor` is read-only and does not attach volumes. `compose:up` reuses the
 Compose project name in `.env` and reattaches that worktree's existing database
 volumes. For remote-node/mTLS work, use
-`npm run qualify:remote-workspace-node -- up [--cowork]` instead of ordinary
+`npm run dev:remote-workspace -- up [--cowork]` instead of ordinary
 `compose:up`; it retains the worktree databases and persistent volumes.
 
 `npm run compose:down` preserves volumes. Never pass `-- --volumes` for a

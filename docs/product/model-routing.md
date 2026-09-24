@@ -69,6 +69,6 @@ not rewrite past decisions.
 
 Provider setup does not automatically publish a price, mapping, policy, or
 rollout. Both deployment profiles use the same tenant-scoped code and schema.
-Run `npm run qualify:governed-routing` for the pinned callback and
+Run `npm run test:integration:governed-routing` for the pinned callback and
 `npm run verify:db` for persistence changes. Live provider and browser
 behavior require separate target-environment checks.

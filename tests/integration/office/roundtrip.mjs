@@ -153,7 +153,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const corpusDir = values.get("corpus");
   const outputDir = values.get("output");
   if (!corpusDir || !outputDir) {
-    process.stderr.write("usage: npm run qualify:office-roundtrip -- --corpus DIR --output DIR [--soffice PATH] [--recorded-at ISO]\n");
+    process.stderr.write("usage: npm run test:integration:office -- --corpus DIR --output DIR [--soffice PATH] [--recorded-at ISO]\n");
     process.exitCode = 1;
   } else {
     qualifyOfficeCorpus({

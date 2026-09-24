@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { qualifyOfficeCorpus } from "../scripts/qualification/qualify-office-roundtrip.mjs";
+import { qualifyOfficeCorpus } from "./integration/office/roundtrip.mjs";
 
 const execute = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..");
-const generator = path.join(root, "scripts/qualification/generate-office-regression-corpus.py");
+const generator = path.join(root, "tests/fixtures/office-regression/generate.py");
 
 const generate = async (directory: string) => {
   await execute("python3", [generator, "--output", directory]);

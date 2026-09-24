@@ -4,7 +4,7 @@ Usage (from the repository root):
   docker build -f docker/Dockerfile.litellm -t lemmacomputer/litellm:egress-test .
   docker run --rm --entrypoint python \
     -e LEMMACOMPUTER_REMOTE_MCP_EGRESS_PROXY_URL=http://litellm-gateway:test@127.0.0.1:1 \
-    -v "$PWD/tests/litellm-remote-mcp-egress.py:/tmp/test.py:ro" \
+    -v "$PWD/tests/integration/gateway/remote-mcp-egress.py:/tmp/test.py:ro" \
     lemmacomputer/litellm:egress-test /tmp/test.py
 """
 

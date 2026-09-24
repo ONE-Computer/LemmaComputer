@@ -33,8 +33,8 @@ image, so it needs no Dockerfile here.
 
 [`qualification/compose.oauth.yaml`](qualification/compose.oauth.yaml) and
 [`qualification/compose.providers.yaml`](qualification/compose.providers.yaml)
-are isolated integration-test stacks. Run them through `npm run qualify:oauth`
-and `npm run qualify:providers`; the runners allocate their own configuration
+are isolated integration-test stacks. Run them through `npm run test:integration:oauth`
+and `npm run test:integration:providers`; the runners allocate their own configuration
 and clean up their test resources. They are not application startup options.
 
 For remote workspace-node tests, use the [remote qualifier](../docs/guides/development-workflow.md#remote-workspace-node-and-cowork-qualification).

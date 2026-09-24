@@ -1,4 +1,4 @@
-# Test-only stack; run through npm run qualify:oauth.
+# Test-only stack; run through npm run test:integration:oauth.
 name: ${LEMMACOMPUTER_OAUTH_QUALIFICATION_PROJECT:?set an isolated qualification project name}
 
 services:

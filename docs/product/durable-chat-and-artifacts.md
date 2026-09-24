@@ -19,7 +19,7 @@ Physical purge, retention windows, and user-visible deletion status remain part 
 ## Local verification
 
 ```bash
-npm run qualify:artifact-store
+npm run test:integration:artifact-store
 npm run verify:db
 ```
 

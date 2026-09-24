@@ -56,7 +56,7 @@ from [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-conf
 `.env.example`; production values belong in deployment secret custody.
 
 For a code-level check of both profiles, run
-`npm run qualify:deployment-profiles`. This checks configuration and service
-projections using the same application image; it does not deploy either
+`npm run test:profiles`. This checks configuration and service
+projections using synthetic configuration and image references; it does not deploy either
 production profile. Start from the [AWS go-live path](aws-go-live.md) when
 planning an AWS installation.

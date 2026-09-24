@@ -14,7 +14,7 @@ if (!project || project === "lemmacomputer") {
 }
 const suffix = project.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").slice(0, 80);
 const image = `lemmacomputer/litellm:mcp-egress-qualification-${suffix}`;
-const qualification = resolve("tests/litellm-remote-mcp-egress.py");
+const qualification = resolve("tests/integration/gateway/remote-mcp-egress.py");
 
 run("docker", ["build", "--file", "docker/Dockerfile.litellm", "--tag", image, "."]);
 run("docker", [

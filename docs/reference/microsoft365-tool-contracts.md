@@ -94,7 +94,7 @@ Run the credential-free qualification after installing the pinned connector:
 
 ```bash
 npm ci --prefix integrations/ms365-mcp
-npm run qualify:microsoft365-contracts
+npm run test:integration:microsoft365-contracts
 ```
 
 Any upstream or LemmaComputer contract change fails qualification. Review the
@@ -103,8 +103,8 @@ the contract version for an incompatible agent-facing change, then explicitly
 regenerate the evidence:
 
 ```bash
-npm run qualify:microsoft365-contracts -- --write
-npm run qualify:microsoft365-contracts
+npm run test:integration:microsoft365-contracts -- --write
+npm run test:integration:microsoft365-contracts
 ```
 
 Do not regenerate evidence merely to make a failure pass.

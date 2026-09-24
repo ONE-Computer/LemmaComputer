@@ -185,7 +185,7 @@ and any rollback window closes.
   are enabled, treat their preserved request URI as sensitive: encrypt and
   tightly restrict the S3 destination, apply a short reviewed retention, and
   sanitize the request target before exporting records to a broader SIEM.
-- `npm run qualify:oauth` passes for the pinned LiteLLM image before release.
+- `npm run test:integration:oauth` passes for the pinned LiteLLM image before release.
 
 See the [AWS go-live path](../guides/aws-go-live.md) for the proposed cloud
 deployment work.

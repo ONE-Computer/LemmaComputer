@@ -247,7 +247,7 @@ Start an ordinary worktree stack first. Stop its active workspaces, then check
 the split topology without changing running containers:
 
 ```bash
-npm run qualify:remote-workspace-node -- config
+npm run dev:remote-workspace -- config
 ```
 
 For Cowork, check the devices and add `--cowork` to `config` and `up`:
@@ -255,11 +255,11 @@ For Cowork, check the devices and add `--cowork` to `config` and `up`:
 ```bash
 test -c /dev/kvm
 test -c /dev/vhost-vsock
-npm run qualify:remote-workspace-node -- config --cowork
-npm run qualify:remote-workspace-node -- up --cowork
+npm run dev:remote-workspace -- config --cowork
+npm run dev:remote-workspace -- up --cowork
 ```
 
-Without Cowork, use `npm run qualify:remote-workspace-node -- up`.
+Without Cowork, use `npm run dev:remote-workspace -- up`.
 The qualifier reuses this worktree's databases and workspace homes, starts a
 separate node project, and prints its stable node ID. Under `/platform`,
 register that ID at `https://workspace-node:4101` with TLS server name
@@ -267,13 +267,13 @@ register that ID at `https://workspace-node:4101` with TLS server name
 placement or change tenant ownership. Inspect or restore with:
 
 ```bash
-npm run qualify:remote-workspace-node -- status
-npm run qualify:remote-workspace-node -- down
+npm run dev:remote-workspace -- status
+npm run dev:remote-workspace -- down
 ```
 
 `down` removes only qualifier-owned containers, networks, and two-day test
 certificates and restores the colocated stack; it preserves databases and
-workspace homes. `npm run qualify:internal-mtls` separately checks the
+workspace homes. `npm run test:mtls` separately checks the
 LiteLLM administration listener. The local qualifier does not test production
 certificate issuance/rotation, cloud firewalls, real cross-host DNS, managed
 restore, node replacement, autoscaling, or capacity.

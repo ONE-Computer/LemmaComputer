@@ -44,12 +44,12 @@ if (
 // compose.yaml consumes ignored per-service files. Render and validate them
 // immediately before any release command can invoke Docker Compose.
 run(process.execPath, ["scripts/setup/render-service-env.mjs"]);
-run("npm", ["run", "qualify:providers"]);
-run("npm", ["run", "qualify:mcp-egress"]);
-run("npm", ["run", "qualify:oauth"]);
-run("npm", ["run", "qualify:microsoft365-contracts"]);
+run("npm", ["run", "test:integration:providers"]);
+run("npm", ["run", "test:integration:mcp-egress"]);
+run("npm", ["run", "test:integration:oauth"]);
+run("npm", ["run", "test:integration:microsoft365-contracts"]);
 run(process.execPath, ["scripts/development/verify-quick.mjs"]);
-run(process.execPath, ["scripts/database/verify-db.mjs"]);
+run(process.execPath, ["tests/integration/database/verify.mjs"]);
 let composeAttempted = false;
 let firstPartyImages;
 try {
@@ -60,7 +60,7 @@ try {
   const webUrl = env.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
   if (!webUrl) throw new Error("LEMMACOMPUTER_PUBLIC_WEB_URL is missing");
   run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__lemmacomputer/healthz`]);
-  const qualifier = `${process.cwd()}/scripts/qualification/qualify-workspace-startup.mts`;
+  const qualifier = `${process.cwd()}/tests/integration/workspace/startup.mts`;
   // Run from the persistent Control container. The Kasm adapter attaches this
   // exact container to each workspace network, so the qualifier can challenge
   // the private chat endpoint instead of merely trusting public state. Stream

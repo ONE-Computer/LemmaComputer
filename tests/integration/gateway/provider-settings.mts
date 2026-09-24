@@ -7,8 +7,8 @@ import pg from "pg";
 import { defaultManagedProviderModelIds, LiteLLMGatewayAdapter, LiteLLMProviderAdministration, managedProviderModels, tenantManagedModelAccessGroup } from "@lemmacomputer/litellm-adapter";
 import { MemoryWorkspaceStore, PostgresProviderSettingsStore, PostgresWorkspaceStore } from "@lemmacomputer/workspace-store";
 import { resolve } from "node:path";
-import { ProviderSettingsService } from "../../apps/control-api/src/provider-settings.js";
-import { createControlServer } from "../../apps/control-api/src/server.js";
+import { ProviderSettingsService } from "../../../apps/control-api/src/provider-settings.js";
+import { createControlServer } from "../../../apps/control-api/src/server.js";
 
 type JsonObject = Record<string, unknown>;
 type HttpResult = { response: Response; payload: JsonObject };
@@ -55,12 +55,12 @@ const stringified = (value: unknown) => JSON.stringify(value);
 
 const main = async () => {
   const transport = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "python",
-    "--mount", `type=bind,src=${resolve("scripts/qualification/qualify-cloud-provider-transports.py")},dst=/qualification.py,readonly`,
+    "--mount", `type=bind,src=${resolve("tests/integration/gateway/cloud-provider-transports.py")},dst=/qualification.py,readonly`,
     "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True",
     "ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e", "/qualification.py"], { stdio: "inherit" });
   if (transport.status !== 0) throw new Error("Pinned cloud provider wire-format qualification failed");
   const catalogCheck = spawnSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", "python",
-    "--mount", `type=bind,src=${resolve("scripts/qualification/qualify-model-catalog.py")},dst=/qualification.py,readonly`,
+    "--mount", `type=bind,src=${resolve("tests/integration/gateway/model-catalog.py")},dst=/qualification.py,readonly`,
     "--mount", `type=bind,src=${resolve("integrations/litellm")},dst=/catalog,readonly`,
     "-e", "LITELLM_LOCAL_MODEL_COST_MAP=True",
     "ghcr.io/berriai/litellm:v1.93.0@sha256:a1745e629abfb17d434426ff48b115f54f4f4c4a0f5af241de569e93c63c411e", "/qualification.py"], { stdio: "inherit" });

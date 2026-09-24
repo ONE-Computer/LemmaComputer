@@ -45,6 +45,6 @@
       "sha256": "578fc476ca726e258c20329b6670f0398e7bb7daa52f55a8bfad14dcd9524705"
     }
   ],
-  "generator": "scripts/qualification/generate-office-regression-corpus.py",
+  "generator": "tests/fixtures/office-regression/generate.py",
   "schemaVersion": 1
 }

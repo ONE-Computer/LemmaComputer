@@ -1,5 +1,5 @@
 # Isolated release qualification for persisted user OAuth refresh. This is not
-# mounted by the product deployment; `qualify:oauth` is its only consumer.
+# mounted by the product deployment; `test:integration:oauth` is its only consumer.
 model_list: []
 
 mcp_servers:

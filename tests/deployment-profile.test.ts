@@ -223,8 +223,10 @@ test("customer-managed preflight passes with Node network access denied", () => 
   const smoke = spawnSync(process.execPath, [
     "--import",
     new URL("fixtures/deny-node-network.mjs", import.meta.url).pathname,
-    new URL("../scripts/qualification/qualify-deployment-profiles.mjs", import.meta.url).pathname,
-    "--profile=customer-managed",
+    "--import", "tsx",
+    "--test",
+    "--test-name-pattern=^(both production profiles render|customer-managed service projection)",
+    new URL("deployment-profile.test.ts", import.meta.url).pathname,
   ], { encoding: "utf8" });
   assert.equal(smoke.status, 0, smoke.stderr);
 });

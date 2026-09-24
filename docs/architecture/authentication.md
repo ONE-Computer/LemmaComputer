@@ -121,7 +121,7 @@ fall back to a header, cached role, or provider claim.
 
 ## Qualification before go-live
 
-The checked-in contract and `npm run qualify:better-auth` verify pins and
+The checked-in contract and `npm run test:integration:auth` verify pins and
 structural boundaries. A production deployment also needs live checks for its
 enabled login methods, callbacks, email delivery, SSO enforcement and owner
 recovery, session revocation, proxy headers, rate limits, backup/restore,

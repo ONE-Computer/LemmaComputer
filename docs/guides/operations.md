@@ -166,7 +166,7 @@ Hosted configuration requires a private HTTPS LiteLLM admin listener with
 mutual TLS, a Control client identity, and distinct customer, platform,
 gateway, and ingress secrets. The hosted
 [profile preflight](deployment-profiles.md#operator-preflight) validates the
-configuration contract. `npm run qualify:internal-mtls` checks the listener
+configuration contract. `npm run test:mtls` checks the listener
 boundary locally. Neither command provisions or qualifies an AWS network.
 Inject certificate material through production secret custody, using the exact
 variable names and validation rules in

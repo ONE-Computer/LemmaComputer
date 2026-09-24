@@ -43,4 +43,4 @@ There is no legacy importer and no dual-write period. Existing `structured-sessi
 
 ## Qualification
 
-Run `npm run qualify:artifact-store`. It exercises a temporary filesystem root and a disposable, digest-pinned MinIO container with a unique bucket; it does not need AWS credentials or a shared test bucket. Hosted production qualification must separately prove the real bucket policy, workload-role permissions, configured server-side encryption, backup/restore, lifecycle, and alarms.
+Run `npm run test:integration:artifact-store`. It exercises a temporary filesystem root and a disposable, digest-pinned MinIO container with a unique bucket; it does not need AWS credentials or a shared test bucket. Hosted production qualification must separately prove the real bucket policy, workload-role permissions, configured server-side encryption, backup/restore, lifecycle, and alarms.

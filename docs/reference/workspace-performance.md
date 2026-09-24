@@ -119,7 +119,7 @@ Run the real headless LibreOffice qualification inside the built workspace image
 or another environment with the same LibreOffice runtime:
 
 ```bash
-npm run qualify:office-roundtrip -- \
+npm run test:integration:office -- \
   --corpus tests/fixtures/office-regression \
   --output .artifacts/office-roundtrip
 ```

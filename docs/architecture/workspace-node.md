@@ -189,7 +189,7 @@ leave the cleanup operation incomplete.
 
 ## Qualification
 
-Run `npm run qualify:internal-mtls` locally to exercise the long-lived service
+Run `npm run test:mtls` locally to exercise the long-lived service
 mTLS listeners in one shot: Control to the LiteLLM administration listener and
 Control to a remote workspace node. The qualification creates separate
 ephemeral test CAs and Control leaf keys, starts the real TLS listeners with
@@ -205,9 +205,9 @@ An isolated development worktree can run the same split boundary without
 manually creating Compose overlays or copying a database:
 
 ```bash
-npm run qualify:remote-workspace-node -- up --cowork
-npm run qualify:remote-workspace-node -- status
-npm run qualify:remote-workspace-node -- down
+npm run dev:remote-workspace -- up --cowork
+npm run dev:remote-workspace -- status
+npm run dev:remote-workspace -- down
 ```
 
 The command creates short-lived worktree-local test authorities and preserves
@@ -217,7 +217,7 @@ See the [remote workspace-node and Cowork workflow](../guides/development-workfl
 architecture, mTLS matrix, exact setup sequence, generated Compose topology,
 manual acceptance checklist, hosted gaps, and troubleshooting.
 
-Before promotion, also run `npm run qualify:deployment-profiles`, the focused
+Before promotion, also run `npm run test:profiles`, the focused
 controller/adapter/ingress tests, and `npm run verify:quick`. In a representative
 private node, prove workspace start/open, governed model and tool traffic,
 desktop reconnect through the TLS relay, egress allow/deny behavior, restart

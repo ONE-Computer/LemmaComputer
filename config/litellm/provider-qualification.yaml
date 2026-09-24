@@ -1,5 +1,5 @@
 # Isolated release qualification for dynamic Provider Settings. The product
-# deployment never mounts this file; only `qualify:providers` does.
+# deployment never mounts this file; only `test:integration:providers` does.
 model_list: []
 
 general_settings:

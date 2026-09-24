@@ -227,7 +227,7 @@ test("qualification inputs are registered separately from deployment inputs", as
   const [oauthCompose, providerCompose, remoteQualifier, qualificationExample] = await Promise.all([
     readFile(new URL("../docker/qualification/compose.oauth.yaml", import.meta.url), "utf8"),
     readFile(new URL("../docker/qualification/compose.providers.yaml", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/qualification/qualify-remote-workspace-node.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/development/remote-workspace-node.mjs", import.meta.url), "utf8"),
     readFile(new URL("../.env.qualification.example", import.meta.url), "utf8"),
   ]);
   const references = [
