@@ -21,7 +21,6 @@ test-results/
 
 # Machine-local handoffs, environment identifiers, and operator notes.
 .claude/
-docs/private/
 docs/tmp/
 docs/spikes/
 
