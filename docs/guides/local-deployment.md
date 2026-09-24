@@ -42,7 +42,7 @@ public origin from `.env`:
 Do not register a private LiteLLM or Microsoft bridge port as a browser
 callback. Leave implicit/hybrid token issuance and public-client flows off.
 The required delegated Microsoft Graph scopes are the list currently pinned in
-[`config/litellm/config.yaml`](../../config/litellm/config.yaml):
+[`docker/litellm/config.yaml`](../../docker/litellm/config.yaml):
 
 ```text
 User.Read                 offline_access

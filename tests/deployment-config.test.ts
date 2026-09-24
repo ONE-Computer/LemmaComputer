@@ -48,6 +48,7 @@ test("runtime sources do not retain the retired OneComputer namespace", () => {
     "grep", "-n", "-i", "onecomputer", "--",
     "apps", "docker", "integrations", "packages", "scripts", "skills",
     ":(exclude)packages/workspace-store/migrations/**",
+    ":(exclude)scripts/release/demo-target.json",
   ], { encoding: "utf8" });
   assert.equal(result.status, 1, result.stdout || result.stderr);
 });

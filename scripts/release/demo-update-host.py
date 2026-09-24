@@ -21,7 +21,7 @@ TARGET = {}
 NODE_SERVICES = ["control-api", "web", "channel-broker", "scheduler-worker",
                  "workspace-controller", "workspace-ingress", "gateway-egress-proxy",
                  "remote-mcp-egress-proxy", "litellm-admin-proxy"]
-METADATA_FILES = {"config/demo-target.json", "AGENTS.md", "CONTRIBUTING.md", "README.md", "scripts/release/demo-update.mjs",
+METADATA_FILES = {"scripts/release/demo-target.json", "AGENTS.md", "CONTRIBUTING.md", "README.md", "scripts/release/demo-update.mjs",
                   "scripts/release/demo-update-host.py", "tests/demo-update-host-test.py"}
 
 
@@ -331,11 +331,11 @@ def main():
     global TARGET
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["status", "plan", "apply", "rollback"])
-    parser.add_argument("--target-json", help="Deployment identity; defaults to config/demo-target.json beside the installed source")
+    parser.add_argument("--target-json", help="Deployment identity; defaults to scripts/release/demo-target.json beside the installed source")
     parser.add_argument("--bundle", type=Path)
     args = parser.parse_args()
     TARGET = json.loads(args.target_json) if args.target_json else json.loads(
-        (Path(__file__).resolve().parents[2] / "config/demo-target.json").read_text())
+        (Path(__file__).resolve().parents[2] / "scripts/release/demo-target.json").read_text())
     require(set(TARGET) == {"root", "project", "controlContainer"}, "Invalid demo target")
     require(re.fullmatch(r"[a-z0-9][a-z0-9_-]*", TARGET["project"]) is not None, "Invalid Compose project")
     root = Path(TARGET["root"]).resolve(strict=True)

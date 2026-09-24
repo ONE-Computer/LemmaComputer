@@ -108,7 +108,7 @@ export type CreateConnectorInput = {
   discoveryToken?: string;
 };
 
-// Keep this in step with the `mcp_servers` keys in config/litellm/config.yaml.
+// Keep this in step with the `mcp_servers` keys in docker/litellm/config.yaml.
 // Those rows exist before Control starts and are reconciled by the gateway, not
 // by connector administration.
 const GATEWAY_CONFIGURED_SERVER_NAMES = new Set([
@@ -1133,7 +1133,7 @@ export class McpConnectionService {
   /**
    * Points one tenant's catalog connector at an OAuth application that tenant
    * registered with the provider, rather than at the deployment-wide client
-   * declared in config/litellm/config.yaml.
+   * declared in docker/litellm/config.yaml.
    *
    * Control never persists the secret. It goes straight to the gateway, which
    * encrypts both halves at rest and refreshes tokens with them, and only the
@@ -1737,7 +1737,7 @@ export class McpConnectionService {
   }
 
   private isOnDemandConnector(connector: Pick<ConnectorDefinition, "id" | "source" | "serverName" | "credentialMode">) {
-    // Servers declared in config/litellm/config.yaml are owned by the gateway.
+    // Servers declared in docker/litellm/config.yaml are owned by the gateway.
     // LiteLLM derives their server_id by hashing name, url, transport,
     // auth_type, and alias, so it never equals the catalog's literal serverId;
     // reconciling them here finds no id match, then trips the server_name

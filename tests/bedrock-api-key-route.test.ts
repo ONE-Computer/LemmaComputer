@@ -230,7 +230,7 @@ test("Bedrock API-key diagnostics distinguish safe remediation without reflectin
 test("Bedrock stays out of static configuration and uses the pinned database-managed LiteLLM image", async () => {
   const [compose, config, dockerfile] = await Promise.all([
     source("compose.yaml"),
-    source("config/litellm/config.yaml"),
+    source("docker/litellm/config.yaml"),
     source("docker/Dockerfile.litellm"),
   ]);
   assert.match(compose, /image: lemmacomputer\/litellm:v1\.93\.0-lemmacomputer-egress/);

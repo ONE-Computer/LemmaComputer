@@ -2,8 +2,8 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 
 export const litellmMountedFilePaths = Object.freeze([
-  "config/litellm/config.yaml",
-  "config/litellm/logging.yaml",
+  "docker/litellm/config.yaml",
+  "docker/litellm/logging.yaml",
   "integrations/litellm/lemmacomputer_policy_callback.py",
 ]);
 

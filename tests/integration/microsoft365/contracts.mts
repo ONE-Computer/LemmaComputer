@@ -7,7 +7,7 @@ import { canonicalJson, m365ToolCatalog } from "@lemmacomputer/contracts";
 import { m365CapabilityDefinitions, m365ControlInputSchemas } from "../../../apps/control-api/src/mcp-policy.js";
 
 const execFileAsync = promisify(execFile);
-const evidencePath = new URL("../../../config/product-policy/microsoft365-tool-contract-evidence.v1.json", import.meta.url);
+const evidencePath = new URL("../../fixtures/microsoft365-tool-contract-evidence.v1.json", import.meta.url);
 const upstreamRoot = new URL("../../../integrations/ms365-mcp/", import.meta.url);
 
 const sha256 = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");

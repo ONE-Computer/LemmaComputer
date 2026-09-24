@@ -107,7 +107,7 @@ customer sign-in mechanism.
 
 ## Qualification and evidence
 
-`config/better-auth-qualification.json` and `npm run test:integration:auth`
+`tests/fixtures/better-auth-qualification.json` and `npm run test:integration:auth`
 check pins and structural boundaries. They do not prove live social login,
 tenant SSO, email delivery, recovery, or a production restore. Those need
 separate environment and human evidence before go-live.

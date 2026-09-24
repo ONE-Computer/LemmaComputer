@@ -12,8 +12,8 @@ import {
 
 test("dev doctor covers every repository file mounted into LiteLLM", () => {
   assert.deepEqual(litellmMountedFilePaths, [
-    "config/litellm/config.yaml",
-    "config/litellm/logging.yaml",
+    "docker/litellm/config.yaml",
+    "docker/litellm/logging.yaml",
     "integrations/litellm/lemmacomputer_policy_callback.py",
   ]);
 });
@@ -48,12 +48,12 @@ test("missing and unreadable LiteLLM bind mounts fail with safe path-only diagno
   };
 
   const diagnostics = await inspectReadablePaths([
-    "config/litellm/missing.yaml",
+    "docker/litellm/missing.yaml",
     "integrations/litellm/unreadable.py",
   ], { accessPath });
 
   assert.deepEqual(diagnostics, [
-    { path: "config/litellm/missing.yaml", reason: "missing" },
+    { path: "docker/litellm/missing.yaml", reason: "missing" },
     { path: "integrations/litellm/unreadable.py", reason: "unreadable" },
   ]);
   assert.equal(JSON.stringify(diagnostics).includes("secret contents"), false);

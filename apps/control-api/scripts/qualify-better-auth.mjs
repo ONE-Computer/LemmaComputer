@@ -12,7 +12,7 @@ const [rootPackage, controlPackage, lockfile, qualification] = await Promise.all
   readJson("package.json"),
   readJson("apps/control-api/package.json"),
   readJson("package-lock.json"),
-  readJson("config/better-auth-qualification.json"),
+  readJson("tests/fixtures/better-auth-qualification.json"),
 ]);
 
 for (const [packageName, expectedVersion] of Object.entries(qualification.packages)) {

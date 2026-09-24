@@ -52,6 +52,8 @@ Follow [demo updates](../docs/guides/demo-release.md) for the running demo.
 | [validate-reasoning-evidence.mts](release/validate-reasoning-evidence.mts) | Validates supplied reasoning-adapter evidence against the runtime catalog and commit. Does not run model experiments. | `npm run release:check-reasoning -- --evidence=<file>` |
 | [release-gates.mjs](release/release-gates.mjs) | Defines the required release checks and attestation schema version. | **Helper:** release verification and tagging. |
 
+[`release/demo-target.json`](release/demo-target.json) records the fixed identity of the managed demo installation. Update it only as part of a planned state handover.
+
 ## Where did the test scripts go?
 
 - [Integration tests](../tests/integration/README.md): repeatable service/runtime checks and their prerequisites; includes `npm run verify:db`.

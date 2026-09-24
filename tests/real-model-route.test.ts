@@ -24,7 +24,7 @@ test("LiteLLM keeps independent request capacity for live MCP authorization call
 
 test("OpenAI, Anthropic, GLM, and Bedrock routes are database-managed", async () => {
   const [config, compose, providerSettings, bootstrapPolicy] = await Promise.all([
-    source("config/litellm/config.yaml"),
+    source("docker/litellm/config.yaml"),
     source("compose.yaml"),
     source("packages/litellm-adapter/src/provider-settings.ts"),
     source("packages/workspace-store/src/identity-policy.ts"),

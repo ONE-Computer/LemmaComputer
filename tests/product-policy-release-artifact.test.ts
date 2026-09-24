@@ -9,8 +9,8 @@ const root = new URL("../", import.meta.url);
 const readJson = async (path: string) => JSON.parse(await readFile(new URL(path, root), "utf8")) as unknown;
 
 test("the archived office-worker baseline remains verifiable for historical audit records", async () => {
-  const trustRootInput = await readJson("config/product-policy/product-release-trust.json");
-  const envelopeInput = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json");
+  const trustRootInput = await readJson("docs/reference/retired-product-policy/product-release-trust.json");
+  const envelopeInput = await readJson("docs/reference/retired-product-policy/office-worker-claude-v1.json");
   const trustRoot = productReleaseVerificationKeySetSchema.parse(trustRootInput);
   const envelope = signedProtectedBaselineTemplateSchema.parse(envelopeInput);
   const serializedConfiguration = JSON.stringify({ trustRootInput, envelopeInput }).toLowerCase();
@@ -59,12 +59,12 @@ test("the archived office-worker baseline remains verifiable for historical audi
 
 test("the Control runtime image does not package the retired product policy ceiling", async () => {
   const dockerfile = await readFile(new URL("docker/Dockerfile.services", root), "utf8");
-  assert.doesNotMatch(dockerfile, /COPY config\/product-policy/);
+  assert.doesNotMatch(dockerfile, /COPY docs\/reference\/retired-product-policy/);
 });
 
 test("archival verification rejects a tampered historical envelope", async () => {
-  const trustRoot = await readJson("config/product-policy/product-release-trust.json");
-  const envelope = await readJson("config/product-policy/protected-baselines/office-worker-claude-v1.json") as Record<string, unknown>;
+  const trustRoot = await readJson("docs/reference/retired-product-policy/product-release-trust.json");
+  const envelope = await readJson("docs/reference/retired-product-policy/office-worker-claude-v1.json") as Record<string, unknown>;
   assert.throws(
     () => parseProductPolicyRelease(trustRoot, { ...envelope, payloadDigest: "0".repeat(64) }, new Date("2026-08-12T05:00:00.000Z")),
     /digest/i,

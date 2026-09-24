@@ -18,7 +18,7 @@ boundaries, and [operations](../guides/operations.md) has local commands.
 | Channel broker | `apps/channel-broker` | 4102 | External-channel credentials, delivery, sender routing |
 | Scheduler worker | `apps/scheduler-worker` | 4103 | Due-run leases; execution returns to Control |
 | OpenVTC consent | `apps/openvtc-consent` | 8788 | Approval protocol and executor signing key |
-| LiteLLM | `config/litellm`, `integrations/litellm` | 4000 | Encrypted provider/OAuth credentials, scoped keys, authorized model/MCP execution |
+| LiteLLM | `docker/litellm`, `integrations/litellm` | 4000 | Encrypted provider/OAuth credentials, scoped keys, authorized model/MCP execution |
 | Microsoft 365 MCP | `integrations/ms365-mcp` | 3000 | Private Graph tool execution and connector consent |
 | Egress proxies | `apps/egress-proxy` | 3128 | Separate model, remote-MCP, and per-workspace destination policy |
 | LiteLLM admin proxy | `apps/litellm-admin-proxy` | private | Hosted mTLS boundary on the gateway administrator API |

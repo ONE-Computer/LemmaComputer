@@ -45,7 +45,7 @@ const isolationAuthorityResource = (resource: string) => (
 );
 
 test("the tenant isolation manifest owns every persisted authentication and control-plane table", async () => {
-  const manifest = JSON.parse(await read("config/tenant-isolation-manifest.json")) as IsolationManifest;
+  const manifest = JSON.parse(await read("tests/contracts/tenant-isolation-manifest.json")) as IsolationManifest;
   assert.equal(manifest.schemaVersion, 1);
   assert.deepEqual(manifest.requiredOperations, [
     "read", "create", "update", "delete", "list", "search", "export", "stream", "privileged",
@@ -103,7 +103,7 @@ test("the reviewed isolation matrix explains the two-database authority boundary
   assert.match(matrix, /LemmaComputer decides which organization and resources/);
   assert.match(matrix, /read.*create.*update.*delete.*list.*search.*export.*stream.*privileged/is);
   assert.match(matrix, /customer-managed.*exactly one organization/is);
-  assert.match(matrix, /config\/tenant-isolation-manifest\.json/);
+  assert.match(matrix, /tests\/contracts\/tenant-isolation-manifest\.json/);
   assert.match(matrix, /every persisted authentication and control-plane table/i);
 });
 

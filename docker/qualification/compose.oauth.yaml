@@ -65,7 +65,7 @@ services:
     ports:
       - "127.0.0.1:${LEMMACOMPUTER_OAUTH_QUALIFICATION_LITELLM_PORT:?set an isolated qualification LiteLLM port}:4000"
     volumes:
-      - ../../config/litellm/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
+      - ../../tests/integration/gateway/fixtures/oauth-qualification.yaml:/app/oauth-qualification.yaml:ro
     depends_on:
       litellm-postgres:
         condition: service_healthy

@@ -84,7 +84,7 @@ fallback for the existing per-process Claude and Codex bridges.
 
 The Softeria dependency remains exactly pinned in
 `integrations/ms365-mcp/package.json` and its lockfile. Evidence in
-`config/product-policy/microsoft365-tool-contract-evidence.v1.json` records two
+`tests/fixtures/microsoft365-tool-contract-evidence.v1.json` records two
 independent boundaries:
 
 1. hashes of each pinned upstream endpoint definition; and

@@ -15,7 +15,7 @@ test("Better Auth core and plugins are exact, matching production pins", async (
     json("package.json"),
     json("apps/control-api/package.json"),
     json("package-lock.json"),
-    json("config/better-auth-qualification.json"),
+    json("tests/fixtures/better-auth-qualification.json"),
   ]);
   assert.equal(controlPackage.dependencies["better-auth"], "1.6.26");
   assert.equal(controlPackage.dependencies["@better-auth/passkey"], "1.6.26");
@@ -33,7 +33,7 @@ test("Better Auth core and plugins are exact, matching production pins", async (
 });
 
 test("the qualification contract keeps authentication and product authority operationally separate", async () => {
-  const qualification = await json("config/better-auth-qualification.json");
+  const qualification = await json("tests/fixtures/better-auth-qualification.json");
   assert.equal(qualification.schemaVersion, 1);
   assert.equal(qualification.mount.routeNamespace, "/api/v1/auth/customer");
   assert.equal(qualification.mount.component, "control-api");
@@ -47,7 +47,7 @@ test("the qualification contract keeps authentication and product authority oper
 });
 
 test("qualification gates cover every issue #51 security and recovery boundary", async () => {
-  const qualification = await json("config/better-auth-qualification.json");
+  const qualification = await json("tests/fixtures/better-auth-qualification.json");
   const required = new Set(qualification.requiredGates);
   for (const gate of [
     "email-verification-and-reset",

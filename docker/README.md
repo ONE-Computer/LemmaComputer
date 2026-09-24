@@ -29,6 +29,15 @@ The first four build through `compose:up`. The desktop builds separately through
 controls which applications a workspace may use. PostgreSQL uses an upstream
 image, so it needs no Dockerfile here.
 
+## LiteLLM configuration
+
+Compose mounts [`litellm/config.yaml`](litellm/config.yaml) and
+[`litellm/logging.yaml`](litellm/logging.yaml) into the gateway. These describe
+LiteLLM's MCP servers and logging behavior; Compose describes the container,
+networks, and mounts. Provider credentials are entered in the product and kept
+in encrypted storage. The YAML files under `tests/integration/gateway/fixtures/`
+are used only by isolated integration tests.
+
 ## Test stacks and production
 
 [`qualification/compose.oauth.yaml`](qualification/compose.oauth.yaml) and

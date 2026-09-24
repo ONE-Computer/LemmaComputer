@@ -532,7 +532,7 @@ test("every approved remote MCP card lazily starts its provider flow only after 
     "lemmacomputer_neon",
     "lemmacomputer_monday",
   ]);
-  // GitHub is declared in config/litellm/config.yaml, so the gateway owns its
+  // GitHub is declared in docker/litellm/config.yaml, so the gateway owns its
   // row and connector administration must not try to reconcile it.
   assert.deepEqual(gateway.ensured.map((connectors) => connectors[0]?.serverName), [
     "lemmacomputer_exa",
@@ -1354,7 +1354,7 @@ test("gateway-configured connectors connect without reconciling a LiteLLM row", 
     configuredStaticMcpClients: allCredentials,
   });
 
-  // config/litellm/config.yaml owns these rows and carries their static
+  // docker/litellm/config.yaml owns these rows and carries their static
   // provider credentials. LiteLLM derives their server_id from a hash of the
   // server definition, so reconciling by the catalog's literal serverId used to
   // miss, hit the server_name guard, and fail Connect with a registration
@@ -1492,7 +1492,7 @@ test("a connector needing a provider application is offered as setup, not as a b
 });
 
 test("the Google Workspace servers request offline access so connections can renew", async () => {
-  const config = await readFile(new URL("../config/litellm/config.yaml", import.meta.url), "utf8");
+  const config = await readFile(new URL("../docker/litellm/config.yaml", import.meta.url), "utf8");
   // LiteLLM's refresher returns None when the stored token has no
   // refresh_token, and Google issues one only for access_type=offline. That is
   // a query parameter rather than a scope, so unlike Microsoft 365 and

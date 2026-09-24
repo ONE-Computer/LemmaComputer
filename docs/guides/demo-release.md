@@ -36,7 +36,7 @@ expect a brief interruption. Afterward, exercise the changed authenticated
 flow; generic health is not enough.
 
 The demo host uses `/opt/onecomputer` and the target identity in
-[`config/demo-target.json`](../../config/demo-target.json). Changing those
+[`scripts/release/demo-target.json`](../../scripts/release/demo-target.json). Changing those
 identities is a separate state handover. Do not run plain `compose:up` on the
 managed demo: it omits recorded image/operator overrides and may trigger
 migration dependencies. The host needs Python 3.12+, Docker Compose, outbound

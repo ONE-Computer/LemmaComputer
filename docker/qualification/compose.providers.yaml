@@ -109,7 +109,7 @@ services:
     volumes:
       - ../../tests/integration/gateway/fixtures/sitecustomize.py:/app/sitecustomize.py:ro
       - ../../integrations/litellm/lemmacomputer_model_catalog.py:/app/lemmacomputer_model_catalog.py:ro
-      - ../../config/litellm/provider-qualification.yaml:/app/provider-qualification.yaml:ro
+      - ../../tests/integration/gateway/fixtures/provider-qualification.yaml:/app/provider-qualification.yaml:ro
     depends_on:
       litellm-postgres:
         condition: service_healthy
@@ -151,7 +151,7 @@ services:
     volumes:
       - ../../tests/integration/gateway/fixtures/sitecustomize.py:/app/sitecustomize.py:ro
       - ../../integrations/litellm/lemmacomputer_model_catalog.py:/app/lemmacomputer_model_catalog.py:ro
-      - ../../config/litellm/provider-probe-qualification.yaml:/app/provider-probe-qualification.yaml:ro
+      - ../../tests/integration/gateway/fixtures/provider-probe-qualification.yaml:/app/provider-probe-qualification.yaml:ro
       - ../../integrations/litellm/lemmacomputer_policy_callback.py:/app/lemmacomputer_policy_callback.py:ro
     depends_on:
       provider-probe-postgres:
