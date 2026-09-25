@@ -6,29 +6,9 @@ import {
   environmentContract,
   generatedSecretNames,
 } from "./deployment-config.mjs";
+import { parseEnvironment } from "./environment-files.mjs";
 
-export { coupledEnvironmentGroups, environmentAliases };
-
-export function parseEnvironment(contents) {
-  const entries = [];
-  for (const [index, line] of contents.split(/\r?\n/).entries()) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/);
-    if (match) entries.push({ key: match[1], value: match[2], line: index + 1 });
-  }
-  const values = new Map();
-  const counts = new Map();
-  for (const entry of entries) {
-    values.set(entry.key, entry.value);
-    counts.set(entry.key, (counts.get(entry.key) ?? 0) + 1);
-  }
-  return {
-    entries,
-    values,
-    duplicates: [...counts.entries()]
-      .filter(([, count]) => count > 1)
-      .map(([key]) => key),
-  };
-}
+export { coupledEnvironmentGroups, environmentAliases, parseEnvironment };
 
 export function initializeEnvironment(template, timeZone) {
   let contents = template;
@@ -146,7 +126,8 @@ export function mergeEnvironment(template, current, initialized) {
     const key = match[1];
     const currentValue = currentEnvironment.values.get(key);
     const templateValue = templateEnvironment.values.get(key);
-    if (currentEnvironment.values.has(key) && !(currentValue === "" && templateValue !== "")) {
+    const optional = environmentContract.find((item) => item.key === key)?.optional;
+    if (currentEnvironment.values.has(key) && !(currentValue === "" && templateValue !== "" && !optional)) {
       preserved += 1;
       return `${key}=${currentValue}`;
     }

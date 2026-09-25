@@ -127,7 +127,7 @@ test("Compose separates model egress from strict remote-MCP egress", async () =>
   assert.doesNotMatch(litellm, /\n\s+- model-egress/);
   assert.doesNotMatch(litellm, /\n\s+ports:/);
   assert.doesNotMatch(ms365, /\n\s+ports:/);
-  assert.match(workspaceIngress, /\$\{LEMMACOMPUTER_WEB_PORT:\?set LEMMACOMPUTER_WEB_PORT in \.env\}:4174/);
+  assert.match(workspaceIngress, /\$\{LEMMACOMPUTER_WEB_PORT:\?[^}]+\}:4174/);
   assert.match(litellm, /socket\.create_connection\(\('remote-mcp-egress-proxy',3128\),2\)/);
   assert.match(modelProxy, /env_file:\s+- path: \.runtime-env\/gateway-egress-proxy\.env\s+format: raw/);
   assert.match(modelProxy, /model-egress: \{\}/);

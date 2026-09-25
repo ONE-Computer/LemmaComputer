@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { readEnvironmentFiles } from "../setup/environment-files.mjs";
 import { releaseAttestationSchemaVersion, requiredReleaseGates } from "./release-gates.mjs";
 
 const run = (command, args, options = {}) => {
@@ -19,8 +20,8 @@ const branch = capture("git", ["branch", "--show-current"]);
 if (branch !== "main" && !branch.startsWith("release/")) {
   throw new Error("Release verification must run on main or a release/* branch");
 }
-const env = await readFile(".env", "utf8");
-const envValue = (name) => env.match(new RegExp(`^${name}=(.+)$`, "m"))?.[1]?.trim();
+const env = readEnvironmentFiles(".env", { resolved: true });
+const envValue = (name) => env[name]?.trim();
 const composeProject = envValue("LEMMACOMPUTER_COMPOSE_PROJECT_NAME");
 const workspaceImage = envValue("LEMMACOMPUTER_WORKSPACE_IMAGE");
 const workspaceNetworkPrefix = envValue("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX");
@@ -53,11 +54,11 @@ run(process.execPath, ["tests/integration/database/verify.mjs"]);
 let composeAttempted = false;
 let firstPartyImages;
 try {
-  run("docker", ["compose", "--profile", "build", "build", "workspace-image"]);
+  run("docker", ["compose", "--env-file", ".runtime-env/compose.env", "--profile", "build", "build", "workspace-image"]);
   run("docker", ["image", "inspect", workspaceImage]);
   composeAttempted = true;
-  run("docker", ["compose", "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
-  const webUrl = env.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
+  run("docker", ["compose", "--env-file", ".runtime-env/compose.env", "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
+  const webUrl = envValue("LEMMACOMPUTER_PUBLIC_WEB_URL");
   if (!webUrl) throw new Error("LEMMACOMPUTER_PUBLIC_WEB_URL is missing");
   run("curl", ["--fail", "--silent", "--show-error", `${webUrl}/__lemmacomputer/healthz`]);
   const qualifier = `${process.cwd()}/tests/integration/workspace/startup.mts`;
@@ -66,7 +67,7 @@ try {
   // the private chat endpoint instead of merely trusting public state. Stream
   // the source over stdin so the production container remains read-only.
   run("docker", [
-    "compose", "exec", "-T", "control-api",
+    "compose", "--env-file", ".runtime-env/compose.env", "exec", "-T", "control-api",
     "node", "--import", "tsx", "-",
   ], {
     input: await readFile(qualifier),

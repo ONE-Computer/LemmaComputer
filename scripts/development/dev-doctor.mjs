@@ -1,5 +1,6 @@
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { readEnvironmentFiles } from "../setup/environment-files.mjs";
 import { worktreeIsolationEnvironmentVariableNames } from "../setup/deployment-config.mjs";
 import { containerMountedFilePaths, inspectReadablePaths } from "./dev-doctor-lib.mjs";
 import { isWorktreeResourceName, worktreeResourcePrefix } from "./worktree-names.mjs";
@@ -11,9 +12,9 @@ const branch = branchResult.stdout.trim();
 if (branchResult.status !== 0 || !branch) failures.push("cannot determine the current branch");
 const integrationCheckout = branch === "main" || branch.startsWith("release/");
 if (await access("node_modules").then(() => false).catch(() => true)) failures.push("dependencies are missing; run npm run worktree:init");
-let env = "";
-try { env = await readFile(".env", "utf8"); } catch { failures.push(".env is missing; run npm run worktree:init"); }
-const value = (key) => env.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
+let env = {};
+try { env = readEnvironmentFiles(); } catch (error) { failures.push(error.message); }
+const value = (key) => env[key]?.trim();
 if (!integrationCheckout) {
   for (const key of worktreeIsolationEnvironmentVariableNames) {
     if (!isWorktreeResourceName(value(key))) failures.push(`${key} is not worktree-isolated; expected prefix ${worktreeResourcePrefix}`);

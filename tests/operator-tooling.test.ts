@@ -140,7 +140,7 @@ test("compose shutdown delegates to Docker only when runtime containers are abse
   assert.equal(status, 0);
   assert.deepEqual(calls.at(-1), {
     command: "docker",
-    args: ["compose", "down", "--volumes"],
+    args: ["compose", "--env-file", ".runtime-env/compose.env", "down", "--volumes"],
   });
   assert.match(output, /Compose-managed volumes were removed/);
 });

@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseEnvironment } from "../setup/environment-template.mjs";
+import { readEnvironmentFiles } from "../setup/environment-files.mjs";
+import { serializeEnvironment } from "../setup/deployment-config.mjs";
 
 const stateDirectoryName = ".runtime-remote-workspace-node";
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
@@ -226,14 +227,14 @@ const removeColocatedController = () => {
   // it does not stop a container that an earlier colocated `up` left running.
   // That stale reconciler has the Docker socket and can attach shared Control
   // services to remote workspace networks, defeating the split-node topology.
-  run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "rm", "-s", "-f", "workspace-controller"]);
+  run("docker", ["compose", "--env-file", ".runtime-env/compose.env", "-f", "compose.yaml", "rm", "-s", "-f", "workspace-controller"]);
 };
 
 const readLocalEnvironment = () => {
   if (!existsSync(".env")) throw new Error(".env is missing; run npm run worktree:init first");
-  const contents = readFileSync(".env", "utf8");
-  const parsed = parseEnvironment(contents);
-  const value = (key) => parsed.values.get(key) ?? "";
+  const values = readEnvironmentFiles(".env", { resolved: true });
+  const contents = serializeEnvironment(values);
+  const value = (key) => values[key] ?? "";
   if (value("LEMMACOMPUTER_INSTALLATION_KIND") !== "worktree") throw new Error("Remote-node qualification is restricted to an isolated worktree profile");
   const branch = capture("git", ["branch", "--show-current"]);
   if (!branch || branch === "main") throw new Error("Remote-node qualification must run from an isolated task branch, not main");
@@ -354,7 +355,7 @@ const bringUp = (state) => {
   ensureNetwork(state.names.nodeTransportNetwork, true);
   ensureNetwork(state.names.applicationNetwork, true);
   ensureNetwork(state.names.relayNetwork, false);
-  run("docker", ["compose", "--env-file", ".env", "-f", "compose.yaml", "build", "control-api"]);
+  run("docker", ["compose", "--env-file", ".runtime-env/compose.env", "-f", "compose.yaml", "build", "control-api"]);
   removeColocatedController();
   run("docker", nodeComposeArguments(state, "up", "-d", "--wait", "--wait-timeout", "300"));
   run("docker", composeArguments(state, "up", "-d", "--build", "--wait", "--wait-timeout", "300"));
@@ -403,7 +404,7 @@ const tearDownRemoteState = (state) => {
 
 const restoreColocated = (projectName) => {
   run(process.execPath, ["scripts/setup/render-service-env.mjs"]);
-  const args = ["compose", "--env-file", ".env", "-f", "compose.yaml"];
+  const args = ["compose", "--env-file", ".runtime-env/compose.env", "-f", "compose.yaml"];
   try {
     run("docker", [...args, "up", "-d", "--build", "--wait", "--wait-timeout", "300"]);
   } catch (error) {

@@ -10,7 +10,7 @@ hosted AWS deployment procedure. For first setup use the
 
 ## Start and stop
 
-In the checkout that owns the stack, keep its existing `.env` and Docker
+In the checkout that owns the stack, keep its existing `.env`, `.env.state`, and Docker
 volumes. For a task worktree, run `npm run dev:doctor` at the start of the
 session, then:
 
@@ -38,8 +38,8 @@ with data. Never copy another checkout's `.env` or attach its writable volumes.
 
 The environment contract lives in
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Its
-generated `.env.example` lists every operator variable. `npm run worktree:init`
-creates a task worktree's `.env` once. A dedicated disposable evaluation clone
+generated `.env.example` is the full reference catalog, including defaults and managed values. `npm run worktree:init`
+creates a task worktree's `.env` and persistent `.env.state` once. A dedicated disposable evaluation clone
 uses `npm run env:init -- --profile=worktree`. After pulling a change to the
 contract, run:
 
@@ -49,12 +49,14 @@ npm run env:update   # only if the check reports missing variables
 npm run env:check
 ```
 
-`env:update` preserves existing values and reports extra variable names.
+`env:update` compacts `.env` into installation choices and overrides, and preserves
+generated keys, image references, resource identity, and legacy values in `.env.state`.
+Back up both files. Existing single-file installations remain readable until updated.
 `env:init --force` replaces generated secrets and can invalidate sessions,
 signatures, and encrypted records; it is not an update command. Repository
 commands generate `.runtime-env/<service>.env` for each service. Before a
 direct `docker compose` command, run `npm run env:render` and use
-`docker compose config --quiet` so interpolated secrets are not printed.
+`docker compose --env-file .runtime-env/compose.env config --quiet` so interpolated secrets are not printed.
 
 The public browser origin is `LEMMACOMPUTER_PUBLIC_WEB_URL`. Its exact value
 must match OAuth callbacks. The reference stack binds published ports to
@@ -67,9 +69,9 @@ secrets in the recovery set for as long as their dependent state exists.
 ## Health and diagnostics
 
 ```bash
-docker compose ps
-docker compose logs --since=10m db-migrate auth-db-migrate platform-auth-db-migrate
-docker compose logs --since=10m control-api workspace-controller litellm
+docker compose --env-file .runtime-env/compose.env ps
+docker compose --env-file .runtime-env/compose.env logs --since=10m db-migrate auth-db-migrate platform-auth-db-migrate
+docker compose --env-file .runtime-env/compose.env logs --since=10m control-api workspace-controller litellm
 ```
 
 Check the browser entry at
@@ -113,10 +115,10 @@ and exact first-party image digests. For a local Compose stack, these examples
 create logical database dumps in the current directory:
 
 ```bash
-docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer -Fc > lemmacomputer-control.dump
-docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_auth -Fc > lemmacomputer-auth.dump
-docker compose exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_platform_auth -Fc > lemmacomputer-platform-auth.dump
-docker compose exec -T litellm-postgres pg_dump -U litellm -d litellm -Fc > lemmacomputer-gateway.dump
+docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer -Fc > lemmacomputer-control.dump
+docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_auth -Fc > lemmacomputer-auth.dump
+docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_platform_auth -Fc > lemmacomputer-platform-auth.dump
+docker compose --env-file .runtime-env/compose.env exec -T litellm-postgres pg_dump -U litellm -d litellm -Fc > lemmacomputer-gateway.dump
 ```
 
 These commands do **not** back up Docker workspace/artifact volumes or secrets.

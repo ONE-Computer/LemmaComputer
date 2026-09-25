@@ -30,7 +30,7 @@ test("release attestation requires an isolated built Hermes workspace readiness 
   assert.match(verifyRelease, /repositoryDigests:/);
   assert.match(releaseTag, /requiredFirstPartyImages/);
   assert.match(releaseTag, /repositoryDigests\.some/);
-  assert.match(verifyRelease, /"compose", "exec", "-T", "control-api"/);
+  assert.match(verifyRelease, /"compose", "--env-file", "\.runtime-env\/compose\.env", "exec", "-T", "control-api"/);
   assert.match(verifyRelease, /"node", "--import", "tsx", "-"/);
   assert.match(verifyRelease, /input: await readFile\(qualifier\)/);
   assert.match(verifyRelease, /stdio: \["pipe", "inherit", "inherit"\]/);

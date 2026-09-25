@@ -45,7 +45,7 @@ if (["status", "rollback"].includes(action)) {
   // A candidate is always a committed archive. Nothing from the local .env is sent.
   for (const ref of [base, sha]) {
     const files = run("git", ["ls-tree", "-r", "--name-only", ref]).split("\n");
-    if (files.some((file) => /(^|\/)(\.env|\.runtime-env)(\/|$)/.test(file))) {
+    if (files.some((file) => /(^|\/)(\.env(?:\.(?!example(?:\/|$))[^/]+)?|\.runtime-env)(\/|$)/.test(file))) {
       throw new Error("Refusing an archive containing tracked deployment secrets");
     }
   }

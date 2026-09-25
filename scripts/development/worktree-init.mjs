@@ -1,7 +1,8 @@
-import { access, chmod, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { worktreeEnvironmentOverrides } from "../setup/deployment-config.mjs";
+import { parseEnvironment, readEnvironmentFiles, writeEnvironmentFiles } from "../setup/environment-files.mjs";
+import { serializeEnvironment, worktreeEnvironmentOverrides } from "../setup/deployment-config.mjs";
 import { runtimeContainerFilters } from "./compose-down.mjs";
 import { containerMountedFilePaths } from "./dev-doctor-lib.mjs";
 import {
@@ -35,7 +36,7 @@ if (!await exists(localModules)) {
 const existingEnvironment = await exists(".env");
 if (!existingEnvironment) run(process.execPath, ["scripts/setup/initialize-env.mjs"]);
 const envPath = resolve(root, ".env");
-const current = await readFile(envPath, "utf8");
+const current = serializeEnvironment(readEnvironmentFiles(envPath, { resolved: true }));
 const currentProject = current.match(/^LEMMACOMPUTER_COMPOSE_PROJECT_NAME=(.+)$/m)?.[1]?.trim();
 const migrateLegacyNamespace = process.argv.includes("--migrate-legacy-namespace");
 if (currentProject === legacySlug && !migrateLegacyNamespace) {
@@ -82,7 +83,7 @@ const previousOverrides = migrateLegacyNamespace
   ? worktreeEnvironmentOverrides({ slug: legacySlug, id, portOffset })
   : currentProject === slug ? overrides : undefined;
 const updated = applyWorktreeEnvironmentOverrides(current, overrides, { previousOverrides });
-await writeFile(envPath, updated, { mode: 0o600 });
+await writeEnvironmentFiles(envPath, parseEnvironment(updated).values);
 const publicWebUrl = updated.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
 
 for (const mountedFile of containerMountedFilePaths) await chmod(mountedFile, 0o644);
@@ -94,7 +95,7 @@ process.stdout.write([
     ? "Legacy isolation names were rewritten; database and workspace contents were not moved. Restore the coordinated recovery set before starting the full stack."
     : existingEnvironment
       ? "Existing worktree environment and custom values were preserved."
-      : "Fresh worktree secrets are in .env; provider and Entra placeholders still need local values for full sign-in tests.",
+      : "Worktree identity and fresh secrets are in .env.state; .env contains installation settings.",
   "Run npm run dev:doctor before starting work.",
   "",
 ].join("\n"));

@@ -1,9 +1,9 @@
 # Local application stack. After setup, run npm run compose:up from the repository root.
 # Image recipes and test-only stacks: docker/README.md.
-name: ${LEMMACOMPUTER_COMPOSE_PROJECT_NAME:?set LEMMACOMPUTER_COMPOSE_PROJECT_NAME in .env}
+name: ${LEMMACOMPUTER_COMPOSE_PROJECT_NAME:?run npm run env:render and use --env-file .runtime-env/compose.env}
 
 x-control-runtime: &control-runtime
-  image: ${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?set LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE in .env}
+  image: ${LEMMACOMPUTER_CONTROL_RUNTIME_IMAGE:?run npm run env:render and use --env-file .runtime-env/compose.env}
   build:
     context: .
     dockerfile: docker/Dockerfile.services
@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
 
   ms365-mcp:
-    image: ${LEMMACOMPUTER_MS365_MCP_IMAGE:?set LEMMACOMPUTER_MS365_MCP_IMAGE in .env}
+    image: ${LEMMACOMPUTER_MS365_MCP_IMAGE:?run npm run env:render and use --env-file .runtime-env/compose.env}
     build:
       context: .
       dockerfile: docker/Dockerfile.ms365-mcp
@@ -99,7 +99,7 @@ services:
     restart: unless-stopped
 
   litellm:
-    container_name: ${LEMMACOMPUTER_LITELLM_CONTAINER:?set LEMMACOMPUTER_LITELLM_CONTAINER in .env}
+    container_name: ${LEMMACOMPUTER_LITELLM_CONTAINER:?run npm run env:render and use --env-file .runtime-env/compose.env}
     image: lemmacomputer/litellm:v1.93.0-lemmacomputer-egress
     build:
       context: .
@@ -240,7 +240,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.openvtc-consent
-    image: ${LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE:?set LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE in .env}
+    image: ${LEMMACOMPUTER_OPENVTC_CONSENT_IMAGE:?run npm run env:render and use --env-file .runtime-env/compose.env}
     env_file:
       - path: .runtime-env/openvtc-consent.env
         format: raw
@@ -362,7 +362,7 @@ services:
 
   control-api:
     <<: [*control-runtime, *hardened]
-    container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?set LEMMACOMPUTER_CONTROL_CONTAINER in .env}
+    container_name: ${LEMMACOMPUTER_CONTROL_CONTAINER:?run npm run env:render and use --env-file .runtime-env/compose.env}
     user: node
     command: ["npm", "run", "start", "--workspace", "@lemmacomputer/control-api"]
     env_file:
@@ -491,7 +491,7 @@ services:
       - control-private
       - gateway-private
     ports:
-      - "${LEMMACOMPUTER_HTTP_BIND_ADDRESS:?set LEMMACOMPUTER_HTTP_BIND_ADDRESS in .env}:${LEMMACOMPUTER_WEB_PORT:?set LEMMACOMPUTER_WEB_PORT in .env}:4174"
+      - "${LEMMACOMPUTER_HTTP_BIND_ADDRESS:?run npm run env:render and use --env-file .runtime-env/compose.env}:${LEMMACOMPUTER_WEB_PORT:?run npm run env:render and use --env-file .runtime-env/compose.env}:4174"
     depends_on:
       web:
         condition: service_healthy
@@ -514,7 +514,7 @@ services:
   workspace-image:
     profiles:
       - build
-    image: ${LEMMACOMPUTER_WORKSPACE_IMAGE:?set LEMMACOMPUTER_WORKSPACE_IMAGE in .env}
+    image: ${LEMMACOMPUTER_WORKSPACE_IMAGE:?run npm run env:render and use --env-file .runtime-env/compose.env}
     build:
       context: .
       dockerfile: docker/Dockerfile.workspace
@@ -525,7 +525,7 @@ networks:
   web-edge:
     internal: true
   control-private:
-    name: ${LEMMACOMPUTER_CONTROL_NETWORK:?set LEMMACOMPUTER_CONTROL_NETWORK in .env}
+    name: ${LEMMACOMPUTER_CONTROL_NETWORK:?run npm run env:render and use --env-file .runtime-env/compose.env}
     internal: true
   consent-private:
     internal: true

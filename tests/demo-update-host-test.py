@@ -97,6 +97,24 @@ class DemoUpdates(unittest.TestCase):
         self.assertNotIn("postgres", argv)
         self.assertEqual((self.previous / ".env").read_bytes(), ENV)
 
+    def test_split_environment_is_preserved_and_state_drift_blocks_rollback(self):
+        state = b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\nGENERATED_SECRET=keep-stable\n"
+        operator = ENV.replace(b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\n", b"")
+        (self.previous / ".env").write_bytes(operator)
+        (self.previous / ".env.state").write_bytes(state)
+        self.patches()
+        demo.update(self.root, self.bundle({"README.md": "new"}), True)
+        candidate = self.root / "releases" / NEXT
+        self.assertEqual((candidate / ".env").read_bytes(), operator)
+        self.assertEqual((candidate / ".env.state").read_bytes(), state)
+        self.assertEqual((candidate / ".env.state").stat().st_mode & 0o777, 0o600)
+        (candidate / ".env.state").write_bytes(state + b"NEW_SECRET=changed\n")
+        with self.assertRaises(RuntimeError):
+            demo.rollback(self.root)
+        (candidate / ".env.state").write_bytes(state)
+        demo.rollback(self.root)
+        self.assertEqual((self.root / "current").resolve(), self.previous)
+
     def test_failed_health_restores_previous_application(self):
         self.patches([RuntimeError("unhealthy"), None])
         with self.assertRaisesRegex(RuntimeError, "unhealthy"):
@@ -168,7 +186,7 @@ class DemoUpdates(unittest.TestCase):
         self.assertNotIn("private", str(error.exception))
 
     def test_archive_path_links_secrets_and_identity(self):
-        for name in ["../escape", "/absolute", ".env", ".runtime-env/web.env"]:
+        for name in ["../escape", "/absolute", ".env", ".env.state", ".env.backup", ".runtime-env/web.env"]:
             archive(self.root / "bad.tar", {name: "bad"})
             with self.assertRaises(RuntimeError):
                 demo.unpack(self.root / "bad.tar", self.root / "extract")

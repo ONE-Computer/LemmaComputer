@@ -43,7 +43,8 @@ npm run env:check
 npm run compose:up
 ```
 
-`env:init` generates `.env` with fresh local secrets; run it **once**.
+`env:init` generates a small `.env` and persistent `.env.state` with fresh local
+secrets; run it **once**.
 `worktree` here names the development configuration, even though this is a
 standalone evaluation clone. Do not copy or fill out `.env.example` manually.
 
@@ -105,7 +106,7 @@ npm run env:check
 npm run compose:up
 ```
 
-Keep `.env` and the Docker volumes: they hold the secrets and data needed to
+Keep `.env`, `.env.state`, and the Docker volumes: they hold the secrets and data needed to
 resume. Do not rerun `env:init`, add `-- --volumes`, or create a new clone to
 resume an existing installation. If startup fails, use
 [health and diagnostics](operations.md#health-and-diagnostics).
@@ -139,7 +140,7 @@ npm run dev:doctor
 ```
 
 Use a descriptive branch name when there is no issue. `worktree:init` runs
-`npm ci` if needed and creates a fresh `.env`, unique ports, Compose project,
+`npm ci` if needed and creates fresh `.env` and `.env.state` files, unique ports, Compose project,
 images, networks, and volumes. Run it once for a new worktree, not as a daily
 startup command. Do not also run `env:init` or copy another checkout's `.env`.
 
@@ -178,17 +179,41 @@ workspace without an AI agent or model provider. Configure model keys through
 | `npm run worktree:init` | Creates this worktree's local identity and `.env` once. |
 | `npm run dev:doctor` | Read-only branch, configuration, and Docker ownership check. |
 | `npm run env:check` | Read-only validation of existing `.env`. |
-| `npm run env:update` | Adds newly required values while preserving existing secrets; run only after a contract change. |
+| `npm run env:update` | Compacts configuration and adds newly required values while preserving existing secrets. |
 | `npm run compose:config` | Renders per-service environment files and checks Compose without starting containers. |
 | `npm run compose:up` | Builds and starts the local stack and explicit migration jobs. |
 | `npm run image:workspace` | Builds the separate managed desktop image. |
 | `npm run compose:down` | Stops the local stack and preserves volumes by default. |
 
-The generated `.env.example` is the operator-variable catalog from
-[`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Do not
-edit it by hand. `.env` is the ignored, checkout-owned deployment input;
-`.runtime-env/<service>.env` is generated for each service. Provider keys and
-per-user connector OAuth tokens are entered through the product, not `.env`.
+`.env` contains installation choices: the profile, runtime mode, public URL,
+port, timezone, and any configured integrations or non-default overrides.
+A fresh worktree has five settings. Optional Microsoft, email, S3, and remote-node
+settings appear only when configured. Provider keys and per-user connector OAuth
+tokens are entered through the product.
+
+`.env.state` holds persistent generated keys, Docker resource identity, and image
+references used by build/release tooling. Back it up with `.env` and installation
+data; it is **not** disposable. Image versions are owned by the repository and
+release process. Operators do not need to choose them for local setup.
+
+`.env.example` is the complete generated reference catalog from
+[`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs),
+including optional overrides and managed values. Do not copy it into `.env` or
+edit it by hand. Ordinary defaults, such as polling intervals and Microsoft Graph
+page limits, stay in that contract unless explicitly overridden.
+
+Existing single-file installations remain readable. Run `npm run env:update`
+once to split and compact them, then `npm run env:check`. The update retains keys,
+custom values, and resource identity; it moves unknown/retired values into state
+for review instead of deleting possible credentials. Deliberately empty optional
+values remain empty. Never run `env:init --force` to clean up existing data.
+
+`.runtime-env/<service>.env` and `.runtime-env/compose.env` are disposable generated
+projections. Use the npm commands below to render them before Compose operations.
+For a direct diagnostic command, run `npm run env:render`, then use
+`docker compose --env-file .runtime-env/compose.env ...`; the operator file alone
+no longer contains all Compose interpolation inputs.
+
 The root `compose.yaml` is the only local application stack. The commands above
 select it automatically; you do not choose a Dockerfile or overlay. See the
 [Docker file map](../../docker/README.md) for build recipes and test-only stacks.

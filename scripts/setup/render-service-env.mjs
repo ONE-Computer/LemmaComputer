@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { parseEnvironment } from "./environment-template.mjs";
+import { readEnvironmentFiles } from "./environment-files.mjs";
 import {
   environmentVariableNameSet,
   projectServiceEnvironment,
@@ -12,14 +12,17 @@ const source = process.argv.find((argument) => argument.startsWith("--file="))?.
 const destination = process.argv.find((argument) => argument.startsWith("--directory="))?.slice("--directory=".length) ?? ".runtime-env";
 const profile = process.argv.find((argument) => argument.startsWith("--profile="))?.slice("--profile=".length);
 const check = process.argv.includes("--check");
-const current = await readFile(source, "utf8");
 const values = Object.fromEntries(
-  [...parseEnvironment(current).values].filter(([key]) => !key.startsWith("LEMMACOMPUTER_") || environmentVariableNameSet.has(key)),
+  Object.entries(readEnvironmentFiles(source)).filter(([key]) => !key.startsWith("LEMMACOMPUTER_") || environmentVariableNameSet.has(key)),
 );
 const validated = validateDeploymentEnvironment(values, { profile, strict: true });
 const services = projectServiceEnvironment(validated);
+const compose = await readFile(new URL("../../compose.yaml", import.meta.url), "utf8");
+const composeKeys = new Set([...compose.matchAll(/\$\{(LEMMACOMPUTER_[A-Z0-9_]+)/g)].map(([, key]) => key));
+const composeValues = Object.fromEntries([...composeKeys].map((key) => [key, validated[key]]));
 
 if (check) {
+  await readFile(resolve(destination, "compose.env"), "utf8");
   for (const service of Object.keys(services)) {
     await readFile(resolve(destination, `${service}.env`), "utf8");
   }
@@ -33,5 +36,7 @@ if (check) {
     await writeFile(target, serializeEnvironment(environment), { mode: 0o600 });
     await chmod(target, 0o600);
   }
+  await writeFile(resolve(destination, "compose.env"), serializeEnvironment(composeValues), { mode: 0o600 });
+  await chmod(resolve(destination, "compose.env"), 0o600);
   process.stdout.write(`Rendered least-privilege service environment files in ${destination}.\n`);
 }

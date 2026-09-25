@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readEnvironmentFiles } from "../../../scripts/setup/environment-files.mjs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -7,8 +7,7 @@ const run = (command, args) => {
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed`);
 };
 
-const environment = await readFile(".env", "utf8");
-const project = environment.match(/^LEMMACOMPUTER_COMPOSE_PROJECT_NAME=(.+)$/m)?.[1]?.trim();
+const project = readEnvironmentFiles().LEMMACOMPUTER_COMPOSE_PROJECT_NAME?.trim();
 if (!project || project === "lemmacomputer") {
   throw new Error("Remote MCP egress qualification requires an isolated worktree environment");
 }

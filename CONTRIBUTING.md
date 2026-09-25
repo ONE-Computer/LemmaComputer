@@ -29,7 +29,7 @@ migration numbers, or release commands.
 | Command | What it proves or starts |
 | --- | --- |
 | `npm run dev:doctor` | Current worktree, dependencies, environment ownership, Docker context, and mounted-file safety |
-| `npm run env:check` | Canonical environment parity and strict selected-profile validation |
+| `npm run env:check` | Resolved defaults, required installation state, and strict selected-profile validation |
 | `npm run compose:config` | Least-privilege service projections and valid resolved Compose configuration |
 | `npm run build` | TypeScript/package builds across npm workspaces |
 | `npm test` | Full non-database Node unit and contract suite |

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { readEnvironmentFiles } from "../setup/environment-files.mjs";
 
 export const runtimeContainerFilters = [
   "label=com.lemmacomputer.sandbox.provider=docker-kasmvnc",
@@ -11,11 +11,12 @@ export const runtimeContainerFilters = [
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
 const localEnvironment = () => {
   try {
-    const contents = readFileSync(".env", "utf8");
-    const value = (key) => contents.match(new RegExp(`^${key}=(.+)$`, "m"))?.[1]?.trim();
+    const values = readEnvironmentFiles(".env", { resolved: true });
+    const value = (key) => values[key]?.trim();
     return { projectName: value("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX") };
-  } catch {
-    return {};
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    throw error;
   }
 };
 
@@ -72,7 +73,7 @@ export function runComposeDown({
     return 1;
   }
 
-  const result = run("docker", ["compose", "down", ...args], { stdio: "inherit" });
+  const result = run("docker", ["compose", "--env-file", ".runtime-env/compose.env", "down", ...args], { stdio: "inherit" });
   if (result.error) {
     stderr.write(`Unable to run Docker Compose: ${result.error.message}\n`);
     return 1;
