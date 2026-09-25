@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { readEnvironmentFiles } from "../setup/environment-files.mjs";
+import { readEnvironmentFile } from "../setup/environment-files.mjs";
 import { worktreeIsolationEnvironmentVariableNames } from "../setup/deployment-config.mjs";
 import { containerMountedFilePaths, inspectReadablePaths } from "./dev-doctor-lib.mjs";
 import { isWorktreeResourceName, worktreeResourcePrefix } from "./worktree-names.mjs";
@@ -13,7 +13,7 @@ if (branchResult.status !== 0 || !branch) failures.push("cannot determine the cu
 const integrationCheckout = branch === "main" || branch.startsWith("release/");
 if (await access("node_modules").then(() => false).catch(() => true)) failures.push("dependencies are missing; run npm run worktree:init");
 let env = {};
-try { env = readEnvironmentFiles(); } catch (error) { failures.push(error.message); }
+try { env = readEnvironmentFile(".env", { resolved: true }); } catch (error) { failures.push(error.message); }
 const value = (key) => env[key]?.trim();
 if (!integrationCheckout) {
   for (const key of worktreeIsolationEnvironmentVariableNames) {

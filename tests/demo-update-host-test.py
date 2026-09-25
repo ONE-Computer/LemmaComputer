@@ -97,23 +97,20 @@ class DemoUpdates(unittest.TestCase):
         self.assertNotIn("postgres", argv)
         self.assertEqual((self.previous / ".env").read_bytes(), ENV)
 
-    def test_split_environment_is_preserved_and_state_drift_blocks_rollback(self):
-        state = b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\nGENERATED_SECRET=keep-stable\n"
-        operator = ENV.replace(b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\n", b"")
-        (self.previous / ".env").write_bytes(operator)
-        (self.previous / ".env.state").write_bytes(state)
-        self.patches()
-        demo.update(self.root, self.bundle({"README.md": "new"}), True)
-        candidate = self.root / "releases" / NEXT
-        self.assertEqual((candidate / ".env").read_bytes(), operator)
-        self.assertEqual((candidate / ".env.state").read_bytes(), state)
-        self.assertEqual((candidate / ".env.state").stat().st_mode & 0o777, 0o600)
-        (candidate / ".env.state").write_bytes(state + b"NEW_SECRET=changed\n")
-        with self.assertRaises(RuntimeError):
-            demo.rollback(self.root)
-        (candidate / ".env.state").write_bytes(state)
-        demo.rollback(self.root)
-        self.assertEqual((self.root / "current").resolve(), self.previous)
+    def test_compose_uses_projection_without_a_second_environment_file(self):
+        projection = self.previous / ".runtime-env/compose.env"
+        projection.write_text("GENERATED_SETTING=resolved\n")
+        with patch.object(demo, "command", return_value="configuration") as command:
+            self.assertEqual(demo.compose(self.previous, [self.previous / "compose.yaml"], ["config"]), "configuration")
+        argv = command.call_args.args[0]
+        self.assertEqual(argv[argv.index("--env-file") + 1], str(projection))
+        self.assertEqual(command.call_args.kwargs["cwd"], self.previous)
+
+    def test_compose_uses_legacy_environment_when_projection_is_absent(self):
+        with patch.object(demo, "command", return_value="") as command:
+            demo.compose(self.previous, [self.previous / "compose.yaml"], ["config"])
+        argv = command.call_args.args[0]
+        self.assertEqual(argv[argv.index("--env-file") + 1], str(self.previous / ".env"))
 
     def test_failed_health_restores_previous_application(self):
         self.patches([RuntimeError("unhealthy"), None])
@@ -212,6 +209,29 @@ class DemoUpdates(unittest.TestCase):
         (self.previous / ".env").write_bytes(ENV.replace(b"=development", b"=production"))
         with self.assertRaisesRegex(RuntimeError, "development demo"):
             demo.active(self.root)
+
+    def test_compact_environment_derives_project_from_installation_id(self):
+        compact = ENV.replace(b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\n",
+                              b"LEMMACOMPUTER_INSTALLATION_ID=0123456789\n")
+        (self.previous / ".env").write_bytes(compact)
+        with patch.dict(demo.TARGET, {"project": "lemmacomputer-0123456789"}):
+            self.assertEqual(demo.active(self.root), self.previous)
+            self.assertEqual(demo.read_env(self.previous)["LEMMACOMPUTER_COMPOSE_PROJECT_NAME"],
+                             "lemmacomputer-0123456789")
+        self.assertEqual((self.previous / ".env").read_bytes(), compact)
+
+    def test_explicit_project_takes_precedence_over_installation_id(self):
+        (self.previous / ".env").write_bytes(ENV + b"LEMMACOMPUTER_INSTALLATION_ID=0123456789\n")
+        self.assertEqual(demo.read_env(self.previous)["LEMMACOMPUTER_COMPOSE_PROJECT_NAME"], "onecomputer-demo")
+
+    def test_invalid_installation_id_cannot_derive_project(self):
+        for installation_id in ["abc", "012345678A", "01234567890", "012345678/"]:
+            with self.subTest(installation_id=installation_id):
+                (self.previous / ".env").write_bytes(ENV.replace(
+                    b"LEMMACOMPUTER_COMPOSE_PROJECT_NAME=onecomputer-demo\n",
+                    f"LEMMACOMPUTER_INSTALLATION_ID={installation_id}\n".encode()))
+                with self.assertRaisesRegex(RuntimeError, "Invalid installation ID"):
+                    demo.read_env(self.previous)
 
     def test_model_comparison_checks_secrets_networks_and_mounts(self):
         old = {"services": {s: {"image": "old", "environment": {"SECRET": "kept"}} for s in demo.NODE_SERVICES}}

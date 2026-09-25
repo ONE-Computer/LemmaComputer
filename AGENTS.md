@@ -71,7 +71,7 @@ npm run compose:up
 ```
 
 `dev:doctor` is read-only and does not attach volumes. `compose:up` reuses the
-Compose project name in `.env` and reattaches that worktree's existing database
+resolved Compose project name and reattaches that worktree's existing database
 volumes. For remote-node/mTLS work, use
 `npm run dev:remote-workspace -- up [--cowork]` instead of ordinary
 `compose:up`; it retains the worktree databases and persistent volumes.

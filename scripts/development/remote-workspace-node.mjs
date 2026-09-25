@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readEnvironmentFiles } from "../setup/environment-files.mjs";
+import { readEnvironmentFile } from "../setup/environment-files.mjs";
 import { serializeEnvironment } from "../setup/deployment-config.mjs";
 
 const stateDirectoryName = ".runtime-remote-workspace-node";
@@ -232,7 +232,7 @@ const removeColocatedController = () => {
 
 const readLocalEnvironment = () => {
   if (!existsSync(".env")) throw new Error(".env is missing; run npm run worktree:init first");
-  const values = readEnvironmentFiles(".env", { resolved: true });
+  const values = readEnvironmentFile(".env", { resolved: true });
   const contents = serializeEnvironment(values);
   const value = (key) => values[key] ?? "";
   if (value("LEMMACOMPUTER_INSTALLATION_KIND") !== "worktree") throw new Error("Remote-node qualification is restricted to an isolated worktree profile");

@@ -9,19 +9,19 @@ other tools and have no standalone command.
 
 | Script | What it does | Command / caller |
 | --- | --- | --- |
-| [initialize-env.mjs](setup/initialize-env.mjs) | Creates a small `.env` and persistent `.env.state` with fresh local secrets. Run once per installation. | `npm run env:init` |
-| [update-env.mjs](setup/update-env.mjs) | Checks configuration, or compacts it into operator settings and persistent state while preserving existing values and secrets. | `npm run env:check` / `npm run env:update` |
+| [initialize-env.mjs](setup/initialize-env.mjs) | Creates one compact `.env` with installation settings and fresh local secrets. Run once per installation. | `npm run env:init` |
+| [update-env.mjs](setup/update-env.mjs) | Checks or compacts `.env` while preserving secrets, resource identity, and configured overrides. | `npm run env:check` / `npm run env:update` |
 | [render-service-env.mjs](setup/render-service-env.mjs) | Validates `.env` and writes each service's configuration files. Also called by Compose commands. | `npm run env:render` |
 | [render-env-example.mjs](setup/render-env-example.mjs) | Checks the generated `.env.example` reference; append `-- --write` to regenerate it. | `npm run env:example` |
 | [deployment-config.mjs](setup/deployment-config.mjs) | Defines supported settings, defaults, profile validation, and which values each service receives. | **Helper:** configuration source of truth for setup tools. |
-| [environment-files.mjs](setup/environment-files.mjs) | Reads old and split configuration; preserves installation state while compacting operator settings. | **Helper:** setup and operator commands. |
+| [environment-files.mjs](setup/environment-files.mjs) | Parses and reads a single `.env` with defaults; compacts it while preserving secrets and explicit overrides. | **Helper:** setup and operator commands. |
 | [environment-template.mjs](setup/environment-template.mjs) | Parses and merges environment files and generates initial secrets. | **Helper:** initialization and update tools. |
 
 ## Development: worktrees and local services
 
 | Script | What it does | Command / caller |
 | --- | --- | --- |
-| [worktree-init.mjs](development/worktree-init.mjs) | Prepares a task worktree with dependencies, its own environment, ports, and Docker names. | `npm run worktree:init` |
+| [worktree-init.mjs](development/worktree-init.mjs) | Prepares dependencies, one `.env`, unique ports, and a persistent installation ID for derived Docker names and image tags. | `npm run worktree:init` |
 | [dev-doctor.mjs](development/dev-doctor.mjs) | Checks branch, environment, and local resource isolation without changing the stack. | `npm run dev:doctor` |
 | [verify-quick.mjs](development/verify-quick.mjs) | Runs local safety/configuration checks, builds, and the default tests before integration. | `npm run verify:quick` |
 | [compose-down.mjs](development/compose-down.mjs) | Stops the worktree's stack after checking for active workspace runtimes. Preserves volumes by default. | `npm run compose:down` |

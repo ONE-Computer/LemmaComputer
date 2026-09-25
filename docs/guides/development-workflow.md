@@ -31,8 +31,9 @@ Node.js tests can run on macOS; the full desktop workflow below requires Linux.
 ### 1. Clone and start the application
 
 Use a dedicated evaluation clone. Keep it for this evaluation; use a separate
-task worktree if you later want to change code. Run only one evaluation clone
-per Docker host because this setup uses the default names and ports.
+task worktree if you later want to change code. Setup gives each clone an
+independent installation ID, Docker names, image tags, ports, and browser URL.
+Never copy another checkout's `.env`.
 
 ```bash
 git clone https://github.com/ONE-Computer/LemmaComputer.git lemmacomputer-eval
@@ -43,7 +44,7 @@ npm run env:check
 npm run compose:up
 ```
 
-`env:init` generates a small `.env` and persistent `.env.state` with fresh local
+`env:init` generates one `.env` with installation settings and fresh local
 secrets; run it **once**.
 `worktree` here names the development configuration, even though this is a
 standalone evaluation clone. Do not copy or fill out `.env.example` manually.
@@ -106,7 +107,7 @@ npm run env:check
 npm run compose:up
 ```
 
-Keep `.env`, `.env.state`, and the Docker volumes: they hold the secrets and data needed to
+Keep `.env` and the Docker volumes: they hold the secrets and data needed to
 resume. Do not rerun `env:init`, add `-- --volumes`, or create a new clone to
 resume an existing installation. If startup fails, use
 [health and diagnostics](operations.md#health-and-diagnostics).
@@ -140,9 +141,11 @@ npm run dev:doctor
 ```
 
 Use a descriptive branch name when there is no issue. `worktree:init` runs
-`npm ci` if needed and creates fresh `.env` and `.env.state` files, unique ports, Compose project,
-images, networks, and volumes. Run it once for a new worktree, not as a daily
-startup command. Do not also run `env:init` or copy another checkout's `.env`.
+`npm ci` if needed and creates one fresh `.env` with generated secrets, unique
+ports, and an installation ID. Docker names and development image tags are
+derived from that ID to isolate the worktree's resources. Run it once for a new
+worktree, not as a daily startup command. Do not also run `env:init` or copy
+another checkout's `.env`.
 
 For a fresh stack, then run:
 
@@ -185,16 +188,20 @@ workspace without an AI agent or model provider. Configure model keys through
 | `npm run image:workspace` | Builds the separate managed desktop image. |
 | `npm run compose:down` | Stops the local stack and preserves volumes by default. |
 
-`.env` contains installation choices: the profile, runtime mode, public URL,
-port, timezone, and any configured integrations or non-default overrides.
-A fresh worktree has five settings. Optional Microsoft, email, S3, and remote-node
-settings appear only when configured. Provider keys and per-user connector OAuth
-tokens are entered through the product.
+`.env` is the single persistent configuration file. It contains installation
+choices, generated secrets, and any configured integrations or non-default
+overrides. Back it up with the installation data. Optional Microsoft, email,
+S3, and remote-node settings appear only when configured. Provider keys and
+per-user connector OAuth tokens are entered through the product.
 
-`.env.state` holds persistent generated keys, Docker resource identity, and image
-references used by build/release tooling. Back it up with `.env` and installation
-data; it is **not** disposable. Image versions are owned by the repository and
-release process. Operators do not need to choose them for local setup.
+The `worktree` profile generates `LEMMACOMPUTER_INSTALLATION_ID` once for both
+evaluation clones and task worktrees. Docker resource names, development image
+tags, and the application version are derived from that stable ID; setup also
+uses it to select ports and the browser URL. Operators do not choose project
+names or image versions during setup. Keep the ID unchanged when moving a
+checkout or switching branches.
+Custom resource names and production image pins remain explicit overrides
+when needed. Release tooling owns production image versions.
 
 `.env.example` is the complete generated reference catalog from
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs),
@@ -202,14 +209,16 @@ including optional overrides and managed values. Do not copy it into `.env` or
 edit it by hand. Ordinary defaults, such as polling intervals and Microsoft Graph
 page limits, stay in that contract unless explicitly overridden.
 
-Existing single-file installations remain readable. Run `npm run env:update`
-once to split and compact them, then `npm run env:check`. The update retains keys,
-custom values, and resource identity; it moves unknown/retired values into state
-for review instead of deleting possible credentials. Deliberately empty optional
-values remain empty. Never run `env:init --force` to clean up existing data.
+Existing full `.env` files remain readable. Run `npm run env:update` to compact
+one, then `npm run env:check`. The update preserves generated secrets, custom
+values, production image pins, and resource identity. For an existing worktree,
+it retains the original identity hash as its installation ID. Unknown or retired
+values stay in `.env` for review instead of being deleted. Deliberately empty
+optional values remain empty. Never run `env:init --force` to clean up existing
+data.
 
 `.runtime-env/<service>.env` and `.runtime-env/compose.env` are disposable generated
-projections. Use the npm commands below to render them before Compose operations.
+projections. The npm commands above render them before Compose operations.
 For a direct diagnostic command, run `npm run env:render`, then use
 `docker compose --env-file .runtime-env/compose.env ...`; the operator file alone
 no longer contains all Compose interpolation inputs.

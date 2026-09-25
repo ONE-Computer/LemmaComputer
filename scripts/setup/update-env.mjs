@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { readEnvironmentFiles, writeEnvironmentFiles } from "./environment-files.mjs";
+import { readEnvironmentFile, writeEnvironmentFile } from "./environment-files.mjs";
 import {
   environmentParity,
   initializeEnvironment,
@@ -7,7 +7,9 @@ import {
   parseEnvironment,
 } from "./environment-template.mjs";
 import {
+  environmentContract,
   environmentVariableNameSet,
+  resolveDeploymentEnvironment,
   renderEnvironmentTemplate,
   serializeEnvironment,
   validateDeploymentEnvironment,
@@ -24,7 +26,12 @@ const checkedInTemplate = await readFile(".env.example", "utf8");
 if (checkedInTemplate !== template) {
   throw new Error(".env.example is not generated from scripts/setup/deployment-config.mjs; run npm run env:example -- --write");
 }
-const current = serializeEnvironment(readEnvironmentFiles(destination));
+const currentValues = readEnvironmentFile(destination);
+if (write && currentValues.LEMMACOMPUTER_INSTALLATION_KIND === "worktree" && !currentValues.LEMMACOMPUTER_INSTALLATION_ID) {
+  const existingId = currentValues.LEMMACOMPUTER_COMPOSE_PROJECT_NAME?.match(/^lemmacomputer-([a-f0-9]{10})$/)?.[1];
+  if (existingId) currentValues.LEMMACOMPUTER_INSTALLATION_ID = existingId;
+}
+const current = serializeEnvironment(currentValues);
 const parity = environmentParity(template, current);
 const retiredSensitiveVariableNames = new Set(["LEMMACOMPUTER_OPENAI_API_KEY", "LEMMACOMPUTER_CLAUDE_API_KEY", "LEMMACOMPUTER_GLM_API_KEY", "LEMMACOMPUTER_LITELLM_UI_PASSWORD"]);
 const retiredSensitive = parity.extra.filter((name) => retiredSensitiveVariableNames.has(name));
@@ -33,8 +40,8 @@ const registeredDeploymentValues = (values) => Object.fromEntries(
 );
 
 if (check) {
-  if (parity.extra.length) process.stdout.write(`Legacy or unrecognized variables (preserved in installation state by env:update): ${parity.extra.join(", ")}\n`);
-  if (retiredSensitive.length) process.stdout.write(`Retired sensitive variables are still present and no longer used: ${retiredSensitive.join(", ")}. Review installation state after provider-settings cutover.\n`);
+  if (parity.extra.length) process.stdout.write(`Legacy or unrecognized variables (preserved by env:update): ${parity.extra.join(", ")}\n`);
+  if (retiredSensitive.length) process.stdout.write(`Retired sensitive variables are still present and no longer used: ${retiredSensitive.join(", ")}. Review these after provider-settings cutover.\n`);
   try {
     const values = registeredDeploymentValues(parseEnvironment(current).values);
     const validated = validateDeploymentEnvironment(values, { profile, strict: true });
@@ -46,15 +53,21 @@ if (check) {
 } else {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
   const initialized = initializeEnvironment(template, timeZone);
-  const merged = mergeEnvironment(template, current, initialized);
+  const resolved = resolveDeploymentEnvironment(currentValues);
+  // Omitted ordinary settings use installation defaults. Missing keys that
+  // require generated secret material must still be initialized by the merge.
+  for (const item of environmentContract) {
+    if (!item.generated && !Object.hasOwn(currentValues, item.key)) currentValues[item.key] = resolved[item.key];
+  }
+  const merged = mergeEnvironment(template, serializeEnvironment(currentValues), initialized);
   const values = registeredDeploymentValues(parseEnvironment(merged.contents).values);
   validateDeploymentEnvironment(values, { profile, strict: true });
-  await writeEnvironmentFiles(destination, parseEnvironment(merged.contents).values);
+  await writeEnvironmentFile(destination, parseEnvironment(merged.contents).values);
   process.stdout.write([
     `Updated ${destination} without rotating ${merged.preserved} existing values.`,
     `Mapped ${merged.mapped} renamed or previously implicit values and initialized ${merged.initialized} missing values.`,
     `${merged.extras.length} extra variable${merged.extras.length === 1 ? " was" : "s were"} preserved for manual review.`,
     "",
   ].join("\n"));
-  if (retiredSensitive.length) process.stdout.write(`Retired sensitive variables remain in ${destination}.state; env:update intentionally did not delete them. Remove ${retiredSensitive.join(", ")} manually after provider-settings cutover.\n`);
+  if (retiredSensitive.length) process.stdout.write(`Retired sensitive variables remain in ${destination}; env:update intentionally did not delete them. Remove ${retiredSensitive.join(", ")} manually after provider-settings cutover.\n`);
 }

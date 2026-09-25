@@ -10,7 +10,7 @@ hosted AWS deployment procedure. For first setup use the
 
 ## Start and stop
 
-In the checkout that owns the stack, keep its existing `.env`, `.env.state`, and Docker
+In the checkout that owns the stack, keep its existing `.env` and Docker
 volumes. For a task worktree, run `npm run dev:doctor` at the start of the
 session, then:
 
@@ -38,10 +38,11 @@ with data. Never copy another checkout's `.env` or attach its writable volumes.
 
 The environment contract lives in
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Its
-generated `.env.example` is the full reference catalog, including defaults and managed values. `npm run worktree:init`
-creates a task worktree's `.env` and persistent `.env.state` once. A dedicated disposable evaluation clone
-uses `npm run env:init -- --profile=worktree`. After pulling a change to the
-contract, run:
+generated `.env.example` is the full reference catalog, including defaults and
+generated values. `npm run worktree:init` creates a task worktree's single `.env`
+once. A dedicated disposable evaluation clone uses
+`npm run env:init -- --profile=worktree`. After pulling a change to the contract,
+run:
 
 ```bash
 npm run env:check
@@ -49,13 +50,17 @@ npm run env:update   # only if the check reports missing variables
 npm run env:check
 ```
 
-`env:update` compacts `.env` into installation choices and overrides, and preserves
-generated keys, image references, resource identity, and legacy values in `.env.state`.
-Back up both files. Existing single-file installations remain readable until updated.
+`env:update` keeps installation choices, generated secrets, configured
+integrations, and non-default overrides in `.env`; ordinary defaults stay in the
+contract. Existing full `.env` files remain readable. Worktree Docker names and
+development image tags are derived from a persistent generated
+`LEMMACOMPUTER_INSTALLATION_ID`; updates preserve existing resource identity,
+custom names, production image pins, and legacy values. Back up `.env` with the
+installation data and do not change its ID to rename a running stack.
 `env:init --force` replaces generated secrets and can invalidate sessions,
 signatures, and encrypted records; it is not an update command. Repository
-commands generate `.runtime-env/<service>.env` for each service. Before a
-direct `docker compose` command, run `npm run env:render` and use
+commands generate disposable `.runtime-env/<service>.env` projections for each
+service. Before a direct `docker compose` command, run `npm run env:render` and use
 `docker compose --env-file .runtime-env/compose.env config --quiet` so interpolated secrets are not printed.
 
 The public browser origin is `LEMMACOMPUTER_PUBLIC_WEB_URL`. Its exact value

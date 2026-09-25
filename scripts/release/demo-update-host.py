@@ -89,42 +89,26 @@ def verify_source(root, expected):
                 f"Deployed source drift: {name}; reconcile before a routine update")
 
 
-def environment_digest(root):
-    root = Path(root)
-    state = root / ".env.state"
-    env_hash = digest(root / ".env")
-    if not state.exists():
-        return env_hash  # Preserve existing single-file update records.
-    require(state.is_file() and not state.is_symlink(), "Expected regular installation state")
-    return hashlib.sha256((env_hash + "\n" + digest(state)).encode()).hexdigest()
-
-
 def preserve_environment(previous, candidate):
-    for name in [".env", ".env.state"]:
-        source, target = Path(previous) / name, Path(candidate) / name
-        if name == ".env.state" and not source.exists():
-            continue
-        require(source.is_file() and not source.is_symlink(), "Expected regular server-owned environment files")
-        require(not target.exists(), "Refusing to overwrite candidate environment")
-        shutil.copy2(source, target)
-        os.chmod(target, 0o600)
-        require(digest(source) == digest(target), "Environment preservation failed")
-    return environment_digest(previous)
+    source, target = Path(previous) / ".env", Path(candidate) / ".env"
+    require(source.is_file() and not source.is_symlink(), "Expected a regular server-owned .env")
+    require(not target.exists(), "Refusing to overwrite candidate .env")
+    shutil.copy2(source, target)
+    os.chmod(target, 0o600)
+    require(digest(source) == digest(target), "Environment preservation failed")
+    return digest(source)
 
 
 def read_env(root):
     values = {}
-    for name in [".env.state", ".env"]:
-        path = Path(root) / name
-        if name == ".env.state" and not path.exists():
-            continue
-        require(path.is_file() and not path.is_symlink(), "Expected regular environment files")
-        for line in path.read_text().splitlines():
-            match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
-            if match:
-                key, value = match[1], match[2].strip().strip("\"'")
-                require(key not in values or values[key] == value, "Conflicting environment values")
-                values[key] = value
+    for line in (Path(root) / ".env").read_text().splitlines():
+        match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
+        if match:
+            values[match[1]] = match[2].strip().strip("\"'")
+    installation_id = values.get("LEMMACOMPUTER_INSTALLATION_ID")
+    if not values.get("LEMMACOMPUTER_COMPOSE_PROJECT_NAME") and installation_id:
+        require(re.fullmatch(r"[a-f0-9]{10}", installation_id), "Invalid installation ID")
+        values["LEMMACOMPUTER_COMPOSE_PROJECT_NAME"] = f"lemmacomputer-{installation_id}"
     require(values.get("LEMMACOMPUTER_INSTALLATION_KIND") == "worktree" and
             values.get("LEMMACOMPUTER_RUNTIME_ENVIRONMENT") == "development",
             "Routine updates are only enabled for a worktree/development demo")
@@ -156,7 +140,10 @@ def compose_files(current):
 
 
 def compose(root, files, args):
-    return command(["docker", "compose", "--project-directory", str(root), "--env-file", str(root / (".runtime-env/compose.env" if (root / ".env.state").exists() else ".env")),
+    environment = root / ".runtime-env/compose.env"
+    if not environment.is_file():
+        environment = root / ".env"
+    return command(["docker", "compose", "--project-directory", str(root), "--env-file", str(environment),
                     "-p", TARGET["project"], *[arg for f in files for arg in ("-f", str(f))], *args], cwd=root)
 
 
@@ -276,7 +263,7 @@ def update(root, bundle, apply=False):
         new_model = model(candidate, new_files)
         require(normalize_model(old_model, files[0].parent) == normalize_model(new_model, candidate),
                 "Compose configuration changed beyond application images; use the full release path")
-        require(environment_digest(previous) == env_hash and environment_digest(candidate) == env_hash,
+        require(digest(previous / ".env") == env_hash and digest(candidate / ".env") == env_hash,
                 "Environment changed during staging; aborting before cutover")
         record = {"sha": meta["sha"], "previous": str(previous), "environmentSha256": env_hash,
                   "services": services, "files": [str(f) for f in new_files],
@@ -291,13 +278,13 @@ def update(root, bundle, apply=False):
                 compose(candidate, new_files, ["up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "300", *services])
             health(candidate)
             verify_continuity(old_state, inventory(), services)
-            require(environment_digest(previous) == env_hash and environment_digest(candidate) == env_hash, "Environment changed during cutover")
+            require(digest(previous / ".env") == env_hash and digest(candidate / ".env") == env_hash, "Environment changed during cutover")
             switch(root, candidate)
             record["status"] = "active"
             save(candidate / "demo-update.json", record)
             (root / ".demo-update-pending.json").unlink()
         except Exception:
-            require(environment_digest(previous) == env_hash and environment_digest(candidate) == env_hash,
+            require(digest(previous / ".env") == env_hash and digest(candidate / ".env") == env_hash,
                     "Environment changed during failure; journal retained for operator recovery")
             # No migrations or database replacement took place, so old images remain usable.
             if services:
@@ -323,7 +310,7 @@ def rollback(root):
     record = json.loads((current / "demo-update.json").read_text())
     previous = Path(record["previous"])
     require(previous.parent == root / "releases", "Invalid previous release")
-    require(environment_digest(current) == environment_digest(previous) == record["environmentSha256"],
+    require(digest(current / ".env") == digest(previous / ".env") == record["environmentSha256"],
             "Environment changed since deployment; refusing to restore stale settings")
     verify_source(current, record["source"])
     verify_source(previous, record["previousSource"])
@@ -339,7 +326,7 @@ def rollback(root):
                 ["up", "-d", "--no-deps", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "300", *services])
     health(previous)
     verify_continuity(before, inventory(), services)
-    require(environment_digest(current) == environment_digest(previous) == record["environmentSha256"],
+    require(digest(current / ".env") == digest(previous / ".env") == record["environmentSha256"],
             "Environment changed during rollback; inspect before switching current")
     switch(root, previous)
     if pending.exists():

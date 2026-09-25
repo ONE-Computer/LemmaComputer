@@ -67,6 +67,7 @@ const validHostedEnvironment = () => {
 
   Object.assign(values, {
     LEMMACOMPUTER_INSTALLATION_KIND: "hosted",
+    LEMMACOMPUTER_INSTALLATION_ID: "",
     LEMMACOMPUTER_RUNTIME_ENVIRONMENT: "production",
     LEMMACOMPUTER_AUTH_TRUSTED_PROXY_CIDRS: "192.0.2.10/32",
     LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
@@ -176,7 +177,7 @@ test("the checked-in environment example is rendered from the canonical deployme
   const checkedIn = await readFile(new URL("../.env.example", import.meta.url), "utf8");
   assert.equal(rendered, checkedIn, ".env.example must be generated from the contract without manual drift");
   assert.deepEqual(assignmentKeys(rendered), keys, "the template must list every registered operator variable once");
-  assert.match(rendered, /Scope: every deployment input, including optional overrides and managed state, is listed/);
+  assert.match(rendered, /Scope: every deployment input, including optional overrides and generated secrets, is listed/);
   assert.match(rendered, /Service-local and per-workspace variables are derived/);
   assert.match(rendered, /Accepted values: customer-managed, hosted, worktree\./);
   assert.match(rendered, /Sensitive: keep this value out of source control and logs/);
@@ -441,7 +442,7 @@ test("environment migration preserves retired variables without projecting them 
       "--write",
     ], { cwd: new URL("..", import.meta.url).pathname, encoding: "utf8" });
     assert.equal(update.status, 0, update.stderr);
-    assert.match(await readFile(`${source}.state`, "utf8"), new RegExp(`LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}`));
+    assert.match(await readFile(source, "utf8"), new RegExp(`LEMMACOMPUTER_OPENAI_API_KEY=${retiredValue}`));
 
     const render = spawnSync(process.execPath, [
       new URL("../scripts/setup/render-service-env.mjs", import.meta.url).pathname,

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { readEnvironmentFiles } from "../setup/environment-files.mjs";
+import { readEnvironmentFile } from "../setup/environment-files.mjs";
 
 export const runtimeContainerFilters = [
   "label=com.lemmacomputer.sandbox.provider=docker-kasmvnc",
@@ -11,7 +11,7 @@ export const runtimeContainerFilters = [
 const text = (value) => Buffer.isBuffer(value) ? value.toString("utf8") : String(value ?? "");
 const localEnvironment = () => {
   try {
-    const values = readEnvironmentFiles(".env", { resolved: true });
+    const values = readEnvironmentFile(".env", { resolved: true });
     const value = (key) => values[key]?.trim();
     return { projectName: value("LEMMACOMPUTER_COMPOSE_PROJECT_NAME"), networkPrefix: value("LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX") };
   } catch (error) {

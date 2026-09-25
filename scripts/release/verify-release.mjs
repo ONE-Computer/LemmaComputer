@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { readEnvironmentFiles } from "../setup/environment-files.mjs";
+import { readEnvironmentFile } from "../setup/environment-files.mjs";
 import { releaseAttestationSchemaVersion, requiredReleaseGates } from "./release-gates.mjs";
 
 const run = (command, args, options = {}) => {
@@ -20,7 +20,7 @@ const branch = capture("git", ["branch", "--show-current"]);
 if (branch !== "main" && !branch.startsWith("release/")) {
   throw new Error("Release verification must run on main or a release/* branch");
 }
-const env = readEnvironmentFiles(".env", { resolved: true });
+const env = readEnvironmentFile(".env", { resolved: true });
 const envValue = (name) => env[name]?.trim();
 const composeProject = envValue("LEMMACOMPUTER_COMPOSE_PROJECT_NAME");
 const workspaceImage = envValue("LEMMACOMPUTER_WORKSPACE_IMAGE");

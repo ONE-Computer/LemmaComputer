@@ -1,10 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import {
   environmentContract,
-  firstPartyImageVariables,
   resolveDeploymentEnvironment,
-  serializeEnvironment,
 } from "./deployment-config.mjs";
 
 export function parseEnvironment(contents) {
@@ -28,22 +26,6 @@ export function parseEnvironment(contents) {
   };
 }
 
-
-// These values describe an installation's identity, not operator choices.
-// Preserve them across updates and include them in installation backups.
-const managedNames = new Set([
-  ...environmentContract.filter((item) => item.generated).map((item) => item.key),
-  ...firstPartyImageVariables,
-  "LEMMACOMPUTER_APP_VERSION",
-  "LEMMACOMPUTER_COMPOSE_PROJECT_NAME",
-  "LEMMACOMPUTER_CONTROL_NETWORK",
-  "LEMMACOMPUTER_CONTROL_CONTAINER",
-  "LEMMACOMPUTER_LITELLM_CONTAINER",
-  "LEMMACOMPUTER_WORKSPACE_NODE_ID",
-  "LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX",
-  "LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK",
-]);
-
 const visibleNames = new Set([
   "LEMMACOMPUTER_INSTALLATION_KIND",
   "LEMMACOMPUTER_RUNTIME_ENVIRONMENT",
@@ -52,69 +34,44 @@ const visibleNames = new Set([
   "LEMMACOMPUTER_TIME_ZONE",
 ]);
 
-function readValues(path, optional = false) {
-  let contents;
-  try { contents = readFileSync(path, "utf8"); } catch (error) {
-    if (optional && error.code === "ENOENT") return {};
-    throw error;
-  }
-  const parsed = parseEnvironment(contents);
-  if (parsed.duplicates.length) throw new Error(`Duplicate variables in ${path}: ${parsed.duplicates.join(", ")}`);
-  return Object.fromEntries(parsed.values);
-}
-
-/** Also accepts existing, single-file installations without modifying them. */
-export function readEnvironmentFiles(source = ".env", { resolved = false } = {}) {
-  if (!existsSync(`${source}.state`) && readFileSync(source, "utf8").startsWith("# Installation settings.")) {
-    throw new Error(`${source}.state is missing; restore installation state from backup, do not regenerate its keys`);
-  }
-  const managed = readValues(`${source}.state`, true);
-  const operator = readValues(source);
-  for (const key of Object.keys(operator)) {
-    if (Object.hasOwn(managed, key) && managed[key] !== operator[key]) {
-      throw new Error(`${key} has conflicting values in ${source} and ${source}.state; keep it in one file`);
-    }
-  }
-  const values = { ...managed, ...operator };
+/** Read one installation file; defaults are resolved without rewriting it. */
+export function readEnvironmentFile(source = ".env", { resolved = false } = {}) {
+  const parsed = parseEnvironment(readFileSync(source, "utf8"));
+  if (parsed.duplicates.length) throw new Error(`Duplicate variables in ${source}: ${parsed.duplicates.join(", ")}`);
+  const values = Object.fromEntries(parsed.values);
   return resolved ? { ...values, ...resolveDeploymentEnvironment(values) } : values;
 }
 
-export function partitionEnvironment(input) {
+export function renderCompactEnvironment(input) {
   const values = input instanceof Map ? Object.fromEntries(input) : input;
-  const operator = {};
-  const managed = {};
-  const known = new Set(environmentContract.map((item) => item.key));
-  for (const item of environmentContract) {
-    if (!Object.hasOwn(values, item.key)) continue;
-    const value = values[item.key];
-    if (managedNames.has(item.key)) managed[item.key] = value;
-    else if (visibleNames.has(item.key) || value !== item.default) operator[item.key] = value;
-  }
-  // Unrecognized values may belong to operator tooling. Never discard them.
-  for (const [key, value] of Object.entries(values)) {
-    if (!known.has(key)) managed[key] = value;
-  }
-  const operatorLines = [
-    "# Installation settings. Never commit this file.",
-    "# Defaults and optional settings: .env.example.",
-    "# Generated keys and deployment identity: the adjacent .state file. Back up both.",
+  const defaults = resolveDeploymentEnvironment({
+    LEMMACOMPUTER_INSTALLATION_KIND: values.LEMMACOMPUTER_INSTALLATION_KIND,
+    LEMMACOMPUTER_INSTALLATION_ID: values.LEMMACOMPUTER_INSTALLATION_ID,
+  });
+  const lines = [
+    "# LemmaComputer installation settings and generated secrets. Never commit this file.",
+    "# Omitted settings use built-in defaults; .env.example is the full reference.",
+    "# Docker names and local image tags are derived from the generated installation ID.",
   ];
   let lastSection;
   for (const item of environmentContract) {
-    if (!Object.hasOwn(operator, item.key)) continue;
+    if (!Object.hasOwn(values, item.key)) continue;
+    const value = values[item.key];
+    const keep = item.generated || visibleNames.has(item.key)
+      || (item.key === "LEMMACOMPUTER_INSTALLATION_ID" && value)
+      || value !== defaults[item.key];
+    if (!keep) continue;
     if (item.section !== lastSection) {
-      operatorLines.push("", `# ${item.section}`);
+      lines.push("", `# ${item.section}`);
       lastSection = item.section;
     }
-    operatorLines.push(`# ${item.description}`, `${item.key}=${operator[item.key]}`);
+    if (!item.generated) lines.push(`# ${item.description}`);
+    lines.push(`${item.key}=${value}`);
   }
-  return {
-    operator: `${operatorLines.join("\n")}\n`,
-    managed: "# Persistent installation state. Generated by setup; never commit or regenerate.\n"
-      + "# Contains keys, image references, resource identity, and preserved legacy values.\n"
-      + "# Back up with .env and the installation data. Not a disposable runtime projection.\n"
-      + serializeEnvironment(managed),
-  };
+  const known = new Set(environmentContract.map((item) => item.key));
+  const extras = Object.entries(values).filter(([key]) => !known.has(key));
+  if (extras.length) lines.push("", "# Preserved unrecognized or retired values; review before removing.", ...extras.map(([key, value]) => `${key}=${value}`));
+  return `${lines.join("\n")}\n`;
 }
 
 async function atomicWrite(path, contents) {
@@ -127,10 +84,6 @@ async function atomicWrite(path, contents) {
   }
 }
 
-export async function writeEnvironmentFiles(source, values) {
-  const files = partitionEnvironment(values);
-  // State first: interruption leaves identical duplicate values in an old
-  // full .env, which the reader accepts without losing or rotating secrets.
-  await atomicWrite(`${source}.state`, files.managed);
-  await atomicWrite(source, files.operator);
+export async function writeEnvironmentFile(source, values) {
+  await atomicWrite(source, renderCompactEnvironment(values));
 }

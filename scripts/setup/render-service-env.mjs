@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { readEnvironmentFiles } from "./environment-files.mjs";
+import { readEnvironmentFile } from "./environment-files.mjs";
 import {
   environmentVariableNameSet,
   projectServiceEnvironment,
@@ -13,7 +13,7 @@ const destination = process.argv.find((argument) => argument.startsWith("--direc
 const profile = process.argv.find((argument) => argument.startsWith("--profile="))?.slice("--profile=".length);
 const check = process.argv.includes("--check");
 const values = Object.fromEntries(
-  Object.entries(readEnvironmentFiles(source)).filter(([key]) => !key.startsWith("LEMMACOMPUTER_") || environmentVariableNameSet.has(key)),
+  Object.entries(readEnvironmentFile(source)).filter(([key]) => !key.startsWith("LEMMACOMPUTER_") || environmentVariableNameSet.has(key)),
 );
 const validated = validateDeploymentEnvironment(values, { profile, strict: true });
 const services = projectServiceEnvironment(validated);

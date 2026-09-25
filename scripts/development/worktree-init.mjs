@@ -1,7 +1,7 @@
 import { access, chmod, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { parseEnvironment, readEnvironmentFiles, writeEnvironmentFiles } from "../setup/environment-files.mjs";
+import { parseEnvironment, readEnvironmentFile, writeEnvironmentFile } from "../setup/environment-files.mjs";
 import { serializeEnvironment, worktreeEnvironmentOverrides } from "../setup/deployment-config.mjs";
 import { runtimeContainerFilters } from "./compose-down.mjs";
 import { containerMountedFilePaths } from "./dev-doctor-lib.mjs";
@@ -22,10 +22,6 @@ const root = run("git", ["rev-parse", "--show-toplevel"]);
 process.chdir(root);
 const branch = run("git", ["branch", "--show-current"]);
 if (!branch || branch === "main") throw new Error("Worktree bootstrap is forbidden on main; create an issue branch/worktree first");
-const id = worktreeId({ root, branch });
-const slug = worktreeSlug(id);
-const legacySlug = legacyWorktreeSlug(id);
-const portOffset = 1000 + (Number.parseInt(id.slice(0, 6), 16) % 20000);
 
 const localModules = resolve(root, "node_modules");
 if (!await exists(localModules)) {
@@ -36,7 +32,13 @@ if (!await exists(localModules)) {
 const existingEnvironment = await exists(".env");
 if (!existingEnvironment) run(process.execPath, ["scripts/setup/initialize-env.mjs"]);
 const envPath = resolve(root, ".env");
-const current = serializeEnvironment(readEnvironmentFiles(envPath, { resolved: true }));
+const current = serializeEnvironment(readEnvironmentFile(envPath, { resolved: true }));
+const id = parseEnvironment(current).values.get("LEMMACOMPUTER_INSTALLATION_ID") || worktreeId({ root, branch });
+if (!/^[a-f0-9]{10}$/.test(id)) throw new Error("LEMMACOMPUTER_INSTALLATION_ID must be a generated 10-character lowercase hexadecimal identifier");
+const slug = worktreeSlug(id);
+const legacySlug = legacyWorktreeSlug(id);
+const portOffset = 1000 + (Number.parseInt(id.slice(0, 6), 16) % 20000);
+
 const currentProject = current.match(/^LEMMACOMPUTER_COMPOSE_PROJECT_NAME=(.+)$/m)?.[1]?.trim();
 const migrateLegacyNamespace = process.argv.includes("--migrate-legacy-namespace");
 if (currentProject === legacySlug && !migrateLegacyNamespace) {
@@ -83,7 +85,9 @@ const previousOverrides = migrateLegacyNamespace
   ? worktreeEnvironmentOverrides({ slug: legacySlug, id, portOffset })
   : currentProject === slug ? overrides : undefined;
 const updated = applyWorktreeEnvironmentOverrides(current, overrides, { previousOverrides });
-await writeEnvironmentFiles(envPath, parseEnvironment(updated).values);
+const updatedValues = parseEnvironment(updated).values;
+updatedValues.set("LEMMACOMPUTER_INSTALLATION_ID", id);
+await writeEnvironmentFile(envPath, updatedValues);
 const publicWebUrl = updated.match(/^LEMMACOMPUTER_PUBLIC_WEB_URL=(.+)$/m)?.[1]?.trim();
 
 for (const mountedFile of containerMountedFilePaths) await chmod(mountedFile, 0o644);
@@ -95,7 +99,7 @@ process.stdout.write([
     ? "Legacy isolation names were rewritten; database and workspace contents were not moved. Restore the coordinated recovery set before starting the full stack."
     : existingEnvironment
       ? "Existing worktree environment and custom values were preserved."
-      : "Worktree identity and fresh secrets are in .env.state; .env contains installation settings.",
+      : "Installation settings and fresh secrets are in .env; Docker names and image tags are derived automatically.",
   "Run npm run dev:doctor before starting work.",
   "",
 ].join("\n"));
