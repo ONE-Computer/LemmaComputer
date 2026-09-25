@@ -4,7 +4,7 @@
 set up a task worktree through the [development workflow](development-workflow.md)
 and keep its `worktree` profile. For a separate, disposable operator evaluation
 of `customer-managed`, initialize a dedicated checkout with
-`npm run env:init -- --profile=customer-managed`; never reuse a development
+`npm run env:init -- --profile=customer-managed` once; never reuse a development
 worktree's `.env` or data. The root Compose stack is a local reference, not a
 production deployment.
 
@@ -13,6 +13,9 @@ uses delegated Graph access for each connected person; Microsoft social login
 and company SSO are Better Auth methods described in
 [authentication architecture](../architecture/authentication.md). None of
 those Microsoft identities assigns a LemmaComputer organization or role.
+The blank `LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID` and
+`LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET` fields configure Microsoft sign-in;
+they do not configure the Microsoft 365 connector below.
 
 ## Before registering the application
 
@@ -59,14 +62,19 @@ customer. `Sites.Selected` also needs an explicit site grant before the
 connector can access a site. See [Microsoft's permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference)
 for current consent requirements.
 
-Set the following three deployment values together, without printing the
-secret to logs or committing `.env`:
+Fill the following three blank deployment fields together in the existing
+`.env`, without printing the secret to logs or committing the file:
 
 ```text
 LEMMACOMPUTER_MS365_TENANT_ID
 LEMMACOMPUTER_MS365_CLIENT_ID
 LEMMACOMPUTER_MS365_CLIENT_SECRET
 ```
+
+If an older `.env` does not show these fields, run `npm run env:update` to
+restore them while preserving existing secrets and configured values. Keep this
+single `.env`; `.env.example` is a reference, not a replacement configuration.
+Leave the fields blank when this connector is unused.
 
 ## Optional SharePoint site administration
 

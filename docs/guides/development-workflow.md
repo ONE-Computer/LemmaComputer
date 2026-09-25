@@ -179,10 +179,12 @@ workspace without an AI agent or model provider. Configure model keys through
 
 | Command | Effect |
 | --- | --- |
+| `npm run env:init -- --profile=worktree` | Creates a disposable evaluation clone's `.env` once. |
 | `npm run worktree:init` | Creates this worktree's local identity and `.env` once. |
 | `npm run dev:doctor` | Read-only branch, configuration, and Docker ownership check. |
-| `npm run env:check` | Read-only validation of existing `.env`. |
-| `npm run env:update` | Compacts configuration and adds newly required values while preserving existing secrets. |
+| `npm run env:check` | Read-only validation of `.env` with omitted defaults resolved. |
+| `npm run env:update` | Compacts `.env`, restores visible setup fields, and initializes missing generated values while preserving existing settings and secrets. |
+| `npm run env:render` | Validates `.env` and regenerates disposable service and Compose environment files. |
 | `npm run compose:config` | Renders per-service environment files and checks Compose without starting containers. |
 | `npm run compose:up` | Builds and starts the local stack and explicit migration jobs. |
 | `npm run image:workspace` | Builds the separate managed desktop image. |
@@ -193,9 +195,15 @@ choices, generated secrets, external-integration fields, and non-default
 overrides. Optional credentials for Postmark email, Microsoft and Google login,
 and Microsoft 365 are included even when blank, along with the customer SSO
 trusted-origin field. Leave unused credentials blank; updates preserve
-configured values. Email transport and invitation
-delivery mode also remain visible, defaulting to `capture` and `copy-link` in
-development. Back up `.env` with the installation data.
+configured values. Setup creates these empty fields; obtain the credentials
+from the external service when enabling an integration. Email transport and
+invitation delivery mode also remain visible, defaulting to `capture` and
+`copy-link` in development. Back up `.env` with the installation data.
+
+Generated database passwords, internal service tokens, and private signing and
+encryption keys are real secrets. Keep `.env` private and retain those values
+when updating an installation; generating replacements can make stored
+credentials unreadable.
 
 Configure GitHub and Google Workspace MCP credentials through the product UI.
 Their `.env` fields are optional deployment-wide fallbacks and are omitted when
@@ -203,14 +211,26 @@ empty; updates preserve existing nonempty overrides. Google sign-in credentials
 are separate from the Google Workspace connector. Model-provider keys and
 per-user connector OAuth tokens are also entered through the product.
 
-The `worktree` profile generates `LEMMACOMPUTER_INSTALLATION_ID` once for both
-evaluation clones and task worktrees. Docker resource names, development image
-tags, and the application version are derived from that stable ID; setup also
-uses it to select ports and the browser URL. Operators do not choose project
-names or image versions during setup. Keep the ID unchanged when moving a
-checkout or switching branches.
-Custom resource names and production image pins remain explicit overrides
-when needed. Release tooling owns production image versions.
+Both local setup commands fill these fields automatically:
+
+| Field | Initial value and purpose |
+| --- | --- |
+| `LEMMACOMPUTER_INSTALLATION_KIND` | `worktree`, selected by the evaluation command's profile flag or by `worktree:init`. |
+| `LEMMACOMPUTER_INSTALLATION_ID` | Generated once and saved to keep this installation's Docker identity stable. |
+| `LEMMACOMPUTER_RUNTIME_ENVIRONMENT` | `development`, allowing local email capture and development image tags. |
+| `LEMMACOMPUTER_WEB_PORT` | Selected from the installation ID for this local stack. |
+| `LEMMACOMPUTER_PUBLIC_WEB_URL` | A localhost URL using that port. |
+
+You do not need to enter these values manually. `env:update` preserves existing
+values. The runtime mode is separate from the deployment profile; see
+[deployment profiles](deployment-profiles.md) for production requirements.
+
+Docker resource names, development image tags, and the application version are
+derived from the saved installation ID. Operators do not choose project names
+or image versions during local setup. Keep the ID unchanged when moving a
+checkout or switching branches. Custom resource names and production image
+pins remain explicit overrides when needed. Release tooling owns production
+image versions.
 
 `.env.example` is the complete generated reference catalog from
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs),
@@ -221,10 +241,12 @@ names and image references are also omitted from `.env` when derived defaults
 apply.
 
 Existing full `.env` files remain readable. Run `npm run env:update` to compact
-one, then `npm run env:check`. The update preserves generated secrets, custom
-values, production image pins, and resource identity. For an existing worktree,
-it retains the original identity hash as its installation ID. Unknown or retired
-values stay in `.env` for review instead of being deleted. Deliberately empty
+one or restore newly visible setup fields, then `npm run env:check`. A passing
+check does not mean the file has already been compacted. The update preserves
+generated secrets, custom values, production image pins, and resource identity.
+For an existing worktree with a standard generated project name, it adopts that
+name's identity suffix as the installation ID. Unknown or retired values stay
+in `.env` for review instead of being deleted. Deliberately empty
 optional values remain empty. Never run `env:init --force` to clean up existing
 data.
 

@@ -17,6 +17,14 @@ anything. LemmaComputer has one codebase and two production profiles:
 creates isolated local configuration and data for a task worktree or disposable
 evaluation. Never select it to represent hosted production.
 
+The profile and runtime safety mode are separate. Set
+`LEMMACOMPUTER_RUNTIME_ENVIRONMENT=production` for production: validation then
+requires immutable first-party image digests and real authentication email
+delivery. `hosted` requires this mode. A dedicated `customer-managed` evaluation
+can use `development`; selecting that profile alone does not enable production
+checks. See the [configuration workflow](development-workflow.md#configuration-and-commands)
+for what setup generates and what remains in `.env`.
+
 The profile decides which capabilities an installation may support. It does not
 log a person in, grant an organization role, or prove the infrastructure is
 safe. Every request still needs server-side organization and resource
@@ -36,8 +44,9 @@ does not qualify that production infrastructure.
 ## Operator preflight
 
 In the target installation's existing configuration, set
-`LEMMACOMPUTER_INSTALLATION_KIND` to the chosen production profile. Validate
-that configuration with the matching command:
+`LEMMACOMPUTER_INSTALLATION_KIND` to the chosen production profile and
+`LEMMACOMPUTER_RUNTIME_ENVIRONMENT=production` for a production deployment.
+Validate that configuration with the matching command:
 
 ```bash
 npm run env:check -- --profile=customer-managed
@@ -49,11 +58,20 @@ or:
 npm run env:check -- --profile=hosted
 ```
 
-`npm run env:render -- --profile=<chosen-profile>` then generates the
-per-service environment projections. It does not provision databases, ECS,
-workspace nodes, or secrets. The full catalog of required values is generated
-from [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs) into
-`.env.example`; production values belong in deployment secret custody.
+The `--profile` option checks that the configured profile matches; it does not
+switch profiles or rewrite `.env`. `env:check` also resolves omitted defaults
+without writing them. Use `npm run env:update` when an existing `.env` needs
+compacting or newly visible optional fields; it preserves configured values and
+generated secrets. Do not rerun initialization for an existing installation.
+
+`npm run env:render -- --profile=<chosen-profile>` then generates disposable
+`.runtime-env/<service>.env` and `.runtime-env/compose.env` projections. Direct
+local Compose commands must use `--env-file .runtime-env/compose.env` after
+rendering. These commands do not provision databases, ECS, workspace nodes, or
+secrets. The full reference catalog, including optional settings, is generated
+from [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs)
+into `.env.example`; do not copy it into `.env`. Production values belong in
+deployment secret custody.
 
 For a code-level check of both profiles, run
 `npm run test:profiles`. This checks configuration and service

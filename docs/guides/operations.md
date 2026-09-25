@@ -39,16 +39,21 @@ with data. Never copy another checkout's `.env` or attach its writable volumes.
 The environment contract lives in
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs). Its
 generated `.env.example` is the full reference catalog, including defaults and
-generated values. `npm run worktree:init` creates a task worktree's single `.env`
-once. A dedicated disposable evaluation clone uses
-`npm run env:init -- --profile=worktree`. After pulling a change to the contract,
-run:
+placeholders for generated secrets; do not copy it into `.env` or edit it by hand.
+`npm run worktree:init` creates a task worktree's single `.env` once. A dedicated
+disposable evaluation clone uses `npm run env:init -- --profile=worktree` once.
+To refresh an existing `.env` after a configuration change, run:
 
 ```bash
 npm run env:check
-npm run env:update   # only if the check reports missing variables
+npm run env:update
 npm run env:check
 ```
+
+`env:check` is read-only and validates the resolved configuration. It can pass
+with optional fields absent because defaults are applied without writing them.
+Use `env:update` to compact an older file or restore the visible optional fields,
+even when validation already passes; it preserves existing secrets and values.
 
 `env:update` keeps installation choices, generated secrets, external-integration
 fields, and non-default overrides in `.env`. Optional Postmark, Microsoft and
@@ -58,16 +63,19 @@ Workspace MCP credentials through the product UI; their optional deployment-wide
 `.env` fallbacks are omitted when empty, and existing nonempty overrides remain.
 Email transport and invitation delivery mode also remain visible. Ordinary
 internal defaults stay in the contract. Existing full `.env` files remain
-readable. Worktree Docker names and development image tags are derived from a
-persistent generated
-`LEMMACOMPUTER_INSTALLATION_ID`; updates preserve existing resource identity,
-custom names, production image pins, and legacy values. Back up `.env` with the
+readable. Worktree Docker names and development image tags are derived from the
+persistent generated `LEMMACOMPUTER_INSTALLATION_ID`; updates preserve existing
+resource identity, custom names, production image pins, and legacy values. Back up `.env` with the
 installation data and do not change its ID to rename a running stack.
 `env:init --force` replaces generated secrets and can invalidate sessions,
 signatures, and encrypted records; it is not an update command. Repository
 commands generate disposable `.runtime-env/<service>.env` projections for each
-service. Before a direct `docker compose` command, run `npm run env:render` and use
-`docker compose --env-file .runtime-env/compose.env config --quiet` so interpolated secrets are not printed.
+service and `.runtime-env/compose.env` for Compose interpolation. Do not edit
+these projections; edit `.env` and regenerate them. Before a direct
+`docker compose` command, run `npm run env:render` and pass
+`--env-file .runtime-env/compose.env`. For configuration validation, use
+`npm run compose:config`; it renders the projections and checks Compose quietly
+without printing interpolated secrets.
 
 The public browser origin is `LEMMACOMPUTER_PUBLIC_WEB_URL`. Its exact value
 must match OAuth callbacks. The reference stack binds published ports to
@@ -80,6 +88,7 @@ secrets in the recovery set for as long as their dependent state exists.
 ## Health and diagnostics
 
 ```bash
+npm run env:render
 docker compose --env-file .runtime-env/compose.env ps
 docker compose --env-file .runtime-env/compose.env logs --since=10m db-migrate auth-db-migrate platform-auth-db-migrate
 docker compose --env-file .runtime-env/compose.env logs --since=10m control-api workspace-controller litellm
@@ -126,6 +135,7 @@ and exact first-party image digests. For a local Compose stack, these examples
 create logical database dumps in the current directory:
 
 ```bash
+npm run env:render
 docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer -Fc > lemmacomputer-control.dump
 docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_auth -Fc > lemmacomputer-auth.dump
 docker compose --env-file .runtime-env/compose.env exec -T postgres pg_dump -U lemmacomputer -d lemmacomputer_platform_auth -Fc > lemmacomputer-platform-auth.dump

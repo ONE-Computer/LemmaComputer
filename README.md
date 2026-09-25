@@ -29,6 +29,12 @@ npm run compose:up
 This uses the root `compose.yaml` and selects the required Dockerfiles for you.
 See the [Docker file map](docker/README.md) for what each image contains.
 
+Run `env:init` once: it creates one `.env` with generated local settings,
+fresh secrets, and empty optional integration fields. `.env.example` is a
+reference catalog. For an existing installation, use `env:update` to refresh
+that same file while preserving its settings and secrets; see
+[configuration and commands](docs/guides/development-workflow.md#configuration-and-commands).
+
 Open the URL in the generated `.env`:
 
 ```bash
