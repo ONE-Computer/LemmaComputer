@@ -58,6 +58,8 @@ const integrationPlaceholderKeys = [
   "LEMMACOMPUTER_MS365_CLIENT_SECRET",
   "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID",
   "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET",
+];
+const connectorFallbackKeys = [
   "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID",
   "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET",
   "LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID",
@@ -140,6 +142,7 @@ test("fresh initialization generates one compact file and refuses to replace its
       assert.notEqual(values[item.key], item.default, item.key);
     }
     for (const key of derivedKeys) assert.equal(Object.hasOwn(values, key), false, key);
+    for (const key of connectorFallbackKeys) assert.equal(Object.hasOwn(values, key), false, key);
     for (const key of integrationPlaceholderKeys) assert.equal(values[key], "", key);
     assert.equal(values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT, "capture");
     assert.equal(values.LEMMACOMPUTER_INVITATION_DELIVERY_MODE, "copy-link");
@@ -155,7 +158,7 @@ test("fresh initialization generates one compact file and refuses to replace its
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("environment updates restore blank integration fields and preserve configured credentials", async () => {
+test("environment updates restore setup fields, omit blank connector fallbacks, and preserve configured credentials", async () => {
   const root = await mkdtemp(join(tmpdir(), "lemma-env-integrations-"));
   const source = join(root, ".env");
   try {
@@ -172,10 +175,11 @@ test("environment updates restore blank integration fields and preserve configur
     assert.equal(placeholders.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT, "capture");
     assert.equal(placeholders.LEMMACOMPUTER_INVITATION_DELIVERY_MODE, "copy-link");
     for (const key of derivedKeys) assert.equal(Object.hasOwn(placeholders, key), false, key);
+    for (const key of connectorFallbackKeys) assert.equal(Object.hasOwn(placeholders, key), false, key);
     assert.deepEqual(projectServiceEnvironment(placeholders), before);
 
     const credentials = {
-      ...Object.fromEntries(integrationPlaceholderKeys.map((key) => [key, `synthetic-${key.toLowerCase()}`])),
+      ...Object.fromEntries([...integrationPlaceholderKeys, ...connectorFallbackKeys].map((key) => [key, `synthetic-${key.toLowerCase()}`])),
       LEMMACOMPUTER_POSTMARK_FROM: "Fixture <auth@example.com>",
       LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
       LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",

@@ -52,12 +52,14 @@ npm run env:check
 
 `env:update` keeps installation choices, generated secrets, external-integration
 fields, and non-default overrides in `.env`. Optional Postmark, Microsoft and
-Google login, Microsoft 365, Google Workspace, GitHub MCP, and customer SSO
-trusted-origin fields remain visible when blank; configured values are preserved.
+Google login, Microsoft 365, and customer SSO trusted-origin fields remain
+visible when blank; configured values are preserved. Configure GitHub and Google
+Workspace MCP credentials through the product UI; their optional deployment-wide
+`.env` fallbacks are omitted when empty, and existing nonempty overrides remain.
 Email transport and invitation delivery mode also remain visible. Ordinary
 internal defaults stay in the contract. Existing full `.env` files remain
-readable. Worktree Docker names and
-development image tags are derived from a persistent generated
+readable. Worktree Docker names and development image tags are derived from a
+persistent generated
 `LEMMACOMPUTER_INSTALLATION_ID`; updates preserve existing resource identity,
 custom names, production image pins, and legacy values. Back up `.env` with the
 installation data and do not change its ID to rename a running stack.

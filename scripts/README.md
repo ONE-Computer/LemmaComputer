@@ -17,6 +17,10 @@ other tools and have no standalone command.
 | [environment-files.mjs](setup/environment-files.mjs) | Parses and reads a single `.env` with defaults; compacts it while preserving secrets and explicit overrides. | **Helper:** setup and operator commands. |
 | [environment-template.mjs](setup/environment-template.mjs) | Parses and merges environment files and generates initial secrets. | **Helper:** initialization and update tools. |
 
+GitHub and Google Workspace MCP credentials are configured through the product
+UI. Their optional deployment-wide `.env` fallbacks are omitted when empty;
+`env:update` preserves existing nonempty overrides.
+
 ## Development: worktrees and local services
 
 | Script | What it does | Command / caller |

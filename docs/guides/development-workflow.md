@@ -191,12 +191,17 @@ workspace without an AI agent or model provider. Configure model keys through
 `.env` is the single persistent configuration file. It contains installation
 choices, generated secrets, external-integration fields, and non-default
 overrides. Optional credentials for Postmark email, Microsoft and Google login,
-Microsoft 365, Google Workspace, and GitHub MCP are included even when blank,
-along with the customer SSO trusted-origin field. Leave unused credentials
-blank; updates preserve configured values. Email transport and invitation
+and Microsoft 365 are included even when blank, along with the customer SSO
+trusted-origin field. Leave unused credentials blank; updates preserve
+configured values. Email transport and invitation
 delivery mode also remain visible, defaulting to `capture` and `copy-link` in
-development. Back up `.env` with the installation data. Model-provider keys and
-per-user connector OAuth tokens are entered through the product.
+development. Back up `.env` with the installation data.
+
+Configure GitHub and Google Workspace MCP credentials through the product UI.
+Their `.env` fields are optional deployment-wide fallbacks and are omitted when
+empty; updates preserve existing nonempty overrides. Google sign-in credentials
+are separate from the Google Workspace connector. Model-provider keys and
+per-user connector OAuth tokens are also entered through the product.
 
 The `worktree` profile generates `LEMMACOMPUTER_INSTALLATION_ID` once for both
 evaluation clones and task worktrees. Docker resource names, development image
