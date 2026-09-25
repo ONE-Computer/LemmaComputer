@@ -9,8 +9,8 @@ other tools and have no standalone command.
 
 | Script | What it does | Command / caller |
 | --- | --- | --- |
-| [initialize-env.mjs](setup/initialize-env.mjs) | Creates one compact `.env` with installation settings and fresh local secrets. Run once per installation. | `npm run env:init` |
-| [update-env.mjs](setup/update-env.mjs) | Checks or compacts `.env` while preserving secrets, resource identity, and configured overrides. | `npm run env:check` / `npm run env:update` |
+| [initialize-env.mjs](setup/initialize-env.mjs) | Creates one compact `.env` with installation settings, fresh local secrets, and blank optional external-integration fields. Run once per installation. | `npm run env:init` |
+| [update-env.mjs](setup/update-env.mjs) | Checks or compacts `.env`, retaining blank integration fields and preserving configured values, secrets, and resource identity. | `npm run env:check` / `npm run env:update` |
 | [render-service-env.mjs](setup/render-service-env.mjs) | Validates `.env` and writes each service's configuration files. Also called by Compose commands. | `npm run env:render` |
 | [render-env-example.mjs](setup/render-env-example.mjs) | Checks the generated `.env.example` reference; append `-- --write` to regenerate it. | `npm run env:example` |
 | [deployment-config.mjs](setup/deployment-config.mjs) | Defines supported settings, defaults, profile validation, and which values each service receives. | **Helper:** configuration source of truth for setup tools. |

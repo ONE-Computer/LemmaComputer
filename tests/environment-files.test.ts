@@ -45,6 +45,24 @@ const derivedKeys = [
   "LEMMACOMPUTER_KASM_LOCAL_NETWORK_PREFIX",
   "LEMMACOMPUTER_KASM_LOCAL_EGRESS_NETWORK",
 ];
+const integrationPlaceholderKeys = [
+  "LEMMACOMPUTER_POSTMARK_SERVER_TOKEN",
+  "LEMMACOMPUTER_POSTMARK_FROM",
+  "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID",
+  "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET",
+  "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID",
+  "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET",
+  "LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS",
+  "LEMMACOMPUTER_MS365_TENANT_ID",
+  "LEMMACOMPUTER_MS365_CLIENT_ID",
+  "LEMMACOMPUTER_MS365_CLIENT_SECRET",
+  "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID",
+  "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET",
+  "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID",
+  "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET",
+  "LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID",
+  "LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET",
+];
 
 test("worktree configuration resolves before npm dependencies are installed", async () => {
   const root = await mkdtemp(join(tmpdir(), "lemma-env-bootstrap-"));
@@ -122,12 +140,58 @@ test("fresh initialization generates one compact file and refuses to replace its
       assert.notEqual(values[item.key], item.default, item.key);
     }
     for (const key of derivedKeys) assert.equal(Object.hasOwn(values, key), false, key);
+    for (const key of integrationPlaceholderKeys) assert.equal(values[key], "", key);
+    assert.equal(values.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT, "capture");
+    assert.equal(values.LEMMACOMPUTER_INVITATION_DELIVERY_MODE, "copy-link");
+    const resolved = readEnvironmentFile(source, { resolved: true });
+    assert.equal(resolved.LEMMACOMPUTER_POSTMARK_MESSAGE_STREAM, "outbound");
+    assert.equal(resolved.LEMMACOMPUTER_MICROSOFT_AUTH_TENANT_ID, "common");
     assert.ok(Object.keys(values).length < environmentContract.length / 2);
     validateDeploymentEnvironment(values, { strict: true });
     assert.deepEqual(await readdir(root), [".env"]);
     assert.equal((await stat(source)).mode & 0o777, 0o600);
     assert.notEqual(run("initialize-env", source, "--profile=worktree").status, 0);
     assert.equal(await readFile(source, "utf8"), contents);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("environment updates restore blank integration fields and preserve configured credentials", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lemma-env-integrations-"));
+  const source = join(root, ".env");
+  try {
+    const existing: Record<string, string> = { ...initial };
+    for (const key of integrationPlaceholderKeys) delete existing[key];
+    delete existing.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT;
+    delete existing.LEMMACOMPUTER_INVITATION_DELIVERY_MODE;
+    await writeFile(source, serializeEnvironment(existing), { mode: 0o600 });
+    const before = projectServiceEnvironment(existing);
+    const restored = run("update-env", source, "--write");
+    assert.equal(restored.status, 0, restored.stderr);
+    const placeholders = readEnvironmentFile(source);
+    for (const key of integrationPlaceholderKeys) assert.equal(placeholders[key], "", key);
+    assert.equal(placeholders.LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT, "capture");
+    assert.equal(placeholders.LEMMACOMPUTER_INVITATION_DELIVERY_MODE, "copy-link");
+    for (const key of derivedKeys) assert.equal(Object.hasOwn(placeholders, key), false, key);
+    assert.deepEqual(projectServiceEnvironment(placeholders), before);
+
+    const credentials = {
+      ...Object.fromEntries(integrationPlaceholderKeys.map((key) => [key, `synthetic-${key.toLowerCase()}`])),
+      LEMMACOMPUTER_POSTMARK_FROM: "Fixture <auth@example.com>",
+      LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT: "postmark",
+      LEMMACOMPUTER_INVITATION_DELIVERY_MODE: "email",
+      LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS: "https://idp.example.com",
+    };
+    const configured = { ...placeholders, ...credentials };
+    await writeFile(source, serializeEnvironment(configured), { mode: 0o600 });
+    const configuredServices = projectServiceEnvironment(configured);
+    const updated = run("update-env", source, "--write");
+    assert.equal(updated.status, 0, updated.stderr);
+    const preserved = readEnvironmentFile(source);
+    for (const [key, value] of Object.entries(credentials)) assert.equal(preserved[key], value, key);
+    for (const key of derivedKeys) assert.equal(Object.hasOwn(preserved, key), false, key);
+    assert.deepEqual(projectServiceEnvironment(preserved), configuredServices);
+    assert.doesNotMatch(updated.stdout + updated.stderr, /synthetic-/);
+    assert.deepEqual(await readdir(root), [".env"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

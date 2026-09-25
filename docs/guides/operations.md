@@ -50,9 +50,13 @@ npm run env:update   # only if the check reports missing variables
 npm run env:check
 ```
 
-`env:update` keeps installation choices, generated secrets, configured
-integrations, and non-default overrides in `.env`; ordinary defaults stay in the
-contract. Existing full `.env` files remain readable. Worktree Docker names and
+`env:update` keeps installation choices, generated secrets, external-integration
+fields, and non-default overrides in `.env`. Optional Postmark, Microsoft and
+Google login, Microsoft 365, Google Workspace, GitHub MCP, and customer SSO
+trusted-origin fields remain visible when blank; configured values are preserved.
+Email transport and invitation delivery mode also remain visible. Ordinary
+internal defaults stay in the contract. Existing full `.env` files remain
+readable. Worktree Docker names and
 development image tags are derived from a persistent generated
 `LEMMACOMPUTER_INSTALLATION_ID`; updates preserve existing resource identity,
 custom names, production image pins, and legacy values. Back up `.env` with the

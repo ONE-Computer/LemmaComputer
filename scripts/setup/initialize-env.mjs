@@ -38,7 +38,8 @@ if (values.LEMMACOMPUTER_INSTALLATION_KIND === "worktree") {
 await writeEnvironmentFile(destination, values);
 process.stdout.write([
   `Created ${destination} with fresh local service, signing, and encryption secrets.`,
-  "Run npm run env:check before starting the stack. Configure optional Microsoft integrations only when needed.",
+  "Optional email, sign-in, and connector credential fields are included empty; fill them only when needed.",
+  "Run npm run env:check before starting the stack.",
   "Model-provider credentials are configured in the product UI after startup, not in this file.",
   "",
 ].join("\n"));

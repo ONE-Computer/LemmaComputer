@@ -189,9 +189,13 @@ workspace without an AI agent or model provider. Configure model keys through
 | `npm run compose:down` | Stops the local stack and preserves volumes by default. |
 
 `.env` is the single persistent configuration file. It contains installation
-choices, generated secrets, and any configured integrations or non-default
-overrides. Back it up with the installation data. Optional Microsoft, email,
-S3, and remote-node settings appear only when configured. Provider keys and
+choices, generated secrets, external-integration fields, and non-default
+overrides. Optional credentials for Postmark email, Microsoft and Google login,
+Microsoft 365, Google Workspace, and GitHub MCP are included even when blank,
+along with the customer SSO trusted-origin field. Leave unused credentials
+blank; updates preserve configured values. Email transport and invitation
+delivery mode also remain visible, defaulting to `capture` and `copy-link` in
+development. Back up `.env` with the installation data. Model-provider keys and
 per-user connector OAuth tokens are entered through the product.
 
 The `worktree` profile generates `LEMMACOMPUTER_INSTALLATION_ID` once for both
@@ -207,7 +211,9 @@ when needed. Release tooling owns production image versions.
 [`scripts/setup/deployment-config.mjs`](../../scripts/setup/deployment-config.mjs),
 including optional overrides and managed values. Do not copy it into `.env` or
 edit it by hand. Ordinary defaults, such as polling intervals and Microsoft Graph
-page limits, stay in that contract unless explicitly overridden.
+page limits, stay in that contract unless explicitly overridden. Internal Docker
+names and image references are also omitted from `.env` when derived defaults
+apply.
 
 Existing full `.env` files remain readable. Run `npm run env:update` to compact
 one, then `npm run env:check`. The update preserves generated secrets, custom

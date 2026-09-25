@@ -32,6 +32,25 @@ const visibleNames = new Set([
   "LEMMACOMPUTER_PUBLIC_WEB_URL",
   "LEMMACOMPUTER_WEB_PORT",
   "LEMMACOMPUTER_TIME_ZONE",
+  // Keep optional integrations discoverable even before credentials are supplied.
+  "LEMMACOMPUTER_AUTH_EMAIL_TRANSPORT",
+  "LEMMACOMPUTER_INVITATION_DELIVERY_MODE",
+  "LEMMACOMPUTER_POSTMARK_SERVER_TOKEN",
+  "LEMMACOMPUTER_POSTMARK_FROM",
+  "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_ID",
+  "LEMMACOMPUTER_GOOGLE_AUTH_CLIENT_SECRET",
+  "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_ID",
+  "LEMMACOMPUTER_MICROSOFT_AUTH_CLIENT_SECRET",
+  "LEMMACOMPUTER_CUSTOMER_SSO_TRUSTED_IDP_ORIGINS",
+  "LEMMACOMPUTER_MS365_TENANT_ID",
+  "LEMMACOMPUTER_MS365_CLIENT_ID",
+  "LEMMACOMPUTER_MS365_CLIENT_SECRET",
+  "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_ID",
+  "LEMMACOMPUTER_MS365_SITE_ADMIN_CLIENT_SECRET",
+  "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_ID",
+  "LEMMACOMPUTER_GOOGLE_WORKSPACE_MCP_CLIENT_SECRET",
+  "LEMMACOMPUTER_GITHUB_MCP_CLIENT_ID",
+  "LEMMACOMPUTER_GITHUB_MCP_CLIENT_SECRET",
 ]);
 
 /** Read one installation file; defaults are resolved without rewriting it. */
@@ -52,6 +71,7 @@ export function renderCompactEnvironment(input) {
     "# LemmaComputer installation settings and generated secrets. Never commit this file.",
     "# Omitted settings use built-in defaults; .env.example is the full reference.",
     "# Docker names and local image tags are derived from the generated installation ID.",
+    "# Optional integration credentials stay empty until you configure them.",
   ];
   let lastSection;
   for (const item of environmentContract) {
